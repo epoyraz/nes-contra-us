@@ -5,3 +5,12 @@
 *.prg
 *.bin
 src/assets/asset-game-type.txt
+build*/
+CMakeUserPresets.json
+.local/
+.local_*
+tmp/
+plan.md
+report.md
+todo-level1.txt
+
