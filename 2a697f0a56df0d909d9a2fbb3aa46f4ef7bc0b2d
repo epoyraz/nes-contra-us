@@ -1,0 +1,47 @@
+port/contra_core/include/contra/buttons.h
+  dc1393ee8159d413 1-23
+port/tools/headless_main.c
+  dc1393ee8159d413 1-830
+CMakeLists.txt
+  1dd885172dbc70d5 1-12
+port/CMakeLists.txt
+  dc1393ee8159d413 1-75
+port/contra_core/include/contra/core.h
+  dc1393ee8159d413 1-75
+.gitignore
+  1dd885172dbc70d5 7,9
+  dc1393ee8159d413 8,10-16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "2a697f0a56df0d909d9a2fbb3aa46f4ef7bc0b2d",
+  "prompts": {
+    "1dd885172dbc70d5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d5e53-61ee-7e33-8418-dca7b9cfa834",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Enes Poyraz",
+      "messages": [],
+      "total_additions": 260,
+      "total_deletions": 1,
+      "accepted_lines": 258,
+      "overriden_lines": 0
+    },
+    "dc1393ee8159d413": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "35e58611-4554-4b86-88a0-b34fa615548e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Enes Poyraz",
+      "messages": [],
+      "total_additions": 1011,
+      "total_deletions": 2,
+      "accepted_lines": 1011,
+      "overriden_lines": 0
+    }
+  }
+}
