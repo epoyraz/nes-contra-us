@@ -139,6 +139,9 @@ int main(void)
     unsigned bullet_index;
     unsigned previous_game_routine = 0xFFu;
     unsigned previous_level_routine = 0xFFu;
+    unsigned forced_boss_frame = 0u;
+    unsigned next_level_frame = 0u;
+    unsigned stage2_intro_frame = 0u;
 
     contra_core_init(&intro_core);
     for (frame = 0u; frame < 272u; ++frame)
@@ -612,7 +615,7 @@ int main(void)
     contra_core_init(&core);
     input.player[0] = 0u;
 
-    for (frame = 0u; frame < 640u; ++frame)
+    for (frame = 0u; frame < 1400u; ++frame)
     {
         if (frame == 5u)
         {
@@ -642,12 +645,26 @@ int main(void)
         if (frame == 579u)
         {
             core.ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] = 0x01u; /* Force the first level_routine_04 branch. */
+            forced_boss_frame = frame + 1u;
         }
 
         contra_core_set_input(&core, &input);
         contra_core_step_frame(&core);
 
         ram = contra_core_ram(&core);
+        if ((next_level_frame == 0u) && (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u))
+        {
+            next_level_frame = frame + 1u;
+        }
+
+        if ((stage2_intro_frame == 0u) &&
+            (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u) &&
+            (ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x02u))
+        {
+            stage2_intro_frame = frame + 1u;
+            break;
+        }
+
         if (((unsigned)ram[CONTRA_RAM_GAME_ROUTINE_INDEX] != previous_game_routine) ||
             ((unsigned)ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] != previous_level_routine))
         {
@@ -673,6 +690,13 @@ int main(void)
     }
 
     ram = contra_core_ram(&core);
+
+    printf(
+        "bossclear forced=%u next_level=%u stage2_intro=%u\n",
+        forced_boss_frame,
+        next_level_frame,
+        stage2_intro_frame
+    );
 
     printf(
         "frame=%u game_routine=%u level_routine=%u init=%u current_level=%u loc=%u scroll_type=%u player_mode=%u p1d=%u lives=(%u,%u) continues=%u scroll=(%u,%u) intro=%u delay=(%u,%u) gfx=%u transition=%u sprite_load=%u boss=%u ppu=(%u,%u)\n",

@@ -33,6 +33,12 @@ typedef struct ContraNativeEnemy
     int16_t y;
     int8_t vx;
     int8_t vy;
+    uint8_t origin_x;
+    uint8_t origin_y;
+    uint8_t x_frac;
+    uint8_t y_frac;
+    uint8_t x_accum;
+    uint8_t y_accum;
 } ContraNativeEnemy;
 
 typedef struct ContraNativeProjectile

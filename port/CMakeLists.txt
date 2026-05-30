@@ -6,6 +6,17 @@ function(contra_apply_warnings target_name)
     endif()
 endfunction()
 
+function(contra_apply_coverage target_name)
+    if(CONTRA_PORT_ENABLE_COVERAGE)
+        if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+            target_compile_options(${target_name} PRIVATE -O0 -g --coverage)
+            target_link_options(${target_name} PRIVATE --coverage)
+        else()
+            message(WARNING "CONTRA_PORT_ENABLE_COVERAGE is only wired for GCC/Clang.")
+        endif()
+    endif()
+endfunction()
+
 add_library(contra_core STATIC
     contra_core/src/core.c
 )
@@ -16,6 +27,7 @@ target_include_directories(contra_core
 )
 
 contra_apply_warnings(contra_core)
+contra_apply_coverage(contra_core)
 
 add_executable(contra_port_headless
     tools/headless_main.c
@@ -24,6 +36,43 @@ add_executable(contra_port_headless
 target_link_libraries(contra_port_headless PRIVATE contra_core)
 
 contra_apply_warnings(contra_port_headless)
+contra_apply_coverage(contra_port_headless)
+
+if(CONTRA_PORT_BUILD_TESTS)
+    add_executable(contra_core_tests
+        tests/core_behavior_tests.c
+    )
+
+    target_link_libraries(contra_core_tests PRIVATE contra_core)
+
+    contra_apply_warnings(contra_core_tests)
+    contra_apply_coverage(contra_core_tests)
+
+    add_test(NAME contra_core_tests COMMAND contra_core_tests)
+
+    add_executable(contra_checkpoint_trace_tests
+        tests/checkpoint_trace_tests.c
+    )
+
+    target_link_libraries(contra_checkpoint_trace_tests PRIVATE contra_core)
+
+    contra_apply_warnings(contra_checkpoint_trace_tests)
+    contra_apply_coverage(contra_checkpoint_trace_tests)
+
+    add_test(NAME contra_checkpoint_trace_tests COMMAND contra_checkpoint_trace_tests)
+
+    add_executable(contra_coverage_manifest_tests
+        tests/coverage_manifest_tests.c
+    )
+
+    contra_apply_warnings(contra_coverage_manifest_tests)
+    contra_apply_coverage(contra_coverage_manifest_tests)
+
+    add_test(NAME contra_coverage_manifest_tests COMMAND contra_coverage_manifest_tests)
+    set_tests_properties(contra_coverage_manifest_tests PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    )
+endif()
 
 if(CONTRA_PORT_BUILD_SDL)
     find_package(SDL2 CONFIG QUIET)
@@ -69,6 +118,7 @@ if(CONTRA_PORT_BUILD_SDL)
         )
 
         contra_apply_warnings(contra_port_sdl)
+        contra_apply_coverage(contra_port_sdl)
     else()
         message(WARNING "SDL2 was not found. Only contra_port_headless will be built.")
     endif()

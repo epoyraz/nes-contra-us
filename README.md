@@ -92,6 +92,12 @@ the code.  Below are some of the more important documents.
 * [docs/Graphics Documentation.md](./docs/Graphics%20Documentation.md) -
   documentation on pattern tables, nametables, palettes, palette cycling,
   super-tiles, background collision, and compression.
+* [docs/Native Port Coverage.md](./docs/Native%20Port%20Coverage.md) -
+  bank-by-bank tracker for what the native port currently translates, uses as
+  ROM-backed data, stubs, and still misses.
+* [docs/Native Port Reliability.md](./docs/Native%20Port%20Reliability.md) -
+  repeatable test, code coverage, and routine-ledger plan for increasing native
+  port confidence.
 * [docs/ROM Map.md](./docs/ROM%20Map.md) - detailed description of ROM file
   contents 
 * [docs/Sound Documentation.md](./docs/Sound%20Documentation.md) - documentation
