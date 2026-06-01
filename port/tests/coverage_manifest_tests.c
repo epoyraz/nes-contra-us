@@ -51,6 +51,14 @@ static bool status_requires_evidence(const char *status)
     return (strcmp(status, "translated") == 0) || (strcmp(status, "partial") == 0);
 }
 
+static bool status_is_known(const char *status)
+{
+    return status_requires_evidence(status) ||
+        (strcmp(status, "rom-backed") == 0) ||
+        (strcmp(status, "stubbed") == 0) ||
+        (strcmp(status, "unported") == 0);
+}
+
 static bool load_text_file(const char *path, char *buffer, size_t buffer_size)
 {
     FILE *file = fopen(path, "rb");
@@ -75,9 +83,39 @@ static bool load_text_file(const char *path, char *buffer, size_t buffer_size)
     return true;
 }
 
+static bool file_exists(const char *path)
+{
+    FILE *file = fopen(path, "rb");
+
+    if (file == NULL)
+    {
+        return false;
+    }
+
+    fclose(file);
+    return true;
+}
+
 static bool source_contains_token(const char *source, const char *token)
 {
     return (!field_is_empty(token)) && (strstr(source, token) != NULL);
+}
+
+static bool tests_source_has_registered_test(const char *tests_source, const char *test_name)
+{
+    char needle[256];
+
+    if (field_is_empty(test_name))
+    {
+        return false;
+    }
+
+    if (snprintf(needle, sizeof(needle), "{\"%s\",", test_name) >= (int)sizeof(needle))
+    {
+        return false;
+    }
+
+    return strstr(tests_source, needle) != NULL;
 }
 
 static bool all_test_refs_exist(const char *tests_source, char *tests_field)
@@ -94,7 +132,7 @@ static bool all_test_refs_exist(const char *tests_source, char *tests_field)
             ++next;
         }
 
-        if (!source_contains_token(tests_source, cursor))
+        if (!tests_source_has_registered_test(tests_source, cursor))
         {
             return false;
         }
@@ -158,6 +196,19 @@ int main(void)
             printf("FAIL coverage row %u is missing source_file label or status\n", line_number);
             ++failures;
             continue;
+        }
+
+        if (!status_is_known(fields[2]))
+        {
+            printf("FAIL coverage row %u has unknown status %s\n", line_number, fields[2]);
+            ++failures;
+            continue;
+        }
+
+        if (!file_exists(fields[0]))
+        {
+            printf("FAIL coverage row %u source_file %s does not exist\n", line_number, fields[0]);
+            ++failures;
         }
 
         if (status_requires_evidence(fields[2]))

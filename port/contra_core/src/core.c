@@ -149,6 +149,36 @@ static const uint8_t contra_player_water_firing_sprite_tbl[10][2] = {
     {0x1Bu, 0x00u}, {0x1Cu, 0x00u}, {0x1Du, 0x00u}, {0x18u, 0x00u}, {0x18u, 0x00u},
     {0x18u, 0x40u}, {0x18u, 0x40u}, {0x1Du, 0x40u}, {0x1Cu, 0x40u}, {0x1Bu, 0x40u}
 };
+static const uint8_t contra_level_2_enemy_gen_screen_00[6] = {
+    0x42u, 0x30u, 0x01u, 0x01u, 0x00u, 0xC0u
+};
+static const uint8_t contra_level_2_enemy_gen_screen_01[12] = {
+    0x46u, 0x30u, 0x81u, 0x50u, 0x01u, 0x10u, 0x00u, 0x30u, 0x00u, 0x10u, 0x01u, 0xE0u
+};
+static const uint8_t contra_level_2_enemy_gen_screen_02[4] = {
+    0x00u, 0x30u, 0xC5u, 0xA0u
+};
+static const uint8_t contra_level_2_enemy_gen_screen_03[6] = {
+    0x46u, 0x20u, 0x81u, 0x60u, 0xC3u, 0xE1u
+};
+static const uint8_t contra_level_2_enemy_gen_screen_04[16] = {
+    0x40u, 0x30u, 0x81u, 0x60u, 0x00u, 0x10u, 0x03u, 0x30u,
+    0x02u, 0x10u, 0x01u, 0x40u, 0x47u, 0x10u, 0x4Au, 0xE0u
+};
+
+typedef struct ContraLevel2GeneratorScript
+{
+    const uint8_t *data;
+    uint8_t length;
+} ContraLevel2GeneratorScript;
+
+static const ContraLevel2GeneratorScript contra_level_2_enemy_gen_scripts[5] = {
+    {contra_level_2_enemy_gen_screen_00, (uint8_t)sizeof(contra_level_2_enemy_gen_screen_00)},
+    {contra_level_2_enemy_gen_screen_01, (uint8_t)sizeof(contra_level_2_enemy_gen_screen_01)},
+    {contra_level_2_enemy_gen_screen_02, (uint8_t)sizeof(contra_level_2_enemy_gen_screen_02)},
+    {contra_level_2_enemy_gen_screen_03, (uint8_t)sizeof(contra_level_2_enemy_gen_screen_03)},
+    {contra_level_2_enemy_gen_screen_04, (uint8_t)sizeof(contra_level_2_enemy_gen_screen_04)}
+};
 
 static void contra_set_jump_status_and_y_velocity(ContraCore *core, uint8_t player_index);
 static const int8_t contra_bullet_initial_pos_ground[12][2] = {
@@ -334,9 +364,15 @@ static const uint8_t contra_gen_soldier_initial_attr_tbl[28] = {
     0x00u, 0x00u, 0x04u, 0x08u
 };
 static const uint16_t contra_level_1_enemy_screen_ptr_tbl_addr = 0xB82Bu;
+static const uint16_t contra_level_2_enemy_screen_ptr_tbl_addr = 0xB8AAu;
 static const uint16_t contra_level_1_nametable_update_supertile_data_addr = 0x83B1u;
 static const uint16_t contra_level_1_nametable_update_palette_data_addr = 0x86ACu;
+static const uint16_t contra_level_2_nametable_update_supertile_data_addr = 0x88A8u;
+static const uint16_t contra_level_2_nametable_update_palette_data_addr = 0x8E91u;
 static const uint16_t contra_demo_input_pointer_table_addr = 0xB3D2u;
+static const uint8_t contra_level_2_wall_core_update_supertile_tbl[4] = {0x02u, 0x03u, 0x01u, 0x00u};
+static const uint8_t contra_level_2_wall_core_update_x_tbl[4] = {0x70u, 0x90u, 0x90u, 0x70u};
+static const uint8_t contra_level_2_wall_core_update_y_tbl[4] = {0x78u, 0x78u, 0x58u, 0x58u};
 
 typedef struct ContraAltGraphicDataRef
 {
@@ -3287,6 +3323,11 @@ static bool contra_handle_indoor_player_up_input(ContraCore *core, uint8_t playe
     ram[CONTRA_RAM_PLAYER_SPRITE_SEQUENCE + player_index] = 0x01u;
     if (ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] == 0u)
     {
+        if (ram[CONTRA_RAM_DEMO_MODE] != 0u)
+        {
+            return true;
+        }
+
         ram[CONTRA_RAM_ELECTROCUTED_TIMER + player_index] = 0x30u;
         contra_play_sound(core, 0x1Cu);
         return true;
@@ -3516,6 +3557,7 @@ static void contra_handle_player_fall_out(ContraCore *core, uint8_t player_index
         ram[CONTRA_RAM_P1_NUM_LIVES + player_index] =
             (uint8_t)(ram[CONTRA_RAM_P1_NUM_LIVES + player_index] - 1u);
     }
+
 }
 
 static void contra_kill_player(ContraCore *core, uint8_t player_index)
@@ -3900,6 +3942,23 @@ static bool contra_is_native_level_1_active(const ContraCore *core)
         (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0u) &&
         (core->ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0u) &&
         (core->ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] == 0u);
+}
+
+static bool contra_is_native_level_2_active(const ContraCore *core)
+{
+    const uint8_t game_routine = core->ram[CONTRA_RAM_GAME_ROUTINE_INDEX];
+
+    return ((game_routine == 0x05u) ||
+            ((game_routine == 0x02u) && (core->ram[CONTRA_RAM_DEMO_MODE] != 0u))) &&
+        (core->ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] >= 0x04u) &&
+        (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u) &&
+        ((core->ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0x01u) ||
+         (core->ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0x80u));
+}
+
+static bool contra_is_native_combat_active(const ContraCore *core)
+{
+    return contra_is_native_level_1_active(core) || contra_is_native_level_2_active(core);
 }
 
 static bool contra_rects_overlap(
@@ -4330,11 +4389,11 @@ static bool contra_try_fire_level_1_turret(
     return contra_try_spawn_level_1_enemy_projectile(core, spawn_x, spawn_y, vx, vy, enemy->type);
 }
 
-static void contra_update_native_level_1_enemy_projectiles(ContraCore *core)
+static void contra_update_native_enemy_projectiles(ContraCore *core)
 {
     size_t projectile_index;
 
-    if (!contra_is_native_level_1_active(core))
+    if (!contra_is_native_combat_active(core))
     {
         return;
     }
@@ -4372,11 +4431,12 @@ static void contra_update_native_level_1_enemy_projectiles(ContraCore *core)
     }
 }
 
-static void contra_check_native_level_1_player_collisions(ContraCore *core)
+static void contra_check_native_player_collisions(ContraCore *core)
 {
     uint8_t player_index;
+    const bool level_1_active = contra_is_native_level_1_active(core);
 
-    if (!contra_is_native_level_1_active(core))
+    if (!contra_is_native_combat_active(core))
     {
         return;
     }
@@ -4410,59 +4470,62 @@ static void contra_check_native_level_1_player_collisions(ContraCore *core)
             &player_bottom
         );
 
-        for (enemy_index = 0u; enemy_index < CONTRA_NATIVE_MAX_ENEMIES; ++enemy_index)
+        if (level_1_active)
         {
-            ContraNativeEnemy *const enemy = &core->enemies[enemy_index];
-            int enemy_left;
-            int enemy_top;
-            int enemy_right;
-            int enemy_bottom;
-
-            if (enemy->active == 0u)
+            for (enemy_index = 0u; enemy_index < CONTRA_NATIVE_MAX_ENEMIES; ++enemy_index)
             {
-                continue;
-            }
+                ContraNativeEnemy *const enemy = &core->enemies[enemy_index];
+                int enemy_left;
+                int enemy_top;
+                int enemy_right;
+                int enemy_bottom;
 
-            contra_native_level_1_enemy_bounds(enemy, &enemy_left, &enemy_top, &enemy_right, &enemy_bottom);
-            if (!contra_rects_overlap(
-                    player_left,
-                    player_top,
-                    player_right,
-                    player_bottom,
-                    enemy_left,
-                    enemy_top,
-                    enemy_right,
-                    enemy_bottom))
-            {
-                continue;
-            }
+                if (enemy->active == 0u)
+                {
+                    continue;
+                }
 
-            if (enemy->type == 0x00u)
-            {
-                contra_collect_level_1_weapon_item(core, player_index, enemy->attrs);
-                memset(enemy, 0, sizeof(*enemy));
-                continue;
-            }
+                contra_native_level_1_enemy_bounds(enemy, &enemy_left, &enemy_top, &enemy_right, &enemy_bottom);
+                if (!contra_rects_overlap(
+                        player_left,
+                        player_top,
+                        player_right,
+                        player_bottom,
+                        enemy_left,
+                        enemy_top,
+                        enemy_right,
+                        enemy_bottom))
+                {
+                    continue;
+                }
 
-            if (!contra_native_level_1_enemy_can_hit_player(enemy))
-            {
-                continue;
-            }
+                if (enemy->type == 0x00u)
+                {
+                    contra_collect_level_1_weapon_item(core, player_index, enemy->attrs);
+                    memset(enemy, 0, sizeof(*enemy));
+                    continue;
+                }
 
-            if (new_life_invincible)
-            {
-                continue;
-            }
+                if (!contra_native_level_1_enemy_can_hit_player(enemy))
+                {
+                    continue;
+                }
 
-            if (barrier_invincible)
-            {
-                contra_handle_level_1_enemy_destroyed(enemy);
-                continue;
-            }
+                if (new_life_invincible)
+                {
+                    continue;
+                }
 
-            contra_kill_player(core, player_index);
-            player_hit = true;
-            break;
+                if (barrier_invincible)
+                {
+                    contra_handle_level_1_enemy_destroyed(enemy);
+                    continue;
+                }
+
+                contra_kill_player(core, player_index);
+                player_hit = true;
+                break;
+            }
         }
 
         if (player_hit)
@@ -4497,6 +4560,14 @@ static void contra_check_native_level_1_player_collisions(ContraCore *core)
             }
 
             contra_clear_enemy_projectile(projectile);
+            if ((core->ram[CONTRA_RAM_DEMO_MODE] != 0u) &&
+                (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u) &&
+                (core->ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0x01u) &&
+                (core->ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] == 0x00u))
+            {
+                continue;
+            }
+
             if (new_life_invincible || barrier_invincible)
             {
                 continue;
@@ -4676,9 +4747,448 @@ static void contra_load_bank_3_handle_scroll(ContraCore *core)
     }
 }
 
+static void contra_destroy_level_2_wall_core(ContraCore *core, ContraNativeEnemy *enemy)
+{
+    if (core->ram[CONTRA_RAM_WALL_CORE_REMAINING] != 0u)
+    {
+        core->ram[CONTRA_RAM_WALL_CORE_REMAINING] =
+            (uint8_t)(core->ram[CONTRA_RAM_WALL_CORE_REMAINING] - 1u);
+    }
+
+    if (core->ram[CONTRA_RAM_WALL_CORE_REMAINING] == 0u)
+    {
+        enemy->state = 0x08u;
+        enemy->timer = 0x04u;
+        enemy->cooldown = 0x03u;
+        enemy->flags = 0x00u;
+        enemy->sprite_code = 0x00u;
+    }
+    else
+    {
+        memset(enemy, 0, sizeof(*enemy));
+    }
+}
+
 static void contra_load_bank_0_exe_all_enemy_routine(ContraCore *core)
 {
     size_t enemy_index;
+
+    if ((core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u) &&
+        ((core->ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0x01u) ||
+         (core->ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0x80u)))
+    {
+        const bool boss_room = (core->ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0x80u);
+        bool grenade_launcher_active = false;
+
+        for (enemy_index = 0u; enemy_index < CONTRA_NATIVE_MAX_ENEMIES; ++enemy_index)
+        {
+            const ContraNativeEnemy *const enemy = &core->enemies[enemy_index];
+
+            grenade_launcher_active = grenade_launcher_active ||
+                ((enemy->active != 0u) && (enemy->type == 0x17u));
+        }
+
+        for (enemy_index = 0u; enemy_index < CONTRA_NATIVE_MAX_ENEMIES; ++enemy_index)
+        {
+            ContraNativeEnemy *const enemy = &core->enemies[enemy_index];
+
+            if (enemy->active == 0u)
+            {
+                continue;
+            }
+
+            switch (enemy->type)
+            {
+                case 0x08u:
+                    if (!boss_room)
+                    {
+                        break;
+                    }
+
+                    if (enemy->timer != 0u)
+                    {
+                        enemy->timer = (uint8_t)(enemy->timer - 1u);
+                        break;
+                    }
+
+                    if (enemy->state == 0x01u)
+                    {
+                        static const int8_t cannon_vx[3] = {-2, 0, 2};
+                        static const int8_t cannon_vy[3] = {2, 3, 2};
+                        static const int8_t cannon_x_offset[3] = {-8, 0, 8};
+                        unsigned shot_index;
+
+                        for (shot_index = 0u; shot_index < 3u; ++shot_index)
+                        {
+                            (void)contra_try_spawn_level_1_enemy_projectile(
+                                core,
+                                (int)enemy->x + cannon_x_offset[shot_index],
+                                (int)enemy->y + 8,
+                                cannon_vx[shot_index],
+                                cannon_vy[shot_index],
+                                enemy->type
+                            );
+                        }
+
+                        enemy->state = 0x02u;
+                        enemy->timer = 0x40u;
+                    }
+                    else
+                    {
+                        enemy->state = 0x01u;
+                        enemy->timer = 0x50u;
+                    }
+                    break;
+
+                case 0x13u:
+                    enemy->sprite_code = 0x84u;
+                    break;
+
+                case 0x14u:
+                    if (enemy->state == 0x01u)
+                    {
+                        if (enemy->timer != 0u)
+                        {
+                            enemy->timer = (uint8_t)(enemy->timer - 1u);
+                        }
+
+                        if (enemy->timer == 0u)
+                        {
+                            enemy->state = 0x03u;
+                            enemy->timer = ((core->ram[CONTRA_RAM_DEMO_MODE] != 0u) &&
+                                            (core->ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] == 0x00u))
+                                ? 0x01u
+                                : 0x40u;
+                            enemy->sprite_code = 0x87u;
+                        }
+                    }
+                    else if (enemy->state == 0x03u)
+                    {
+                        if ((core->ram[CONTRA_RAM_DEMO_MODE] != 0u) &&
+                            (core->ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] == 0x00u))
+                        {
+                            if (enemy->timer != 0u)
+                            {
+                                enemy->timer = (uint8_t)(enemy->timer - 1u);
+                            }
+
+                            if (enemy->timer == 0u)
+                            {
+                                if (enemy->hp != 0u)
+                                {
+                                    enemy->hp = (uint8_t)(enemy->hp - 1u);
+                                }
+
+                                if (enemy->hp == 0u)
+                                {
+                                    contra_destroy_level_2_wall_core(core, enemy);
+                                }
+                                else
+                                {
+                                    enemy->timer = 0x01u;
+                                }
+                            }
+                        }
+                    }
+                    else if (enemy->state == 0x08u)
+                    {
+                        if (enemy->timer != 0u)
+                        {
+                            enemy->timer = (uint8_t)(enemy->timer - 1u);
+                        }
+
+                        if (enemy->timer == 0u)
+                        {
+                            enemy->flags = (uint8_t)(enemy->flags | (uint8_t)(1u << enemy->cooldown));
+                            if (enemy->cooldown == 0u)
+                            {
+                                enemy->state = 0x09u;
+                                enemy->timer = 0x10u;
+                            }
+                            else
+                            {
+                                enemy->cooldown = (uint8_t)(enemy->cooldown - 1u);
+                                enemy->timer = 0x01u;
+                            }
+                        }
+                    }
+                    else if (enemy->state == 0x09u)
+                    {
+                        if (enemy->timer != 0u)
+                        {
+                            enemy->timer = (uint8_t)(enemy->timer - 1u);
+                        }
+
+                        if (enemy->timer == 0u)
+                        {
+                            core->ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] = 0x01u;
+                            memset(enemy, 0, sizeof(*enemy));
+                        }
+                    }
+                    break;
+
+                case 0x19u:
+                case 0x1Au:
+                    if (boss_room || grenade_launcher_active)
+                    {
+                        break;
+                    }
+
+                    if (enemy->timer != 0u)
+                    {
+                        enemy->timer = (uint8_t)(enemy->timer - 1u);
+                    }
+                    else
+                    {
+                        const uint8_t screen = core->ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER];
+                        const ContraLevel2GeneratorScript *script;
+                        uint8_t read_offset;
+                        uint8_t spawn_attrs;
+                        uint8_t delay_byte;
+                        uint8_t generated_type;
+                        uint8_t generated_count = 1u;
+                        uint8_t generated_index;
+
+                        if (screen >= (sizeof(contra_level_2_enemy_gen_scripts) / sizeof(contra_level_2_enemy_gen_scripts[0])))
+                        {
+                            break;
+                        }
+
+                        script = &contra_level_2_enemy_gen_scripts[screen];
+                        read_offset = (uint8_t)(enemy->flags % script->length);
+                        spawn_attrs = script->data[read_offset];
+                        delay_byte = script->data[(uint8_t)(read_offset + 1u)];
+                        enemy->flags = (uint8_t)(read_offset + 2u);
+                        if (enemy->flags >= script->length)
+                        {
+                            enemy->flags = 0x00u;
+                        }
+
+                        if ((delay_byte & 0x80u) != 0u)
+                        {
+                            core->ram[CONTRA_RAM_INDOOR_ENEMY_ATTACK_COUNT] =
+                                (uint8_t)(core->ram[CONTRA_RAM_INDOOR_ENEMY_ATTACK_COUNT] + 1u);
+                            if (core->ram[CONTRA_RAM_INDOOR_ENEMY_ATTACK_COUNT] >= 0x07u)
+                            {
+                                memset(enemy, 0, sizeof(*enemy));
+                                break;
+                            }
+                        }
+
+                        switch (spawn_attrs >> 6u)
+                        {
+                            case 0x00u:
+                                generated_type = 0x15u;
+                                break;
+
+                            case 0x01u:
+                                generated_type = 0x16u;
+                                break;
+
+                            case 0x02u:
+                                generated_type = 0x18u;
+                                generated_count = 4u;
+                                break;
+
+                            default:
+                                generated_type = 0x17u;
+                                core->ram[CONTRA_RAM_GRENADE_LAUNCHER_FLAG] = 0x01u;
+                                break;
+                        }
+
+                        for (generated_index = 0u; generated_index < generated_count; ++generated_index)
+                        {
+                            size_t slot_index;
+
+                            for (slot_index = 0u; slot_index < CONTRA_NATIVE_MAX_ENEMIES; ++slot_index)
+                            {
+                                ContraNativeEnemy *const generated = &core->enemies[slot_index];
+
+                                if (generated->active != 0u)
+                                {
+                                    continue;
+                                }
+
+                                memset(generated, 0, sizeof(*generated));
+                                generated->active = 0x01u;
+                                generated->type = generated_type;
+                                generated->attrs = (uint8_t)(spawn_attrs & 0x3Fu);
+                                generated->screen_id = screen;
+                                generated->hp = 0x01u;
+                                generated->state = 0x01u;
+                                generated->timer = (uint8_t)(generated_index * 4u);
+                                generated->cooldown = 0x08u;
+                                generated->sprite_code = (generated_type == 0x16u) ? 0x97u : 0x93u;
+                                generated->sprite_attr = ((spawn_attrs & 0x01u) != 0u) ? 0x00u : 0x40u;
+                                generated->x = ((spawn_attrs & 0x01u) != 0u) ? 0x0A : 0xFA;
+                                generated->y = (int16_t)(0x70 + (int)(generated_index * 8u));
+                                generated->vx = ((spawn_attrs & 0x01u) != 0u) ? 1 : -1;
+                                break;
+                            }
+                        }
+
+                        enemy->timer = (uint8_t)(delay_byte & 0x7Fu);
+                    }
+                    break;
+
+                case 0x15u:
+                case 0x16u:
+                case 0x17u:
+                case 0x18u:
+                    enemy->x = (int16_t)(enemy->x + enemy->vx);
+                    enemy->sprite_code = (enemy->type == 0x16u) ? 0x97u : 0x93u;
+                    enemy->sprite_attr = (uint8_t)(enemy->vx < 0 ? 0x40u : 0x00u);
+                    if ((enemy->x >= 0x68) && (enemy->x < 0x98))
+                    {
+                        if (enemy->cooldown != 0u)
+                        {
+                            enemy->cooldown = (uint8_t)(enemy->cooldown - 1u);
+                        }
+                        else
+                        {
+                            int target_dx = -32;
+                            int target_dy = 0;
+                            int8_t projectile_vx;
+                            int8_t projectile_vy;
+                            unsigned player_index;
+                            bool has_target = false;
+
+                            for (player_index = 0u; player_index < 2u; ++player_index)
+                            {
+                                if (core->ram[CONTRA_RAM_P1_GAME_OVER_STATUS + player_index] != 0u)
+                                {
+                                    continue;
+                                }
+
+                                target_dx = (int)core->ram[CONTRA_RAM_SPRITE_X_POS + player_index] - (int)enemy->x;
+                                target_dy = (int)core->ram[CONTRA_RAM_SPRITE_Y_POS + player_index] - (int)enemy->y;
+                                has_target = true;
+                                break;
+                            }
+
+                            if (has_target)
+                            {
+                                contra_select_level_1_projectile_velocity(
+                                    target_dx,
+                                    target_dy,
+                                    &projectile_vx,
+                                    &projectile_vy
+                                );
+                                if (contra_try_spawn_level_1_enemy_projectile(
+                                        core,
+                                        (int)enemy->x,
+                                        (int)enemy->y,
+                                        projectile_vx,
+                                        projectile_vy,
+                                        enemy->type))
+                                {
+                                    enemy->cooldown = 0x10u;
+                                }
+                            }
+                        }
+                    }
+                    if ((enemy->x < -16) || (enemy->x > 0x110))
+                    {
+                        if (enemy->type == 0x17u)
+                        {
+                            core->ram[CONTRA_RAM_GRENADE_LAUNCHER_FLAG] = 0x00u;
+                        }
+                        memset(enemy, 0, sizeof(*enemy));
+                    }
+                    break;
+
+                default:
+                    break;
+            }
+        }
+
+        for (enemy_index = 0u; enemy_index < CONTRA_PLAYER_BULLET_COUNT; ++enemy_index)
+        {
+            const int bullet_x = (int)core->ram[CONTRA_RAM_PLAYER_BULLET_X_POS + enemy_index];
+            const int bullet_y = (int)core->ram[CONTRA_RAM_PLAYER_BULLET_Y_POS + enemy_index];
+            size_t target_enemy_index;
+
+            if (core->ram[CONTRA_RAM_PLAYER_BULLET_SLOT + enemy_index] == 0u)
+            {
+                continue;
+            }
+
+            for (target_enemy_index = 0u; target_enemy_index < CONTRA_NATIVE_MAX_ENEMIES; ++target_enemy_index)
+            {
+                ContraNativeEnemy *const enemy = &core->enemies[target_enemy_index];
+                const int hit_left = (int)enemy->x - 12;
+                const int hit_right = hit_left + 32;
+                const int hit_top = (int)enemy->y - 12;
+                const int hit_bottom = hit_top + 32;
+
+                if (enemy->active == 0u)
+                {
+                    continue;
+                }
+
+                if (!boss_room)
+                {
+                    if ((enemy->type != 0x14u) || (enemy->state != 0x03u))
+                    {
+                        continue;
+                    }
+                }
+                else if ((enemy->type != 0x08u) &&
+                         (enemy->type != 0x0Au) &&
+                         (enemy->type != 0x10u))
+                {
+                    continue;
+                }
+
+                if ((bullet_x < hit_left) || (bullet_x >= hit_right) ||
+                    (bullet_y < hit_top) || (bullet_y >= hit_bottom))
+                {
+                    continue;
+                }
+
+                contra_clear_player_bullet(core, enemy_index);
+                if (boss_room &&
+                    (enemy->type == 0x10u) &&
+                    (core->ram[CONTRA_RAM_WALL_PLATING_DESTROYED_COUNT] < 0x04u))
+                {
+                    break;
+                }
+
+                if (enemy->hp != 0u)
+                {
+                    enemy->hp = (uint8_t)(enemy->hp - 1u);
+                }
+
+                if (enemy->hp == 0u)
+                {
+                    if (enemy->type == 0x14u)
+                    {
+                        contra_destroy_level_2_wall_core(core, enemy);
+                    }
+                    else if (enemy->type == 0x0Au)
+                    {
+                        core->ram[CONTRA_RAM_WALL_PLATING_DESTROYED_COUNT] =
+                            (uint8_t)(core->ram[CONTRA_RAM_WALL_PLATING_DESTROYED_COUNT] + 1u);
+                        memset(enemy, 0, sizeof(*enemy));
+                    }
+                    else if (enemy->type == 0x10u)
+                    {
+                        core->ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] = 0x01u;
+                        core->ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] = 0x01u;
+                        memset(enemy, 0, sizeof(*enemy));
+                    }
+                    else
+                    {
+                        memset(enemy, 0, sizeof(*enemy));
+                    }
+                }
+
+                break;
+            }
+        }
+
+        return;
+    }
 
     if ((core->ram[CONTRA_RAM_CURRENT_LEVEL] != 0u) ||
         (core->ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u) ||
@@ -5312,10 +5822,145 @@ static void contra_load_bank_2_load_screen_enemy_data(ContraCore *core)
     uint16_t screen_data_addr;
     uint8_t read_offset;
 
+    if (!contra_load_rom_image())
+    {
+        return;
+    }
+
+    if ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u) &&
+        ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0x01u) ||
+         (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0x80u)))
+    {
+        static const uint8_t wall_core_hp_tbl[4] = {0x08u, 0x05u, 0x10u, 0x05u};
+        static const uint8_t core_opening_delay_tbl[4] = {0x20u, 0x80u, 0xB0u, 0xF0u};
+        const bool boss_room = (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0x80u);
+        uint8_t read_index = 0x01u;
+        int enemy_index = (int)CONTRA_NATIVE_MAX_ENEMIES - 1;
+
+        if (ram[CONTRA_RAM_ENEMY_SCREEN_READ_OFFSET] != 0u)
+        {
+            return;
+        }
+
+        screen_data_addr = contra_rom_read_u16(
+            2u,
+            (uint16_t)(contra_level_2_enemy_screen_ptr_tbl_addr + ((uint16_t)ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] * 2u))
+        );
+
+        ram[CONTRA_RAM_ENEMY_SCREEN_READ_OFFSET] = 0x01u;
+        ram[CONTRA_RAM_INDOOR_ENEMY_ATTACK_COUNT] = 0x00u;
+        ram[CONTRA_RAM_WALL_PLATING_DESTROYED_COUNT] = 0x00u;
+        ram[CONTRA_RAM_INDOOR_RED_SOLDIER_CREATED] = 0x00u;
+        ram[CONTRA_RAM_GRENADE_LAUNCHER_FLAG] = 0x00u;
+        ram[CONTRA_RAM_WALL_CORE_REMAINING] = contra_rom_read_u8(2u, screen_data_addr);
+        ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] =
+            (ram[CONTRA_RAM_WALL_CORE_REMAINING] == 0u) ? 0x01u : 0x00u;
+        memset(core->enemies, 0, sizeof(core->enemies));
+
+        while (enemy_index >= 0)
+        {
+            const uint8_t position = contra_rom_read_u8(2u, (uint16_t)(screen_data_addr + read_index));
+            uint8_t type_flags;
+            uint8_t enemy_type;
+            uint8_t enemy_attrs;
+            ContraNativeEnemy *enemy;
+
+            if (position == 0xFFu)
+            {
+                break;
+            }
+
+            type_flags = contra_rom_read_u8(2u, (uint16_t)(screen_data_addr + read_index + 1u));
+            enemy_type = (uint8_t)(type_flags & 0x3Fu);
+            enemy_attrs = contra_rom_read_u8(2u, (uint16_t)(screen_data_addr + read_index + 2u));
+            read_index = (uint8_t)(read_index + 3u);
+
+            if ((enemy_type != 0x13u) &&
+                (enemy_type != 0x14u) &&
+                (enemy_type != 0x19u) &&
+                (enemy_type != 0x1Au) &&
+                (!boss_room ||
+                 ((enemy_type != 0x08u) &&
+                  (enemy_type != 0x0Au) &&
+                  (enemy_type != 0x10u))))
+            {
+                continue;
+            }
+
+            enemy = &core->enemies[enemy_index--];
+            memset(enemy, 0, sizeof(*enemy));
+            enemy->active = 0x01u;
+            enemy->type = enemy_type;
+            enemy->attrs = enemy_attrs;
+            enemy->screen_id = ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER];
+            enemy->x = (int16_t)((uint8_t)(position << 4u));
+            enemy->y = (int16_t)(position & 0xF0u);
+            if ((type_flags & 0x40u) != 0u)
+            {
+                enemy->x = (int16_t)(enemy->x + 7);
+            }
+            if ((type_flags & 0x80u) != 0u)
+            {
+                enemy->y = (int16_t)(enemy->y + 7);
+            }
+
+            switch (enemy_type)
+            {
+                case 0x08u:
+                    enemy->hp = 0x04u;
+                    enemy->state = 0x01u;
+                    enemy->timer = 0x40u;
+                    enemy->sprite_code = 0x84u;
+                    break;
+
+                case 0x0Au:
+                    enemy->hp = 0x03u;
+                    enemy->state = 0x01u;
+                    enemy->sprite_code = 0x80u;
+                    break;
+
+                case 0x10u:
+                    enemy->hp = 0x20u;
+                    enemy->state = 0x01u;
+                    enemy->timer = 0x60u;
+                    enemy->sprite_code = 0x87u;
+                    break;
+
+                case 0x13u:
+                    enemy->hp = 0x04u;
+                    enemy->sprite_code = 0x84u;
+                    break;
+
+                case 0x14u:
+                {
+                    const uint8_t core_kind = (uint8_t)((enemy_attrs >> 2u) & 0x03u);
+                    const uint8_t opening_delay_index = (uint8_t)(enemy_attrs & 0x03u);
+
+                    enemy->hp = wall_core_hp_tbl[core_kind];
+                    enemy->state = 0x01u;
+                    enemy->timer = ((enemy_attrs & 0x04u) != 0u)
+                        ? core_opening_delay_tbl[0u]
+                        : core_opening_delay_tbl[opening_delay_index];
+                    enemy->sprite_code = ((enemy_attrs & 0x04u) != 0u) ? 0x80u : 0x84u;
+                    break;
+                }
+
+                case 0x19u:
+                case 0x1Au:
+                    enemy->timer = (enemy_type == 0x1Au) ? 0x50u : 0x40u;
+                    break;
+
+                default:
+                    break;
+            }
+        }
+
+        return;
+    }
+
     if ((ram[CONTRA_RAM_CURRENT_LEVEL] != 0u) ||
         (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u) ||
-        (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u) ||
-        !contra_load_rom_image())
+        (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u))
     {
         return;
     }
@@ -6590,25 +7235,8 @@ static void contra_run_level_enemy_logic(ContraCore *core)
     contra_load_bank_2_load_screen_enemy_data(core);
     contra_load_bank_2_exe_soldier_generation(core);
 
-    if ((core->ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0x01u) &&
-        (core->ram[CONTRA_RAM_INDOOR_SCROLL] == 0u) &&
-        (core->ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] == 0u))
-    {
-        const uint8_t clear_delay = (core->ram[CONTRA_RAM_DEMO_MODE] != 0u) ? 0x40u : 0xF0u;
-
-        if (core->ram[CONTRA_RAM_INDOOR_ENEMY_ATTACK_COUNT] >= clear_delay)
-        {
-            core->ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] = 0x01u;
-        }
-        else
-        {
-            core->ram[CONTRA_RAM_INDOOR_ENEMY_ATTACK_COUNT] =
-                (uint8_t)(core->ram[CONTRA_RAM_INDOOR_ENEMY_ATTACK_COUNT] + 1u);
-        }
-    }
-
-    contra_update_native_level_1_enemy_projectiles(core);
-    contra_check_native_level_1_player_collisions(core);
+    contra_update_native_enemy_projectiles(core);
+    contra_check_native_player_collisions(core);
     contra_load_palette_indexes(core);
     contra_load_bank_2_alternate_tile_loading(core);
 }
@@ -7239,19 +7867,21 @@ static uint8_t contra_render_native_sprite_code(
     return sprite_order;
 }
 
-static void contra_render_level_1_overlay_supertile(
+static void contra_render_overlay_supertile(
     ContraCore *core,
+    uint16_t supertile_data_addr,
+    uint16_t palette_data_addr,
     int dest_x,
     int dest_y,
     uint8_t supertile_index
 )
 {
     const uint16_t supertile_addr = (uint16_t)(
-        contra_level_1_nametable_update_supertile_data_addr + ((uint16_t)supertile_index * 16u)
+        supertile_data_addr + ((uint16_t)supertile_index * 16u)
     );
     const uint8_t supertile_palette = contra_rom_read_u8(
         3u,
-        (uint16_t)(contra_level_1_nametable_update_palette_data_addr + supertile_index)
+        (uint16_t)(palette_data_addr + supertile_index)
     );
     unsigned tile_y;
 
@@ -7277,6 +7907,40 @@ static void contra_render_level_1_overlay_supertile(
             );
         }
     }
+}
+
+static void contra_render_level_1_overlay_supertile(
+    ContraCore *core,
+    int dest_x,
+    int dest_y,
+    uint8_t supertile_index
+)
+{
+    contra_render_overlay_supertile(
+        core,
+        contra_level_1_nametable_update_supertile_data_addr,
+        contra_level_1_nametable_update_palette_data_addr,
+        dest_x,
+        dest_y,
+        supertile_index
+    );
+}
+
+static void contra_render_level_2_overlay_supertile(
+    ContraCore *core,
+    int dest_x,
+    int dest_y,
+    uint8_t supertile_index
+)
+{
+    contra_render_overlay_supertile(
+        core,
+        contra_level_2_nametable_update_supertile_data_addr,
+        contra_level_2_nametable_update_palette_data_addr,
+        dest_x,
+        dest_y,
+        supertile_index
+    );
 }
 
 static void contra_render_level_1_nametable_update_supertile(
@@ -7333,64 +7997,108 @@ static void contra_render_level_1_bridge_cloud(
     );
 }
 
-static void contra_render_native_level_1_enemies(ContraCore *core)
+static void contra_render_level_2_wall_core_updates(ContraCore *core, const ContraNativeEnemy *enemy)
 {
-    uint8_t sprite_order = 0x80u;
-    size_t enemy_index;
+    unsigned phase;
 
-    if (!contra_is_native_level_1_active(core))
+    if ((enemy->type != 0x14u) || ((enemy->state != 0x08u) && (enemy->state != 0x09u)))
     {
         return;
     }
 
-    for (enemy_index = 0u; enemy_index < CONTRA_NATIVE_MAX_ENEMIES; ++enemy_index)
+    for (phase = 0u; phase < 4u; ++phase)
     {
-        const ContraNativeEnemy *const enemy = &core->enemies[enemy_index];
-
-        if (enemy->active == 0u)
+        if ((enemy->flags & (uint8_t)(1u << phase)) == 0u)
         {
             continue;
         }
 
-        switch (enemy->type)
+        contra_render_level_2_overlay_supertile(
+            core,
+            (int)contra_level_2_wall_core_update_x_tbl[phase],
+            (int)contra_level_2_wall_core_update_y_tbl[phase],
+            contra_level_2_wall_core_update_supertile_tbl[phase]
+        );
+    }
+}
+
+static void contra_render_native_enemies(ContraCore *core)
+{
+    uint8_t sprite_order = 0x80u;
+    size_t enemy_index;
+    const bool level_1_active = contra_is_native_level_1_active(core);
+    const bool level_2_active = contra_is_native_level_2_active(core);
+
+    if (!contra_is_native_combat_active(core))
+    {
+        return;
+    }
+
+    if (level_1_active)
+    {
+        for (enemy_index = 0u; enemy_index < CONTRA_NATIVE_MAX_ENEMIES; ++enemy_index)
         {
-            case 0x02u:
-            case 0x04u:
-            case 0x07u:
-            case 0x10u:
-                contra_render_level_1_nametable_update_supertile(
-                    core,
-                    (int)enemy->x,
-                    (int)enemy->y,
-                    enemy->sprite_code
-                );
-                break;
+            const ContraNativeEnemy *const enemy = &core->enemies[enemy_index];
 
-            case 0x12u:
+            if (enemy->active == 0u)
             {
-                unsigned section;
-
-                for (section = 0u; section < 4u; ++section)
-                {
-                    const uint8_t overlay = contra_level_1_bridge_get_overlay(enemy, section);
-
-                    if (overlay == 0u)
-                    {
-                        continue;
-                    }
-
-                    contra_render_level_1_overlay_supertile(
-                        core,
-                        ((int)enemy->x - 12) + (int)(section * 32u),
-                        (int)enemy->y - 12,
-                        overlay
-                    );
-                }
-                break;
+                continue;
             }
 
-            default:
-                break;
+            switch (enemy->type)
+            {
+                case 0x02u:
+                case 0x04u:
+                case 0x07u:
+                case 0x10u:
+                    contra_render_level_1_nametable_update_supertile(
+                        core,
+                        (int)enemy->x,
+                        (int)enemy->y,
+                        enemy->sprite_code
+                    );
+                    break;
+
+                case 0x12u:
+                {
+                    unsigned section;
+
+                    for (section = 0u; section < 4u; ++section)
+                    {
+                        const uint8_t overlay = contra_level_1_bridge_get_overlay(enemy, section);
+
+                        if (overlay == 0u)
+                        {
+                            continue;
+                        }
+
+                        contra_render_level_1_overlay_supertile(
+                            core,
+                            ((int)enemy->x - 12) + (int)(section * 32u),
+                            (int)enemy->y - 12,
+                            overlay
+                        );
+                    }
+                    break;
+                }
+
+                default:
+                    break;
+            }
+        }
+    }
+    else if (level_2_active)
+    {
+        for (enemy_index = 0u; enemy_index < CONTRA_NATIVE_MAX_ENEMIES; ++enemy_index)
+        {
+            const ContraNativeEnemy *const enemy = &core->enemies[enemy_index];
+
+            if (enemy->active == 0u)
+            {
+                continue;
+            }
+
+            contra_render_level_2_wall_core_updates(core, enemy);
         }
     }
 
@@ -7409,6 +8117,10 @@ static void contra_render_native_level_1_enemies(ContraCore *core)
             case 0x03u:
             case 0x05u:
             case 0x06u:
+            case 0x15u:
+            case 0x16u:
+            case 0x17u:
+            case 0x18u:
             case CONTRA_NATIVE_LEVEL1_TYPE_EXPLOSION:
                 sprite_order = contra_render_native_sprite_code(
                     core,
@@ -7504,7 +8216,7 @@ static void contra_render_frame(ContraCore *core)
         contra_render_level_background(core);
     }
 
-    contra_render_native_level_1_enemies(core);
+    contra_render_native_enemies(core);
     contra_render_cpu_sprites(core);
 }
 

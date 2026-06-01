@@ -60,6 +60,42 @@ if(CONTRA_PORT_BUILD_TESTS)
     contra_apply_coverage(contra_checkpoint_trace_tests)
 
     add_test(NAME contra_checkpoint_trace_tests COMMAND contra_checkpoint_trace_tests)
+    add_test(
+        NAME contra_checkpoint_trace_export
+        COMMAND contra_checkpoint_trace_tests --emit-jsonl "${CMAKE_CURRENT_BINARY_DIR}/contra_checkpoint_trace.jsonl"
+    )
+
+    add_executable(contra_checkpoint_trace_export_tests
+        tests/checkpoint_trace_export_tests.c
+    )
+
+    contra_apply_warnings(contra_checkpoint_trace_export_tests)
+    contra_apply_coverage(contra_checkpoint_trace_export_tests)
+
+    add_test(
+        NAME contra_checkpoint_trace_export_tests
+        COMMAND contra_checkpoint_trace_export_tests "${CMAKE_CURRENT_BINARY_DIR}/contra_checkpoint_trace.jsonl"
+    )
+    set_tests_properties(contra_checkpoint_trace_export_tests PROPERTIES
+        DEPENDS contra_checkpoint_trace_export
+    )
+
+    add_executable(contra_checkpoint_trace_compare
+        tests/checkpoint_trace_compare.c
+    )
+
+    contra_apply_warnings(contra_checkpoint_trace_compare)
+    contra_apply_coverage(contra_checkpoint_trace_compare)
+
+    add_test(
+        NAME contra_checkpoint_trace_compare_self
+        COMMAND contra_checkpoint_trace_compare
+            "${CMAKE_CURRENT_BINARY_DIR}/contra_checkpoint_trace.jsonl"
+            "${CMAKE_CURRENT_BINARY_DIR}/contra_checkpoint_trace.jsonl"
+    )
+    set_tests_properties(contra_checkpoint_trace_compare_self PROPERTIES
+        DEPENDS contra_checkpoint_trace_export
+    )
 
     add_executable(contra_coverage_manifest_tests
         tests/coverage_manifest_tests.c
@@ -72,6 +108,62 @@ if(CONTRA_PORT_BUILD_TESTS)
     set_tests_properties(contra_coverage_manifest_tests PROPERTIES
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     )
+
+    if(CONTRA_PORT_ENABLE_MESEN_TRACE_TESTS)
+        find_program(CONTRA_MESEN_EXECUTABLE NAMES Mesen.exe Mesen mesen)
+        set(CONTRA_MESEN_TRACE_JSONL "${CMAKE_CURRENT_BINARY_DIR}/mesen_checkpoint_trace.jsonl")
+
+        if(CONTRA_MESEN_EXECUTABLE AND EXISTS "${CMAKE_SOURCE_DIR}/contra.nes")
+            add_executable(contra_mesen_trace_export_tests
+                tests/mesen_trace_export_tests.c
+            )
+
+            contra_apply_warnings(contra_mesen_trace_export_tests)
+            contra_apply_coverage(contra_mesen_trace_export_tests)
+
+            add_executable(contra_checkpoint_trace_compare_attract_semantics
+                tests/checkpoint_trace_compare_attract_semantics.c
+            )
+
+            contra_apply_warnings(contra_checkpoint_trace_compare_attract_semantics)
+            contra_apply_coverage(contra_checkpoint_trace_compare_attract_semantics)
+
+            add_test(
+                NAME contra_mesen_checkpoint_trace_export
+                COMMAND
+                    "${CMAKE_COMMAND}" -E env
+                    "CONTRA_MESEN_TRACE_JSONL=${CONTRA_MESEN_TRACE_JSONL}"
+                    "${CONTRA_MESEN_EXECUTABLE}"
+                    --testRunner
+                    --enableStdout
+                    --doNotSaveSettings
+                    --timeout=30
+                    --debug.scriptWindow.allowIoOsAccess=true
+                    "${CMAKE_SOURCE_DIR}/tools/mesen_checkpoint_trace.lua"
+                    "${CMAKE_SOURCE_DIR}/contra.nes"
+            )
+
+            add_test(
+                NAME contra_mesen_trace_export_tests
+                COMMAND contra_mesen_trace_export_tests "${CONTRA_MESEN_TRACE_JSONL}"
+            )
+            set_tests_properties(contra_mesen_trace_export_tests PROPERTIES
+                DEPENDS contra_mesen_checkpoint_trace_export
+            )
+
+            add_test(
+                NAME contra_checkpoint_trace_compare_attract_semantics
+                COMMAND contra_checkpoint_trace_compare_attract_semantics
+                    "${CONTRA_MESEN_TRACE_JSONL}"
+                    "${CMAKE_CURRENT_BINARY_DIR}/contra_checkpoint_trace.jsonl"
+            )
+            set_tests_properties(contra_checkpoint_trace_compare_attract_semantics PROPERTIES
+                DEPENDS "contra_mesen_checkpoint_trace_export;contra_checkpoint_trace_export"
+            )
+        else()
+            message(STATUS "Mesen original-ROM trace tests disabled: Mesen executable or contra.nes not found.")
+        endif()
+    endif()
 endif()
 
 if(CONTRA_PORT_BUILD_SDL)
