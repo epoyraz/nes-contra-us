@@ -16,7 +16,9 @@ end
 local frame = 0
 local checkpoint_index = 1
 local level2_checkpoint_index = 1
+local room_chain_checkpoint_index = 1
 local phase = "level1"
+local room_chain_forced = false
 local level1_checkpoints = {
     { name = "level1-title", frame = 180 },
     { name = "level1-gameplay-start", frame = 900 },
@@ -71,6 +73,10 @@ local function read_ram(addr)
     return emu.read(addr, RAM, false)
 end
 
+local function write_ram(addr, value)
+    emu.write(addr, value, RAM)
+end
+
 local function hex32(value)
     return string.format("%08X", band(value, 0xFFFFFFFF))
 end
@@ -120,7 +126,7 @@ local function capture(scenario, name, capture_frame)
 end
 
 local function input_for_next_frame()
-    return {
+    local input = {
         up = false,
         down = false,
         left = false,
@@ -130,6 +136,24 @@ local function input_for_next_frame()
         a = false,
         b = false,
     }
+
+    if phase == "level2_room_chain" and read_ram(0x37) ~= 0 then
+        input.up = true
+    end
+
+    return input
+end
+
+local function force_level2_room_chain()
+    write_ram(0x18, 0x05)
+    write_ram(0x2C, 0x00)
+    write_ram(0x30, 0x01)
+    write_ram(0x1D, 0x01)
+    write_ram(0x38, 0x00)
+    write_ram(0x39, 0x01)
+    write_ram(0x32, 0x02)
+    room_chain_forced = true
+    debug_log("forced level 2 room chain")
 end
 
 local function on_input_polled()
@@ -197,12 +221,69 @@ local function on_end_frame()
     if phase == "wait_level2_demo_end" then
         if read_ram(0x18) ~= 0x02 then
             capture("attract_level2_demo", "level2-demo-finished", frame)
-            output:close()
-            emu.stop(0)
+            phase = "level2_room_chain"
+            force_level2_room_chain()
         elseif frame >= 12000 then
             output:close()
             emu.stop(1)
         end
+        return
+    end
+
+    if phase == "level2_room_chain" then
+        if not room_chain_forced then
+            force_level2_room_chain()
+        end
+
+        if read_ram(0x2C) == 0x04 then
+            local should_capture = false
+            local name = ""
+
+            if room_chain_checkpoint_index == 1 then
+                should_capture =
+                    read_ram(0x30) == 0x01 and
+                    read_ram(0x40) == 0x01 and
+                    read_ram(0x64) == 0x00
+                name = "level2-first-room"
+            elseif room_chain_checkpoint_index == 2 then
+                should_capture =
+                    read_ram(0x30) == 0x01 and
+                    read_ram(0x40) == 0x01 and
+                    read_ram(0x64) == 0x01
+                name = "level2-after-room-1"
+            elseif room_chain_checkpoint_index == 3 then
+                should_capture =
+                    read_ram(0x30) == 0x01 and
+                    read_ram(0x40) == 0x01 and
+                    read_ram(0x64) == 0x04
+                name = "level2-after-room-4"
+            elseif room_chain_checkpoint_index == 4 then
+                should_capture =
+                    read_ram(0x30) == 0x01 and
+                    read_ram(0x40) == 0x80 and
+                    read_ram(0x64) == 0x05
+                name = "level2-boss-state"
+            end
+
+            if should_capture then
+                capture("level2_room_chain", name, frame)
+                room_chain_checkpoint_index = room_chain_checkpoint_index + 1
+            end
+
+            if read_ram(0x40) == 0x80 then
+                output:close()
+                emu.stop((room_chain_checkpoint_index > 4) and 0 or 1)
+                return
+            end
+
+            if read_ram(0x86) ~= 0 and read_ram(0x37) == 0x00 then
+                write_ram(0x37, 0x01)
+            end
+        elseif frame >= 18000 then
+            output:close()
+            emu.stop(1)
+        end
+
         return
     end
 

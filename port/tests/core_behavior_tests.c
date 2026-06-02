@@ -547,6 +547,8 @@ static bool test_level1_bridge_destruction_changes_render_state(void)
 {
     ContraCore core;
     unsigned frame;
+    uint32_t initial_overlay_hash;
+    uint32_t active_overlay_hash;
     bool bridge_active = false;
 
     contra_core_init(&core);
@@ -566,6 +568,11 @@ static bool test_level1_bridge_destruction_changes_render_state(void)
     core.enemies[0].x = 0x70;
     core.enemies[0].y = 0x90;
     core.enemies[0].state = 0x00u;
+    initial_overlay_hash =
+        ((uint32_t)core.enemies[0].screen_id << 24u) |
+        ((uint32_t)core.enemies[0].sprite_code << 16u) |
+        ((uint32_t)core.enemies[0].sprite_attr << 8u) |
+        (uint32_t)core.enemies[0].hp;
 
     for (frame = 0u; frame < 96u; ++frame)
     {
@@ -584,6 +591,103 @@ static bool test_level1_bridge_destruction_changes_render_state(void)
     CHECK(core.enemies[0].sprite_code == 0x19u);
     CHECK(core.enemies[0].sprite_attr == 0x19u);
     CHECK(core.enemies[0].hp == 0x1Du);
+    active_overlay_hash =
+        ((uint32_t)core.enemies[0].screen_id << 24u) |
+        ((uint32_t)core.enemies[0].sprite_code << 16u) |
+        ((uint32_t)core.enemies[0].sprite_attr << 8u) |
+        (uint32_t)core.enemies[0].hp;
+    CHECK(active_overlay_hash != initial_overlay_hash);
+
+    core.ram[CONTRA_RAM_PLAYER_STATE] = 0x01u;
+    core.ram[CONTRA_RAM_PLAYER_BG_FLAG_EDGE_DETECT] = 0x00u;
+    core.ram[CONTRA_RAM_EDGE_FALL_CODE] = 0x00u;
+    core.ram[CONTRA_RAM_PLAYER_JUMP_STATUS] = 0x00u;
+    core.ram[CONTRA_RAM_SPRITE_X_POS] = 0x90u;
+    core.ram[CONTRA_RAM_SPRITE_Y_POS] = 0x90u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_EDGE_FALL_CODE] != 0x00u);
+    CHECK(core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] == 0x00u);
+    return true;
+}
+
+static bool test_level1_organic_bridge_load_changes_collision(void)
+{
+    ContraCore core;
+    unsigned frame;
+    size_t bridge_index = 0u;
+    bool bridge_loaded = false;
+    bool bridge_active = false;
+    uint32_t initial_overlay_hash;
+    uint32_t active_overlay_hash;
+
+    contra_core_init(&core);
+    CHECK(run_until_gameplay(&core, 900u));
+
+    for (frame = 0u; frame < 6000u; ++frame)
+    {
+        size_t enemy_index;
+
+        core.ram[CONTRA_RAM_NEW_LIFE_INVINCIBILITY_TIMER] = 0x80u;
+        step_with_input(&core, CONTRA_BUTTON_RIGHT);
+
+        for (enemy_index = 0u; enemy_index < CONTRA_NATIVE_MAX_ENEMIES; ++enemy_index)
+        {
+            if ((core.enemies[enemy_index].active != 0u) &&
+                (core.enemies[enemy_index].type == 0x12u))
+            {
+                bridge_index = enemy_index;
+                bridge_loaded = true;
+                break;
+            }
+        }
+
+        if (bridge_loaded)
+        {
+            break;
+        }
+    }
+
+    CHECK(bridge_loaded);
+    initial_overlay_hash =
+        ((uint32_t)core.enemies[bridge_index].screen_id << 24u) |
+        ((uint32_t)core.enemies[bridge_index].sprite_code << 16u) |
+        ((uint32_t)core.enemies[bridge_index].sprite_attr << 8u) |
+        (uint32_t)core.enemies[bridge_index].hp;
+
+    core.ram[CONTRA_RAM_PLAYER_STATE] = 0x01u;
+    core.ram[CONTRA_RAM_PLAYER_BG_FLAG_EDGE_DETECT] = 0x01u;
+    core.ram[CONTRA_RAM_PLAYER_JUMP_STATUS] = 0x00u;
+    core.ram[CONTRA_RAM_EDGE_FALL_CODE] = 0x00u;
+    core.ram[CONTRA_RAM_SPRITE_X_POS] = (uint8_t)core.enemies[bridge_index].x;
+    core.ram[CONTRA_RAM_SPRITE_Y_POS] = (uint8_t)core.enemies[bridge_index].y;
+
+    for (frame = 0u; frame < 96u; ++frame)
+    {
+        step_no_input(&core);
+        if (core.enemies[bridge_index].state == 0x02u)
+        {
+            bridge_active = true;
+            break;
+        }
+    }
+
+    CHECK(bridge_active);
+    active_overlay_hash =
+        ((uint32_t)core.enemies[bridge_index].screen_id << 24u) |
+        ((uint32_t)core.enemies[bridge_index].sprite_code << 16u) |
+        ((uint32_t)core.enemies[bridge_index].sprite_attr << 8u) |
+        (uint32_t)core.enemies[bridge_index].hp;
+    CHECK(active_overlay_hash != initial_overlay_hash);
+
+    core.ram[CONTRA_RAM_PLAYER_STATE] = 0x01u;
+    core.ram[CONTRA_RAM_PLAYER_BG_FLAG_EDGE_DETECT] = 0x00u;
+    core.ram[CONTRA_RAM_EDGE_FALL_CODE] = 0x00u;
+    core.ram[CONTRA_RAM_PLAYER_JUMP_STATUS] = 0x00u;
+    core.ram[CONTRA_RAM_SPRITE_X_POS] = (uint8_t)(core.enemies[bridge_index].x + 0x20);
+    core.ram[CONTRA_RAM_SPRITE_Y_POS] = (uint8_t)core.enemies[bridge_index].y;
+    step_no_input(&core);
+
+    CHECK(core.ram[CONTRA_RAM_EDGE_FALL_CODE] != 0x00u);
     CHECK(core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] == 0x00u);
     return true;
 }
@@ -1161,6 +1265,36 @@ static bool test_attract_level2_loads_wall_core_without_early_clear(void)
     return true;
 }
 
+static bool test_attract_level2_demo_does_not_consume_multiple_lives_before_rom_terminal(void)
+{
+    ContraCore core;
+    unsigned frame;
+    const unsigned original_terminal_frame = 4632u;
+    bool terminal_reached = false;
+
+    contra_core_init(&core);
+    for (frame = 0u; frame < (original_terminal_frame + 300u); ++frame)
+    {
+        step_no_input(&core);
+        if ((frame > 3000u) && (core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] != 0x02u))
+        {
+            terminal_reached = true;
+            break;
+        }
+    }
+
+    CHECK(terminal_reached);
+    CHECK(frame <= (original_terminal_frame + 300u));
+    CHECK(core.ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u);
+    CHECK(core.ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0x01u);
+    CHECK(core.ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] == 0x01u);
+    CHECK(core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] == 0x00u);
+    CHECK(core.ram[CONTRA_RAM_P1_NUM_LIVES] >= 0x61u);
+    CHECK(core.ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] == 0x00u);
+    CHECK(core.ram[CONTRA_RAM_WALL_CORE_REMAINING] == 0x01u);
+    return true;
+}
+
 static bool test_level2_repeated_room_advances_reach_boss_state(void)
 {
     ContraCore core;
@@ -1300,6 +1434,7 @@ int main(void)
         {"level1_bullet_destroyed_enemy_becomes_explosion", test_level1_bullet_destroyed_enemy_becomes_explosion},
         {"level1_weapon_item_pickup_changes_weapon_and_bullet", test_level1_weapon_item_pickup_changes_weapon_and_bullet},
         {"level1_bridge_destruction_reaches_overlay_state", test_level1_bridge_destruction_changes_render_state},
+        {"level1_organic_bridge_load_changes_collision", test_level1_organic_bridge_load_changes_collision},
         {"level1_forced_boss_clear_hands_off_to_level2", test_level1_forced_boss_clear_hands_off_to_level2},
         {"attract_reaches_level2_gameplay", test_attract_reaches_level2_gameplay},
         {"attract_level1_demo_reaches_screen_milestones", test_attract_level1_demo_reaches_screen_milestones},
@@ -1315,6 +1450,7 @@ int main(void)
         {"level2_projectiles_move_and_hit_player", test_level2_projectiles_move_and_hit_player},
         {"level2_room_advance_changes_render_state", test_level2_room_advance_changes_render_state},
         {"attract_level2_loads_wall_core_without_early_clear", test_attract_level2_loads_wall_core_without_early_clear},
+        {"attract_level2_demo_does_not_consume_multiple_lives_before_rom_terminal", test_attract_level2_demo_does_not_consume_multiple_lives_before_rom_terminal},
         {"level2_repeated_room_advances_reach_boss_state", test_level2_repeated_room_advances_reach_boss_state},
         {"level2_boss_room_loads_rom_enemy_data", test_level2_boss_room_loads_rom_enemy_data},
         {"level2_boss_room_plating_and_eye_can_be_destroyed", test_level2_boss_room_plating_and_eye_can_be_destroyed},

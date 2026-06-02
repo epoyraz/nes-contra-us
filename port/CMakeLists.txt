@@ -128,6 +128,13 @@ if(CONTRA_PORT_BUILD_TESTS)
             contra_apply_warnings(contra_checkpoint_trace_compare_attract_semantics)
             contra_apply_coverage(contra_checkpoint_trace_compare_attract_semantics)
 
+            add_executable(contra_checkpoint_trace_compare_level2_room_chain_semantics
+                tests/checkpoint_trace_compare_level2_room_chain_semantics.c
+            )
+
+            contra_apply_warnings(contra_checkpoint_trace_compare_level2_room_chain_semantics)
+            contra_apply_coverage(contra_checkpoint_trace_compare_level2_room_chain_semantics)
+
             add_test(
                 NAME contra_mesen_checkpoint_trace_export
                 COMMAND
@@ -158,6 +165,16 @@ if(CONTRA_PORT_BUILD_TESTS)
                     "${CMAKE_CURRENT_BINARY_DIR}/contra_checkpoint_trace.jsonl"
             )
             set_tests_properties(contra_checkpoint_trace_compare_attract_semantics PROPERTIES
+                DEPENDS "contra_mesen_checkpoint_trace_export;contra_checkpoint_trace_export"
+            )
+
+            add_test(
+                NAME contra_checkpoint_trace_compare_level2_room_chain_semantics
+                COMMAND contra_checkpoint_trace_compare_level2_room_chain_semantics
+                    "${CONTRA_MESEN_TRACE_JSONL}"
+                    "${CMAKE_CURRENT_BINARY_DIR}/contra_checkpoint_trace.jsonl"
+            )
+            set_tests_properties(contra_checkpoint_trace_compare_level2_room_chain_semantics PROPERTIES
                 DEPENDS "contra_mesen_checkpoint_trace_export;contra_checkpoint_trace_export"
             )
         else()

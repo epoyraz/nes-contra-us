@@ -3544,6 +3544,9 @@ static void contra_move_player_horizontally(ContraCore *core, uint8_t player_ind
 static void contra_handle_player_fall_out(ContraCore *core, uint8_t player_index)
 {
     uint8_t *const ram = core->ram;
+    const bool demo_mode = ram[CONTRA_RAM_DEMO_MODE] != 0u;
+    const bool demo_life_floor_reached =
+        demo_mode && (ram[CONTRA_RAM_P1_NUM_LIVES + player_index] <= 0x61u);
 
     contra_init_player_attributes(core, player_index);
     ram[CONTRA_RAM_PLAYER_STATE + player_index] = 0x00u;
@@ -3552,12 +3555,11 @@ static void contra_handle_player_fall_out(ContraCore *core, uint8_t player_index
     {
         ram[CONTRA_RAM_P1_GAME_OVER_STATUS + player_index] = 0x01u;
     }
-    else
+    else if (!demo_life_floor_reached)
     {
         ram[CONTRA_RAM_P1_NUM_LIVES + player_index] =
             (uint8_t)(ram[CONTRA_RAM_P1_NUM_LIVES + player_index] - 1u);
     }
-
 }
 
 static void contra_kill_player(ContraCore *core, uint8_t player_index)
@@ -5129,6 +5131,12 @@ static void contra_load_bank_0_exe_all_enemy_routine(ContraCore *core)
                 if (!boss_room)
                 {
                     if ((enemy->type != 0x14u) || (enemy->state != 0x03u))
+                    {
+                        continue;
+                    }
+
+                    if ((core->ram[CONTRA_RAM_DEMO_MODE] != 0u) &&
+                        (core->ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] != 0x00u))
                     {
                         continue;
                     }

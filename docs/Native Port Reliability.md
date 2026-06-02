@@ -28,15 +28,20 @@ repeatable tests, coverage output, and a machine-readable routine ledger.
    The original and native JSONL traces are now both machine-readable. The
    Mesen exporter covers level 1 attract/demo checkpoints, the first natural
    level 2 attract/demo checkpoint, and the original-ROM terminal level 2 demo
-   state. The terminal row is exported as a drift target but is not included in
-   the passing native semantic comparator yet. The
+   state, then appends a seeded original-ROM level 2 room-chain through the
+   boss-room entry. The native exporter also records the terminal level 2 demo
+   state and a seeded level 2 room-chain. The
    `contra_checkpoint_trace_compare_attract_semantics` CTest target compares
    the shared native/original attract rows for routine, level, screen, player,
    lives, game-over, demo-end, indoor-clear, and wall-core remaining semantics,
    with explicit tolerances for the remaining frame, scroll, and player-position
-   drift. The attract trace now includes the original-ROM level 2 first-room
+   drift, including the terminal level 2 demo row. The attract trace now
+   includes the original-ROM level 2 first-room
    wall-core load, wall-core destruction, room-clear flag, screen-1 advance,
-   and the later original-ROM demo-finished state.
+   and the later demo-finished state. The
+   `contra_checkpoint_trace_compare_level2_room_chain_semantics` CTest target
+   compares the seeded original/native level 2 room-chain rows through screen 4
+   and boss-room entry with relative-frame and player-position tolerances.
    Full strict hash comparison remains expected to fail until the native
    timing/state model is brought into parity.
 
@@ -56,19 +61,20 @@ repeatable tests, coverage output, and a machine-readable routine ledger.
 
 4. Differential testing
 
-   The first differential gate is now active for the shared attract/demo trace.
-   A stricter deterministic emulator harness still needs to drive original ROM
-   and native level 1/level 2 gameplay frame-by-frame on identical input streams,
-   then graduate from semantic fields to RAM, PPU, enemy, and framebuffer hashes.
-   Until that exists, confidence is stronger than scenario-only testing but is
-   not yet equivalence-proof based.
+   Differential gates are now active for the shared attract/demo trace and a
+   seeded level 2 room-chain through boss-room entry. A stricter deterministic
+   emulator harness still needs to drive original ROM and native level 1/level 2
+   gameplay frame-by-frame on identical input streams, then graduate from
+   semantic fields to RAM, PPU, enemy, and framebuffer hashes. Until that
+   exists, confidence is stronger than scenario-only testing but is not yet
+   equivalence-proof based.
 
 ## Commands
 
 Build and run the normal tests:
 
 ```powershell
-cmake --build C:\Users\enesp\Desktop\coding\nes-contra-us\build_win --target contra_core_tests contra_checkpoint_trace_tests contra_checkpoint_trace_export_tests contra_checkpoint_trace_compare contra_checkpoint_trace_compare_attract_semantics contra_coverage_manifest_tests contra_mesen_trace_export_tests
+cmake --build C:\Users\enesp\Desktop\coding\nes-contra-us\build_win --target contra_core_tests contra_checkpoint_trace_tests contra_checkpoint_trace_export_tests contra_checkpoint_trace_compare contra_checkpoint_trace_compare_attract_semantics contra_checkpoint_trace_compare_level2_room_chain_semantics contra_coverage_manifest_tests contra_mesen_trace_export_tests
 ctest --test-dir C:\Users\enesp\Desktop\coding\nes-contra-us\build_win --output-on-failure
 ```
 
@@ -76,7 +82,7 @@ Create and run a coverage build:
 
 ```powershell
 cmake -S C:\Users\enesp\Desktop\coding\nes-contra-us -B C:\Users\enesp\Desktop\coding\nes-contra-us\build-coverage -G Ninja -DCONTRA_PORT_BUILD_SDL=OFF -DCONTRA_PORT_ENABLE_COVERAGE=ON
-cmake --build C:\Users\enesp\Desktop\coding\nes-contra-us\build-coverage --target contra_core_tests contra_checkpoint_trace_tests contra_checkpoint_trace_export_tests contra_checkpoint_trace_compare contra_checkpoint_trace_compare_attract_semantics contra_coverage_manifest_tests contra_mesen_trace_export_tests
+cmake --build C:\Users\enesp\Desktop\coding\nes-contra-us\build-coverage --target contra_core_tests contra_checkpoint_trace_tests contra_checkpoint_trace_export_tests contra_checkpoint_trace_compare contra_checkpoint_trace_compare_attract_semantics contra_checkpoint_trace_compare_level2_room_chain_semantics contra_coverage_manifest_tests contra_mesen_trace_export_tests
 ctest --test-dir C:\Users\enesp\Desktop\coding\nes-contra-us\build-coverage --output-on-failure
 gcov -b -c C:\Users\enesp\Desktop\coding\nes-contra-us\build-coverage\port\CMakeFiles\contra_core.dir\contra_core\src\core.c.gcda
 ```
@@ -86,12 +92,14 @@ Export and compare native and original-ROM checkpoint traces manually:
 ```powershell
 ctest --test-dir C:\Users\enesp\Desktop\coding\nes-contra-us\build_win -R "checkpoint_trace_export|mesen_checkpoint_trace_export" --output-on-failure
 C:\Users\enesp\Desktop\coding\nes-contra-us\build_win\port\contra_checkpoint_trace_compare_attract_semantics.exe C:\Users\enesp\Desktop\coding\nes-contra-us\build_win\port\mesen_checkpoint_trace.jsonl C:\Users\enesp\Desktop\coding\nes-contra-us\build_win\port\contra_checkpoint_trace.jsonl
+C:\Users\enesp\Desktop\coding\nes-contra-us\build_win\port\contra_checkpoint_trace_compare_level2_room_chain_semantics.exe C:\Users\enesp\Desktop\coding\nes-contra-us\build_win\port\mesen_checkpoint_trace.jsonl C:\Users\enesp\Desktop\coding\nes-contra-us\build_win\port\contra_checkpoint_trace.jsonl
 C:\Users\enesp\Desktop\coding\nes-contra-us\build_win\port\contra_checkpoint_trace_compare.exe C:\Users\enesp\Desktop\coding\nes-contra-us\build_win\port\mesen_checkpoint_trace.jsonl C:\Users\enesp\Desktop\coding\nes-contra-us\build_win\port\contra_checkpoint_trace.jsonl
 ```
 
-The semantic attract comparison is part of the passing CTest suite. The strict
-comparison is the intended final equivalence gate; today it is not part of the
-passing suite because it exposes known native-vs-original differences.
+The semantic attract and seeded level 2 room-chain comparisons are part of the
+passing CTest suite. The strict comparison is the intended final equivalence
+gate; today it is not part of the passing suite because it exposes known
+native-vs-original differences.
 
 ## Current Gates
 
@@ -102,7 +110,8 @@ The native behavior tests currently cover:
 - level 1 native enemy-screen data loading and enemy activation while scrolling
 - level 1 bullet collision turning a defeated enemy into an explosion actor
 - level 1 weapon item pickup changes weapon RAM, weapon strength, and bullet type
-- level 1 bridge destruction reaches the native broken-overlay state
+- level 1 bridge destruction reaches the native broken-overlay state, and a
+  ROM-loaded bridge actor changes player collision through the normal step loop
 - level 1 forced boss-defeated path exercises end-level subroutine states and
   hands off into level 2 initialization
 - attract mode reaching level 2 gameplay
@@ -149,43 +158,49 @@ The native behavior tests currently cover:
   level, screen, player, lives, game-over, demo-end, indoor-clear, and wall-core
   remaining fields, with documented timing and position tolerances
 - original-ROM and native attract/demo checkpoints for level 2 first-room wall
-  core load, wall-core destruction, room clear, and screen-1 advance
-- original-ROM-only level 2 demo-finished checkpoint, currently documenting the
-  next native timing/death drift target rather than a passing equivalence gate
+  core load, wall-core destruction, room clear, screen-1 advance, and terminal
+  demo-finished state
+- native level 2 attract/demo terminal invariant ensuring the port does not
+  consume more than one life before the original-ROM terminal window and exits
+  with the screen-1 wall core still uncleared
+- seeded original-ROM and native level 2 room-chain checkpoints for first room,
+  screen-1 advance, screen-4 advance, and boss-room entry, compared
+  semantically with documented relative-frame and player-position tolerances
 
 These are not enough to claim full level 1 or level 2 parity. They are the first
 CI-style gates for the areas we are actively stabilizing.
 
 Most recent coverage run for `port/contra_core/src/core.c`:
 
-- lines executed: 80.55% of 4051
-- branches executed: 86.21% of 2204
-- branches taken at least once: 69.28% of 2204
+- lines executed: 80.70% of 4058
+- branches executed: 86.27% of 2214
+- branches taken at least once: 69.69% of 2214
 - calls executed: 78.74% of 508
 
 ## Required Next Gates
 
 Level 1 high-confidence gates:
 
-- bridge destruction changes collision and rendering state in an organic level run
+- fully hands-off bridge destruction in an organic level run without test-side
+  player repositioning or invincibility assistance
 - organic boss defeated path reaches end-level sequence and level 2 handoff
   without forcing the boss flag
 - selected framebuffer region hashes for stable level 1 moments
 
 Level 2 high-confidence gates:
 
-- level 2 attract demo continues beyond screen 1 without ending early, including
-  later wall-core variants
+- level 2 attract demo continues beyond the current screen-1 terminal invariant,
+  including later wall-core variants once native timing/death drift is closed
 - indoor electrocution only happens before room clear
 - precise original projectile physics, remaining generator variants, and
   room-clear variants are native, not forced
-- original-vs-native checkpoints for level 2 boss-room gameplay rather than
-  native-only boss-room behavior tests
+- original-vs-native checkpoints for level 2 boss-room combat and boss defeat
+  rather than native-only boss-room behavior tests
 
 Equivalence gates:
 
-- expand the deterministic original-ROM Mesen runner to level 2 room-chain and
-  additional input streams
+- expand the deterministic original-ROM Mesen runner to additional input streams
+  beyond attract/demo and the seeded level 2 room-chain
 - make native-vs-original checkpoint comparison a required gate once intentional
   timing/state differences are closed
 - compare PPU-facing state before comparing full framebuffer output

@@ -77,12 +77,6 @@ static bool parse_row(const char *line, TraceRow *row)
 
 static bool is_attract_row(const TraceRow *row)
 {
-    /* Original-ROM terminal demo timing is exported as a drift target, not a passing native equivalence gate yet. */
-    if (strcmp(row->name, "level2-demo-finished") == 0)
-    {
-        return false;
-    }
-
     return (strcmp(row->scenario, "attract_level1_demo") == 0) ||
         (strcmp(row->scenario, "attract_level2_demo") == 0);
 }
