@@ -8709,6 +8709,128 @@ static void contra_rom_soldier_routine_01(ContraCore *core, uint8_t x)
     contra_rom_set_enemy_delay_adv_routine(core, x, 0x10u); /* -> routine_02 (walk) */
 }
 
+/* update_enemy_x_pos / update_enemy_y_pos (bank7.asm:7736-): apply the 16-bit
+   fixed-point velocity (FAST.FRACT via the accumulator) to the position. */
+static void contra_rom_update_enemy_x_pos(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint16_t accum =
+        (uint16_t)ram[CONTRA_RAM_ENEMY_X_VEL_ACCUM + x] + ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x];
+
+    ram[CONTRA_RAM_ENEMY_X_VEL_ACCUM + x] = (uint8_t)accum;
+    ram[CONTRA_RAM_ENEMY_X_POS + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] +
+        ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] + (uint8_t)(accum >> 8u));
+}
+
+static void contra_rom_update_enemy_y_pos(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint16_t accum =
+        (uint16_t)ram[CONTRA_RAM_ENEMY_Y_VEL_ACCUM + x] + ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x];
+
+    ram[CONTRA_RAM_ENEMY_Y_VEL_ACCUM + x] = (uint8_t)accum;
+    ram[CONTRA_RAM_ENEMY_Y_POS + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] +
+        ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] + (uint8_t)(accum >> 8u));
+}
+
+/* update_enemy_pos (bank7.asm:7736), horizontal: apply X velocity then subtract
+   the frame scroll; apply Y velocity; remove if off the left/bottom edge. */
+static void contra_rom_update_enemy_pos(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_update_enemy_x_pos(core, x);
+    ram[CONTRA_RAM_ENEMY_X_POS + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] - ram[CONTRA_RAM_FRAME_SCROLL]);
+    if (ram[CONTRA_RAM_ENEMY_X_POS + x] < 0x08u)
+    {
+        contra_rom_clear_enemy(core, x);
+        return;
+    }
+    contra_rom_update_enemy_y_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_Y_POS + x] >= 0xE8u)
+    {
+        contra_rom_clear_enemy(core, x);
+    }
+}
+
+/* add_a_y_to_enemy_pos_get_bg_collision (bank7.asm:8692): bg collision at
+   (ENEMY_X_POS + a, ENEMY_Y_POS + y_off), positions unchanged. */
+static uint8_t contra_rom_add_a_y_to_enemy_pos_get_bg_collision(
+    const ContraCore *core, uint8_t x, uint8_t a, uint8_t y_off)
+{
+    const uint8_t ex = (uint8_t)(core->ram[CONTRA_RAM_ENEMY_X_POS + x] + a);
+    const uint8_t ey = (uint8_t)(core->ram[CONTRA_RAM_ENEMY_Y_POS + x] + y_off);
+
+    return contra_get_outdoor_horizontal_bg_collision(core, ex, ey);
+}
+
+/* set_soldier_sprite (bank0.asm:1709): sprite code from ENEMY_FRAME, flip when
+   running left, recoil bit while firing. */
+static const uint8_t contra_soldier_sprite_codes[12] = {
+    0x3Bu, 0x3Cu, 0x3Du, 0x3Fu, 0x3Cu, 0x3Eu, 0x40u, 0x26u, 0x73u, 0x18u, 0x28u, 0x27u};
+static void contra_rom_set_soldier_sprite(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t frame = ram[CONTRA_RAM_ENEMY_FRAME + x];
+    uint8_t attr;
+
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = contra_soldier_sprite_codes[(frame < 12u) ? frame : 0u];
+    attr = (ram[CONTRA_RAM_ENEMY_VAR_2 + x] == 0u) ? 0x40u : 0x00u;
+    if (ram[CONTRA_RAM_ENEMY_VAR_1 + x] != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] - 1u);
+        attr = (uint8_t)(attr | 0x08u);
+    }
+    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = attr;
+}
+
+/* soldier_change_direction (bank0.asm): flip direction, reset X velocity. */
+static void contra_rom_soldier_change_direction(ContraCore *core, uint8_t x)
+{
+    core->ram[CONTRA_RAM_ENEMY_VAR_4 + x] = (uint8_t)(core->ram[CONTRA_RAM_ENEMY_VAR_4 + x] + 1u);
+    core->ram[CONTRA_RAM_ENEMY_VAR_2 + x] = (uint8_t)(core->ram[CONTRA_RAM_ENEMY_VAR_2 + x] ^ 0x01u);
+    contra_rom_soldier_set_x_velocity(core, x);
+}
+
+/* soldier_routine_02 (bank0.asm:1323): walk. Animate the run cycle, step in the
+   facing direction (velocity + scroll), and turn around at an edge.
+   DEFERRED (clearly not yet faithful): the RNG-driven jump-off-ledge (uses the
+   busy-loop RANDOM_NUM, unreproducible) and firing (routine_03); at an edge the
+   soldier simply turns instead of jumping for now. */
+static void contra_rom_soldier_routine_02(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t code;
+
+    if (ram[CONTRA_RAM_ENEMY_VAR_3 + x] != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_VAR_3 + x] = 0u; /* TODO: port the jump arc */
+    }
+
+    /* @continue_walk_routine: advance the 6-frame run animation every 8 ticks */
+    ram[CONTRA_RAM_ENEMY_VAR_A + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_A + x] + 1u);
+    if ((ram[CONTRA_RAM_ENEMY_VAR_A + x] & 0x07u) == 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+        if (ram[CONTRA_RAM_ENEMY_FRAME + x] >= 0x06u)
+        {
+            ram[CONTRA_RAM_ENEMY_FRAME + x] = 0u;
+        }
+    }
+
+    /* @soldier_move: is there ground one step ahead and #$10 below? */
+    code = contra_rom_add_a_y_to_enemy_pos_get_bg_collision(
+        core, x, ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x], 0x10u);
+    if ((code != 0x80u) && (code != 0x01u))
+    {
+        contra_rom_soldier_change_direction(core, x); /* edge: turn (jump deferred) */
+    }
+
+    contra_rom_set_soldier_sprite(core, x);
+    contra_rom_update_enemy_pos(core, x);
+}
+
 /* dispatch one enemy slot to its type routine by (ENEMY_TYPE, ENEMY_ROUTINE).
    Only ported types act; others hold until their routine is ported. */
 static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
@@ -8723,7 +8845,8 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
             {
                 case 0x01u: contra_rom_soldier_routine_00(core, x); break;
                 case 0x02u: contra_rom_soldier_routine_01(core, x); break;
-                default: break; /* walk/fire/hit routines not yet ported */
+                case 0x03u: contra_rom_soldier_routine_02(core, x); break;
+                default: break; /* fire/hit routines not yet ported */
             }
             break;
         case 0x02u: /* pill box / weapon box */
