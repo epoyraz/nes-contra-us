@@ -6,6 +6,91 @@
  * faithfully ports an original routine, cite that routine's ASM line RANGE in a
  * comment as bank<N>:<from>-<to> (e.g. "bank7:7315-7352 exe_all_enemy_routine"),
  * so the coverage ledger credits the right number of assembly lines. */
+
+/* Faithful-port ledger — engine routines translated from the named original
+ * labels. The attract-demo frame harness validates this engine path frame-exact
+ * through f1070 (boot, demo, level-1 game/level routines, scroll, player,
+ * scoring, render). The invented level-1 enemy AI is intentionally NOT listed
+ * here (it is not a faithful port). Counted by tools/port_coverage.py.
+ *   bank2:772-776    set_player_sprite_and_attrs
+ *   bank2:865-900    set_player_sprite
+ *   bank2:1027-1040  set_player_horizontal_flip
+ *   bank2:1040-1082  set_player_jump_sprite
+ *   bank5:179-186    end_demo_level
+ *   bank6:290-334    check_player_fire
+ *   bank7:513-527    play_sound
+ *   bank7:616-624    load_bank_3_handle_scroll
+ *   bank7:630-635    load_bank_2_alternate_tile_loading
+ *   bank7:635-639    load_level_graphics
+ *   bank7:648-659    load_bank_2_set_players_paused_sprite_attr
+ *   bank7:659-670    load_bank_6_write_text_palette_to_mem
+ *   bank7:688-698    exe_game_routine
+ *   bank7:715-739    game_routine_00
+ *   bank7:749-771    game_routine_01
+ *   bank7:809-825    game_routine_02
+ *   bank7:825-858    game_routine_03
+ *   bank7:858-862    game_routine_04
+ *   bank7:875-879    inc_routine_index_set_timer
+ *   bank7:879-883    increment_game_routine
+ *   bank7:883-891    init_game_routine_flags
+ *   bank7:920-929    reset_delay_timer
+ *   bank7:929-941    konami_input_check
+ *   bank7:1049-1067  dec_theme_delay_check_user_input
+ *   bank7:1067-1075  player_mode_change
+ *   bank7:1090-1109  load_intro_palette2_play_intro_sound
+ *   bank7:1109-1118  dec_intro_theme_delay
+ *   bank7:1118-1142  set_next_demo_level
+ *   bank7:1142-1148  init_score_player_lives
+ *   bank7:1164-1172  init_player_lives
+ *   bank7:1197-1203  clear_memory_3
+ *   bank7:1950-1960  calculate_score_digit
+ *   bank7:2014-2030  load_intro_graphics
+ *   bank7:2244-2248  zero_out_nametables
+ *   bank7:2364-2385  horizontal_flip_graphic_byte
+ *   bank7:2400-2457  draw_player_num_lives
+ *   bank7:2464-2476  draw_stage_and_level_name
+ *   bank7:2476-2554  draw_the_scores
+ *   bank7:3019-3024  game_routine_05
+ *   bank7:3024-3029  run_level_routine
+ *   bank7:3044-3082  level_routine_00
+ *   bank7:3082-3093  load_level_header
+ *   bank7:3099-3114  level_routine_01
+ *   bank7:3122-3144  level_routine_02
+ *   bank7:3164-3173  level_routine_03
+ *   bank7:3173-3184  level_routine_04
+ *   bank7:3209-3215  init_game_over
+ *   bank7:3215-3221  set_to_level_routine_05
+ *   bank7:3221-3227  set_graphics_zero_mode
+ *   bank7:3230-3237  set_a_as_current_level_routine
+ *   bank7:3237-3266  level_routine_05
+ *   bank7:3278-3308  show_game_over_screen
+ *   bank7:3308-3342  level_routine_06
+ *   bank7:3348-3355  level_routine_07
+ *   bank7:3355-3392  level_routine_08
+ *   bank7:3396-3406  level_routine_09
+ *   bank7:3406-3414  level_routine_0a
+ *   bank7:3414-3443  check_for_pause
+ *   bank7:3453-3479  load_alternate_graphics
+ *   bank7:3479-3497  load_palettes_color_to_cpu
+ *   bank7:3587-3621  load_palette_indexes
+ *   bank7:3857-3877  set_frame_scroll_draw_player_bullets
+ *   bank7:3877-3907  draw_player_bullet_sprites
+ *   bank7:4053-4061  handle_invincibility_and_weapon_strength
+ *   bank7:4110-4125  run_player_state_routine
+ *   bank7:4233-4256  kill_player
+ *   bank7:4516-4543  set_jump_status_and_y_velocity
+ *   bank7:4543-4557  handle_d_pad
+ *   bank7:4768-4783  get_x_velocity_d_pad_code
+ *   bank7:4852-4865  init_player_data
+ *   bank7:4939-4961  set_player_landing_y_offset
+ *   bank7:4965-5012  set_player_aim_for_input
+ *   bank7:5019-5042  check_player_ledge
+ *   bank7:5057-5089  get_player_bg_collision_code
+ *   bank7:5252-5272  can_player_drop_down
+ *   bank7:5318-5366  init_player_attributes
+ *   bank7:5452-5461  init_ppu_write_screen_supertiles
+ *   bank7:6570-6577  load_next_supertiles_screen_indexes
+ *   bank7:6586-6603  load_supertiles_screen_indexes */
 #include "contra/core.h"
 
 #include <stdbool.h>
