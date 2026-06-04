@@ -9128,6 +9128,69 @@ static void contra_rom_begin_enemy_explosion(ContraCore *core, uint8_t x)
     ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = 0x00u;
 }
 
+/* --- boss bomb turret (enemy type 0x10), bank0.asm --- */
+/* super-tile per (recoil state VAR_1: 0 idle / 2 firing) and background variant
+   (attr bit0: wall vs jungle), interleaved. */
+static const uint8_t contra_boss_bomb_turret_supertile_tbl[6] = {
+    0x29u, 0x26u, 0x2Au, 0x27u, 0x2Bu, 0x28u};
+static const uint8_t contra_boss_bomb_turret_bomb_velocity_tbl[4] = {0x01u, 0x03u, 0x05u, 0x07u};
+
+static void contra_rom_draw_boss_bomb_turret(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t idx = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
+    int draw_x = (int)ram[CONTRA_RAM_ENEMY_X_POS + x];
+
+    if ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x01u) != 0u)
+    {
+        idx = (uint8_t)(idx + 1u); /* jungle background variant */
+        draw_x -= 8;               /* jungle super-tile sits 8px left of the enemy */
+    }
+    contra_render_level_1_nametable_update_supertile(
+        core, draw_x, (int)ram[CONTRA_RAM_ENEMY_Y_POS + x],
+        contra_boss_bomb_turret_supertile_tbl[(idx < 6u) ? idx : 0u]);
+}
+
+/* boss_bomb_turret_routine_00/01 (bank0): after a startup delay, alternate
+   idle/recoil super-tiles and lob a bomb (a regular type-0 enemy bullet at a
+   fixed up-left angle with a random speed) on each firing beat. */
+static void contra_rom_boss_bomb_turret_routine_00(ContraCore *core, uint8_t x)
+{
+    core->ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x20u;
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+static void contra_rom_boss_bomb_turret_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t was_firing;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] != 0u)
+    {
+        return;
+    }
+    contra_rom_draw_boss_bomb_turret(core, x);
+    was_firing = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = (was_firing == 0u) ? 0x28u : 0x08u;
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)(was_firing ^ 0x02u);
+    if (ram[CONTRA_RAM_ENEMY_VAR_1 + x] == 0u)
+    {
+        return; /* recoil frame only, no bomb */
+    }
+    (void)contra_rom_create_enemy_bullet(
+        core, 0u, 0x17u, 0x01u,
+        contra_boss_bomb_turret_bomb_velocity_tbl[ram[CONTRA_RAM_RANDOM_NUM] & 0x03u],
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] + 0xF8u),
+        ram[CONTRA_RAM_ENEMY_Y_POS + x]);
+}
+
 /* --- red turret (enemy type 0x07), bank0.asm:973 --- */
 /* red_turret_supertile_1_tbl flows into _2_tbl (11 bytes): emerge frames 0..3
    then the rotation/active frames. */
@@ -9230,6 +9293,14 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
 
     switch (type)
     {
+        case 0x10u: /* boss wall bomb turret */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_boss_bomb_turret_routine_00(core, x); break;
+                case 0x02u: contra_rom_boss_bomb_turret_routine_01(core, x); break;
+                default: break; /* explosion handled via the kill path */
+            }
+            break;
         case 0x07u: /* red turret */
             switch (routine)
             {
