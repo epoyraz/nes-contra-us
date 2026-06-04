@@ -9152,10 +9152,91 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
     }
 }
 
+/* Player collision boxes vs an enemy, by player state: jumping (box 01) and
+   standing (box 02), bank7.asm:7240/7259. Water (00) and crouching (03) fall
+   back to standing for now. */
+static const uint8_t contra_collision_box_codes_01[15][4] = {
+    {0xEAu, 0xF8u, 0x1Eu, 0x10u}, {0xF6u, 0xFAu, 0x0Cu, 0x0Cu},
+    {0xF1u, 0xF5u, 0x12u, 0x16u}, {0xEAu, 0xEEu, 0x24u, 0x24u},
+    {0xE0u, 0xF0u, 0x08u, 0x20u}, {0xF5u, 0xF9u, 0x0Eu, 0x0Eu},
+    {0xEDu, 0xF8u, 0x1Eu, 0x10u}, {0xDFu, 0xE3u, 0x3Au, 0x3Au},
+    {0xE9u, 0xE3u, 0x26u, 0x3Au}, {0xDCu, 0xD4u, 0x46u, 0x58u},
+    {0xF8u, 0xF7u, 0x14u, 0x14u}, {0x00u, 0xF2u, 0x10u, 0x1Cu},
+    {0xEDu, 0xF2u, 0x1Eu, 0x1Cu}, {0xE2u, 0xEDu, 0x35u, 0x26u},
+    {0xF3u, 0xF1u, 0x12u, 0x1Eu}};
+static const uint8_t contra_collision_box_codes_02[15][4] = {
+    {0xF4u, 0xF1u, 0x0Du, 0x1Eu}, {0xF3u, 0xF4u, 0x04u, 0x18u},
+    {0xECu, 0xEDu, 0x10u, 0x26u}, {0xE6u, 0xE7u, 0x1Cu, 0x32u},
+    {0xE0u, 0xF0u, 0x08u, 0x20u}, {0xF1u, 0xF2u, 0x06u, 0x1Cu},
+    {0xE9u, 0xF1u, 0x16u, 0x1Eu}, {0xDBu, 0xDCu, 0x32u, 0x48u},
+    {0xE5u, 0xDCu, 0x1Eu, 0x48u}, {0xD8u, 0xCDu, 0x3Eu, 0x66u},
+    {0xF4u, 0xF0u, 0x19u, 0x22u}, {0xFCu, 0xEBu, 0x08u, 0x2Au},
+    {0xE3u, 0xF2u, 0x1Au, 0x1Cu}, {0xDEu, 0xE6u, 0x2Du, 0x34u},
+    {0xE9u, 0xEAu, 0x0Du, 0x2Cu}};
+
+/* check_players_collision (bank7.asm:6671), outdoor focus: if a normal-state
+   player's body overlaps this enemy's collision box, kill the player (barrier
+   invincibility destroys the enemy instead; new-life invincibility passes
+   through). DEFERRED: water/crouch boxes (use standing), landing on rideable
+   enemies, and weapon-item pickup. */
+static void contra_rom_check_players_collision(ContraCore *core, uint8_t slot)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t code = (uint8_t)(ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + slot] & 0x0Fu);
+    int player;
+
+    if (code >= 15u)
+    {
+        return;
+    }
+    for (player = 1; player >= 0; --player)
+    {
+        const unsigned p = (unsigned)player;
+        const uint8_t (*tbl)[4];
+        const uint8_t *box;
+        uint8_t box_y;
+        uint8_t box_x;
+
+        if (ram[CONTRA_RAM_PLAYER_STATE + p] != 0x01u)
+        {
+            continue;
+        }
+        tbl = (ram[CONTRA_RAM_PLAYER_JUMP_STATUS + p] != 0u)
+            ? contra_collision_box_codes_01 : contra_collision_box_codes_02;
+        box = tbl[code];
+        box_y = (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + slot] + box[0]);
+        box_x = (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + slot] + box[1]);
+        if ((uint8_t)(ram[CONTRA_RAM_SPRITE_Y_POS + p] - box_y) >= box[2])
+        {
+            continue;
+        }
+        if ((uint8_t)(ram[CONTRA_RAM_SPRITE_X_POS + p] - box_x) >= box[3])
+        {
+            continue; /* outside the box */
+        }
+        /* overlap */
+        if (ram[CONTRA_RAM_NEW_LIFE_INVINCIBILITY_TIMER + p] != 0u)
+        {
+            continue; /* invincible just after respawn -- walk through */
+        }
+        if (ram[CONTRA_RAM_INVINCIBILITY_TIMER + p] != 0u)
+        {
+            const uint8_t hp = ram[CONTRA_RAM_ENEMY_HP + slot];
+
+            if ((hp != 0u) && (hp < 0xF0u))
+            {
+                contra_rom_begin_enemy_explosion(core, slot); /* barrier: destroy enemy */
+            }
+            continue;
+        }
+        contra_kill_player(core, (uint8_t)p);
+    }
+}
+
 /* exe_all_enemy_routine (bank7.asm:7315): run every active enemy's routine, then
-   test bullet collision against it (the ROM also tests player-body collision via
-   check_players_collision -- deferred). Active = ENEMY_SPRITES set and
-   ENEMY_STATE_WIDTH bit 7 (the inactive bit) clear. */
+   test player-body and player-bullet collision against it, gated like the ROM
+   dispatcher (ENEMY_SPRITES set; body collision when STATE_WIDTH bit 0 clear;
+   bullet collision when bit 7 clear). */
 static void contra_rom_exe_all_enemy_routine(ContraCore *core)
 {
     int slot;
@@ -9169,9 +9250,17 @@ static void contra_rom_exe_all_enemy_routine(ContraCore *core)
             continue;
         }
         contra_rom_exe_enemy_type(core, sx);
+        if ((core->ram[CONTRA_RAM_ENEMY_ROUTINE + sx] == 0u) ||
+            (core->ram[CONTRA_RAM_ENEMY_SPRITES + sx] == 0u))
+        {
+            continue;
+        }
+        if ((core->ram[CONTRA_RAM_ENEMY_STATE_WIDTH + sx] & 0x01u) == 0u)
+        {
+            contra_rom_check_players_collision(core, sx);
+        }
         if ((core->ram[CONTRA_RAM_ENEMY_ROUTINE + sx] != 0u) &&
-            (core->ram[CONTRA_RAM_ENEMY_SPRITES + sx] != 0u) &&
-            ((core->ram[CONTRA_RAM_ENEMY_STATE_WIDTH + sx] & 0x80u) == 0u))
+            (core->ram[CONTRA_RAM_ENEMY_STATE_WIDTH + sx] & 0x80u) == 0u)
         {
             contra_rom_bullet_enemy_collision_test(core, sx);
         }
