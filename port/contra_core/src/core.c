@@ -7956,10 +7956,250 @@ static void contra_set_frame_scroll_draw_player_bullets(ContraCore *core)
     contra_draw_player_bullet_sprites(core);
 }
 
+/* ---------------------------------------------------------------------------
+   Faithful real-RAM enemy system (work in progress).
+
+   This is the in-progress replacement for the invented core->enemies[] layer:
+   a direct port of the ROM's enemy spawn/dispatch onto the real ENEMY_* RAM
+   arrays, so the frame-exact harness can validate enemy state against the ROM.
+
+   It is built behind CONTRA_USE_ROM_ENEMY_SYSTEM (default 0) so each piece can
+   land and be reviewed without disturbing the working invented layer until the
+   replacement (spawn -> dispatch -> per-type routines -> render -> collision)
+   is complete and validated. Define it to 1 to exercise the new spawn.
+   --------------------------------------------------------------------------- */
+#ifndef CONTRA_USE_ROM_ENEMY_SYSTEM
+#define CONTRA_USE_ROM_ENEMY_SYSTEM 0
+#endif
+
+/* Level 1 scripted enemy data, faithful to level_1_enemy_screen_* (bank2.asm).
+   Triples: xx = x position, tt = (repeat << 6) | type, yy = (ypos & 0xF0) |
+   attrs; 0xFF terminates a screen. Screen 0x09's capsule has repeat=1, so it
+   carries an extra yy byte. */
+static const uint8_t contra_l1_enemy_screen_00[] = {
+    0x10u, 0x05u, 0x60u, 0x40u, 0x05u, 0x60u, 0x50u, 0x06u, 0xC0u,
+    0x60u, 0x02u, 0xA1u, 0x80u, 0x05u, 0x60u, 0xF0u, 0x03u, 0x40u, 0xFFu};
+static const uint8_t contra_l1_enemy_screen_01[] = {0x90u, 0x06u, 0xC0u, 0xFFu};
+static const uint8_t contra_l1_enemy_screen_02[] = {0x20u, 0x12u, 0x80u, 0xFFu};
+static const uint8_t contra_l1_enemy_screen_03[] = {0x40u, 0x12u, 0x80u, 0xFFu};
+static const uint8_t contra_l1_enemy_screen_04[] = {
+    0x00u, 0x04u, 0xA0u, 0x10u, 0x06u, 0x60u, 0x50u, 0x06u, 0x61u,
+    0x60u, 0x03u, 0x43u, 0xFFu};
+static const uint8_t contra_l1_enemy_screen_05[] = {
+    0x20u, 0x06u, 0x41u, 0x40u, 0x02u, 0xA2u, 0x80u, 0x04u, 0x80u, 0xFFu};
+static const uint8_t contra_l1_enemy_screen_06[] = {0x40u, 0x04u, 0x80u, 0xFFu};
+static const uint8_t contra_l1_enemy_screen_07[] = {
+    0x20u, 0x07u, 0xA0u, 0xA0u, 0x07u, 0x41u, 0xFFu};
+static const uint8_t contra_l1_enemy_screen_08[] = {
+    0x00u, 0x02u, 0xC3u, 0x50u, 0x06u, 0x80u, 0xFFu};
+static const uint8_t contra_l1_enemy_screen_09[] = {
+    0x10u, 0x43u, 0x40u, 0xB4u, 0xE0u, 0x07u, 0x81u, 0xFFu};
+static const uint8_t contra_l1_enemy_screen_0a[] = {0xC0u, 0x04u, 0xC0u, 0xFFu};
+static const uint8_t contra_l1_enemy_screen_0b[] = {
+    0x40u, 0x04u, 0xC3u, 0xA8u, 0x10u, 0x81u, 0xB1u, 0x11u, 0xB0u,
+    0xB4u, 0x06u, 0x52u, 0xC0u, 0x10u, 0x80u, 0xFFu};
+static const uint8_t contra_l1_enemy_screen_0c[] = {0xFFu};
+
+static const uint8_t *const contra_l1_enemy_screen_tbl[] = {
+    contra_l1_enemy_screen_00, contra_l1_enemy_screen_01, contra_l1_enemy_screen_02,
+    contra_l1_enemy_screen_03, contra_l1_enemy_screen_04, contra_l1_enemy_screen_05,
+    contra_l1_enemy_screen_06, contra_l1_enemy_screen_07, contra_l1_enemy_screen_08,
+    contra_l1_enemy_screen_09, contra_l1_enemy_screen_0a, contra_l1_enemy_screen_0b,
+    contra_l1_enemy_screen_0c};
+
+/* enemy_prop_00 (bank7.asm): 4 bytes/type — STATE_WIDTH, SCORE_COLLISION, HP,
+   VAR_A — indexed by ENEMY_TYPE. Level 1 (and shared types < 0x10) use this. */
+static const uint8_t contra_enemy_prop_00[][4] = {
+    {0x82u, 0x22u, 0x01u, 0x00u}, {0x80u, 0x00u, 0x01u, 0x00u},
+    {0x0Fu, 0x32u, 0xF0u, 0x00u}, {0x0Bu, 0x32u, 0x01u, 0x00u},
+    {0x8Fu, 0x22u, 0x08u, 0x00u}, {0x83u, 0x10u, 0x01u, 0x00u},
+    {0x83u, 0x30u, 0x01u, 0x00u}, {0x8Fu, 0x30u, 0x08u, 0x00u},
+    {0x0Fu, 0x52u, 0xF1u, 0x00u}, {0x00u, 0x00u, 0x01u, 0x00u},
+    {0x0Fu, 0x42u, 0xF0u, 0x00u}, {0x8Au, 0x05u, 0x01u, 0x00u},
+    {0x83u, 0x42u, 0x01u, 0x00u}, {0x00u, 0x00u, 0x01u, 0x00u},
+    {0x0Eu, 0x33u, 0x0Au, 0x00u}, {0x80u, 0x01u, 0x01u, 0x00u},
+    {0x0Fu, 0x42u, 0x10u, 0x00u}, {0x0Cu, 0x82u, 0x20u, 0x00u},
+    {0x89u, 0x00u, 0x01u, 0x00u}};
+
+/* find_next_enemy_slot (bank7.asm:9024): first free slot scanning 15->0, or -1. */
+static int contra_rom_find_next_enemy_slot(const ContraCore *core)
+{
+    int slot;
+
+    for (slot = 0x0F; slot >= 0; --slot)
+    {
+        if (core->ram[CONTRA_RAM_ENEMY_ROUTINE + (unsigned)slot] == 0u)
+        {
+            return slot;
+        }
+    }
+    return -1;
+}
+
+/* find_bullet_slot (bank7.asm:9037): first slot whose ENEMY_TYPE == 1, else 0. */
+static uint8_t contra_rom_find_bullet_slot(const ContraCore *core)
+{
+    int slot;
+
+    for (slot = 0x0F; slot >= 0; --slot)
+    {
+        if (core->ram[CONTRA_RAM_ENEMY_TYPE + (unsigned)slot] == 0x01u)
+        {
+            return (uint8_t)slot;
+        }
+    }
+    return 0u;
+}
+
+/* clear_enemy_pt_2..pt_4 (bank7.asm:9077): zero per-slot vars. ENEMY_TYPE/HP and
+   ROUTINE/SPRITES are handled by the caller (initialize_enemy). */
+static void contra_rom_clear_enemy_pt_2(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_Y_POS + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_X_POS + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_Y_VEL_ACCUM + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_X_VEL_ACCUM + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_VAR_A + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_VAR_3 + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_VAR_4 + x] = 0u;
+}
+
+/* initialize_enemy (bank7.asm:9109): set routine=1, sprite=1, clear vars, then
+   load props (width/score/HP/var_a) from enemy_prop_00 by ENEMY_TYPE. Level 1
+   uses enemy_prop_00 for both shared (<0x10) and level-specific types. */
+static void contra_rom_initialize_enemy(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t type = ram[CONTRA_RAM_ENEMY_TYPE + x];
+
+    ram[CONTRA_RAM_ENEMY_ROUTINE + x] = 0x01u;
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x01u;
+    contra_rom_clear_enemy_pt_2(core, x);
+
+    if (type < (sizeof(contra_enemy_prop_00) / sizeof(contra_enemy_prop_00[0])))
+    {
+        ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = contra_enemy_prop_00[type][0];
+        ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = contra_enemy_prop_00[type][1];
+        ram[CONTRA_RAM_ENEMY_HP + x] = contra_enemy_prop_00[type][2];
+        ram[CONTRA_RAM_ENEMY_VAR_A + x] = contra_enemy_prop_00[type][3];
+    }
+}
+
+/* load_screen_enemy_data (bank2.asm:1518), outdoor/horizontal level-1 path:
+   spawn scripted enemies as the screen scrolls to their x position. */
+static void contra_rom_load_screen_enemy_data(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t screen = ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER];
+    const uint8_t *data;
+    uint8_t y;
+    uint8_t x_raw;
+    uint8_t xpos;
+    uint8_t scroll;
+    uint8_t distance;
+    uint8_t type;
+    uint8_t repeat;
+
+    if (ram[CONTRA_RAM_CURRENT_LEVEL] != 0u)
+    {
+        return; /* level 1 only for now */
+    }
+    if (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u)
+    {
+        return; /* outdoor (horizontal) path only for now */
+    }
+    if (screen >= (sizeof(contra_l1_enemy_screen_tbl) / sizeof(contra_l1_enemy_screen_tbl[0])))
+    {
+        return;
+    }
+    data = contra_l1_enemy_screen_tbl[screen];
+
+    y = ram[CONTRA_RAM_ENEMY_SCREEN_READ_OFFSET];
+    x_raw = data[y];
+    if (x_raw == 0xFFu)
+    {
+        return; /* end of screen data */
+    }
+
+    xpos = (uint8_t)(x_raw & 0xFEu);
+    scroll = ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET];
+    if (xpos == scroll)
+    {
+        distance = 0u;
+    }
+    else if (xpos > scroll)
+    {
+        return; /* scroll hasn't reached this enemy's position yet */
+    }
+    else
+    {
+        distance = (uint8_t)((uint8_t)((uint8_t)(xpos - scroll) ^ 0xFFu) + 1u);
+    }
+
+    ++y;
+    type = (uint8_t)(data[y] & 0x3Fu);
+    repeat = (uint8_t)((data[y] >> 6) & 0x03u);
+
+    for (;;)
+    {
+        const uint8_t byte3 = data[(uint8_t)(y + 1u)];
+        int slot = contra_rom_find_next_enemy_slot(core);
+
+        ++y;
+        if (slot < 0)
+        {
+            /* no free slot: ROM only steals a bullet slot if the enemy x's low
+               bit is set; otherwise it skips placement for this repeat. */
+            if ((x_raw & 0x01u) != 0u)
+            {
+                slot = (int)contra_rom_find_bullet_slot(core);
+            }
+        }
+        if (slot >= 0)
+        {
+            const uint8_t sx = (uint8_t)slot;
+
+            ram[CONTRA_RAM_ENEMY_TYPE + sx] = type;
+            contra_rom_initialize_enemy(core, sx);
+            ram[CONTRA_RAM_ENEMY_ATTRIBUTES + sx] = (uint8_t)(byte3 & 0x0Fu);
+            ram[CONTRA_RAM_ENEMY_Y_POS + sx] = (uint8_t)(byte3 & 0xF0u);
+            ram[CONTRA_RAM_ENEMY_X_POS + sx] = (uint8_t)(0xF0u - distance);
+        }
+
+        if (repeat == 0u)
+        {
+            break;
+        }
+        --repeat;
+    }
+
+    ++y;
+    ram[CONTRA_RAM_ENEMY_SCREEN_READ_OFFSET] = y;
+}
+
 static void contra_run_level_enemy_logic(ContraCore *core)
 {
     contra_load_bank_3_handle_scroll(core);
     contra_load_bank_0_exe_all_enemy_routine(core);
+    if (CONTRA_USE_ROM_ENEMY_SYSTEM)
+    {
+        contra_rom_load_screen_enemy_data(core);
+    }
     contra_load_bank_2_load_screen_enemy_data(core);
     contra_load_bank_2_exe_soldier_generation(core);
 

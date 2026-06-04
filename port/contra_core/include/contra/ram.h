@@ -195,6 +195,7 @@ enum ContraRamOffset
     /* Enemy object arrays (16 slots each), faithful to src/ram.asm. Enemies
        share the sprite-object RAM region; these are the real addresses the ROM
        enemy routines read/write, so the frame-exact harness can validate them. */
+    CONTRA_RAM_ENEMY_SPRITES = 0x30Au,
     CONTRA_RAM_ENEMY_Y_POS = 0x324u,
     CONTRA_RAM_ENEMY_X_POS = 0x33Eu,
     CONTRA_RAM_ENEMY_SPRITE_ATTR = 0x358u,
