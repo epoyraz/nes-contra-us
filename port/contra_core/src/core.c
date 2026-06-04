@@ -9029,18 +9029,103 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
     }
 }
 
-/* exe_all_enemy_routine (bank7.asm:7315): run every active enemy's routine.
-   Collision checks (check_players_collision / bullet_enemy_collision_test) are
-   not ported yet — added with the collision chunk. */
+/* collision_box_codes_04 (bank7.asm:7297): the bullet-vs-enemy hitbox per enemy
+   collision code (4 bytes: y offset, x offset, height, width). */
+static const uint8_t contra_collision_box_codes_04[15][4] = {
+    {0xEEu, 0xF5u, 0x24u, 0x16u}, {0xFCu, 0xFCu, 0x08u, 0x08u},
+    {0xF5u, 0xF5u, 0x16u, 0x16u}, {0xEFu, 0xEFu, 0x22u, 0x22u},
+    {0xE0u, 0xF0u, 0x08u, 0x20u}, {0xFAu, 0xFAu, 0x0Cu, 0x0Cu},
+    {0xF3u, 0xFAu, 0x16u, 0x0Cu}, {0xE4u, 0xE4u, 0x38u, 0x38u},
+    {0xEEu, 0xE4u, 0x24u, 0x38u}, {0xE1u, 0xD5u, 0x44u, 0x56u},
+    {0xFDu, 0xF8u, 0x12u, 0x12u}, {0x05u, 0xF3u, 0x0Eu, 0x1Au},
+    {0xF3u, 0xF3u, 0x1Au, 0x1Au}, {0xE7u, 0xEEu, 0x33u, 0x24u},
+    {0xF2u, 0xF2u, 0x13u, 0x1Cu}};
+
+/* bullet_enemy_collision_test (bank7.asm:6928) + set_enemy_collision_box +
+   bullet_collision_logic, outdoor path: test each live player bullet against the
+   enemy's bullet hitbox; on a hit subtract HP (HP >= 0xF0 is invulnerable, e.g.
+   the open pill box) and remove the enemy when HP reaches 0.
+   DEFERRED: score award, explosion animation (enemy is removed on death for
+   now), and laser pass-through (the bullet is consumed on any hit). */
+static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slot)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t code = (uint8_t)(ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + slot] & 0x0Fu);
+    const uint8_t *box;
+    uint8_t box_y;
+    uint8_t box_x;
+    int bullet;
+
+    if (code >= 15u)
+    {
+        return; /* collision code 0x0F (fire beams / spiked walls) not used in level 1 */
+    }
+    box = contra_collision_box_codes_04[code];
+    box_y = (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + slot] + box[0]);
+    box_x = (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + slot] + box[1]);
+
+    for (bullet = 0x0F; bullet >= 0; --bullet)
+    {
+        const unsigned b = (unsigned)bullet;
+        uint8_t diff;
+        uint8_t hp;
+
+        if ((ram[CONTRA_RAM_PLAYER_BULLET_SPRITE_CODE + b] == 0u) ||
+            (ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE + b] != 0x01u))
+        {
+            continue;
+        }
+        /* outdoor box test (the ROM enters with carry clear -> the -1 borrow) */
+        diff = (uint8_t)(ram[CONTRA_RAM_PLAYER_BULLET_Y_POS + b] - box_y - 1u);
+        if (diff >= box[2])
+        {
+            continue;
+        }
+        diff = (uint8_t)(ram[CONTRA_RAM_PLAYER_BULLET_X_POS + b] - box_x - 1u);
+        if (diff >= box[3])
+        {
+            continue;
+        }
+
+        /* hit */
+        hp = ram[CONTRA_RAM_ENEMY_HP + slot];
+        ram[CONTRA_RAM_PLAYER_BULLET_SPRITE_CODE + b] = 0u; /* consume bullet */
+        if ((hp == 0u) || (hp >= 0xF0u))
+        {
+            continue; /* already dead, or invulnerable this frame */
+        }
+        hp = (uint8_t)(hp - 1u);
+        ram[CONTRA_RAM_ENEMY_HP + slot] = hp;
+        if (hp == 0u)
+        {
+            contra_rom_clear_enemy(core, slot);
+            return;
+        }
+    }
+}
+
+/* exe_all_enemy_routine (bank7.asm:7315): run every active enemy's routine, then
+   test bullet collision against it (the ROM also tests player-body collision via
+   check_players_collision -- deferred). Active = ENEMY_SPRITES set and
+   ENEMY_STATE_WIDTH bit 7 (the inactive bit) clear. */
 static void contra_rom_exe_all_enemy_routine(ContraCore *core)
 {
     int slot;
 
     for (slot = 0x0F; slot >= 0; --slot)
     {
-        if (core->ram[CONTRA_RAM_ENEMY_ROUTINE + (unsigned)slot] != 0u)
+        const uint8_t sx = (uint8_t)slot;
+
+        if (core->ram[CONTRA_RAM_ENEMY_ROUTINE + sx] == 0u)
         {
-            contra_rom_exe_enemy_type(core, (uint8_t)slot);
+            continue;
+        }
+        contra_rom_exe_enemy_type(core, sx);
+        if ((core->ram[CONTRA_RAM_ENEMY_ROUTINE + sx] != 0u) &&
+            (core->ram[CONTRA_RAM_ENEMY_SPRITES + sx] != 0u) &&
+            ((core->ram[CONTRA_RAM_ENEMY_STATE_WIDTH + sx] & 0x80u) == 0u))
+        {
+            contra_rom_bullet_enemy_collision_test(core, sx);
         }
     }
 }
