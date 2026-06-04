@@ -110,6 +110,10 @@ The native behavior tests currently cover:
 - level 1 native enemy-screen data loading and enemy activation while scrolling
 - level 1 bullet collision turning a defeated enemy into an explosion actor
 - level 1 weapon item pickup changes weapon RAM, weapon strength, and bullet type
+- broad public-step matrix for machine gun, flame, spray, and laser player
+  bullet families, water sprite transitions, alternate graphics streaming,
+  continue/end selection, exhausted-continue game-over, and game-completion
+  transition coverage
 - level 1 bridge destruction reaches the native broken-overlay state, and a
   ROM-loaded bridge actor changes player collision through the normal step loop
 - level 1 forced boss-defeated path exercises end-level subroutine states and
@@ -164,18 +168,21 @@ The native behavior tests currently cover:
   consume more than one life before the original-ROM terminal window and exits
   with the screen-1 wall core still uncleared
 - seeded original-ROM and native level 2 room-chain checkpoints for first room,
-  screen-1 advance, screen-4 advance, and boss-room entry, compared
-  semantically with documented relative-frame and player-position tolerances
+  screen-1 advance, screen-4 advance, boss-room entry, and the boss-defeated
+  level-routine transition, compared semantically with documented relative-frame
+  and player-position tolerances
+- broad public-step matrices for level 1 weapon families, enemy-state dispatch,
+  pause/title/game-over UI, water/drop-down player states, and level end flow
 
 These are not enough to claim full level 1 or level 2 parity. They are the first
 CI-style gates for the areas we are actively stabilizing.
 
 Most recent coverage run for `port/contra_core/src/core.c`:
 
-- lines executed: 80.70% of 4058
-- branches executed: 86.27% of 2214
-- branches taken at least once: 69.69% of 2214
-- calls executed: 78.74% of 508
+- lines executed: 91.23% of 4058
+- branches executed: 94.31% of 2214
+- branches taken at least once: 78.82% of 2214
+- calls executed: 94.49% of 508
 
 ## Required Next Gates
 
@@ -194,8 +201,8 @@ Level 2 high-confidence gates:
 - indoor electrocution only happens before room clear
 - precise original projectile physics, remaining generator variants, and
   room-clear variants are native, not forced
-- original-vs-native checkpoints for level 2 boss-room combat and boss defeat
-  rather than native-only boss-room behavior tests
+- original-vs-native checkpoints for projectile-accurate level 2 boss-room combat
+  rather than only the controlled boss-defeated flag transition
 
 Equivalence gates:
 

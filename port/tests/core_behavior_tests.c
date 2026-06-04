@@ -21,6 +21,11 @@ typedef struct TestCase
     bool (*run)(void);
 } TestCase;
 
+enum
+{
+    TEST_PLAYER_BULLET_COUNT = 16u
+};
+
 static void step_with_input(ContraCore *core, uint8_t player_1_input)
 {
     ContraInputSnapshot input = {{0u, 0u}};
@@ -377,6 +382,94 @@ static bool shoot_enemy_until_removed_or_changed(ContraCore *core, uint8_t enemy
     }
 
     return count_active_enemy_type(core, enemy_type) < initial_count;
+}
+
+static void clear_player_bullets(ContraCore *core)
+{
+    size_t index;
+
+    for (index = 0u; index < TEST_PLAYER_BULLET_COUNT; ++index)
+    {
+        core->ram[CONTRA_RAM_PLAYER_BULLET_SLOT + index] = 0x00u;
+        core->ram[CONTRA_RAM_PLAYER_BULLET_SPRITE_CODE + index] = 0x00u;
+        core->ram[CONTRA_RAM_PLAYER_BULLET_SPRITE_ATTR + index] = 0x00u;
+        core->ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE + index] = 0x00u;
+        core->ram[CONTRA_RAM_PLAYER_BULLET_OWNER + index] = 0x00u;
+        core->ram[CONTRA_RAM_PLAYER_BULLET_TIMER + index] = 0x00u;
+        core->ram[CONTRA_RAM_PLAYER_BULLET_DIST + index] = 0x00u;
+    }
+}
+
+static unsigned count_player_bullets_with_slot(const ContraCore *core, uint8_t slot)
+{
+    unsigned count = 0u;
+    size_t index;
+
+    for (index = 0u; index < TEST_PLAYER_BULLET_COUNT; ++index)
+    {
+        if ((core->ram[CONTRA_RAM_PLAYER_BULLET_SLOT + index] & 0x0Fu) == slot)
+        {
+            ++count;
+        }
+    }
+
+    return count;
+}
+
+static void prepare_level1_weapon_state(ContraCore *core)
+{
+    clear_player_bullets(core);
+    memset(core->enemy_projectiles, 0, sizeof(core->enemy_projectiles));
+    core->ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
+    core->ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x04u;
+    core->ram[CONTRA_RAM_CURRENT_LEVEL] = 0x00u;
+    core->ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] = 0x00u;
+    core->ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] = 0x00u;
+    core->ram[CONTRA_RAM_P1_GAME_OVER_STATUS] = 0x00u;
+    core->ram[CONTRA_RAM_P2_GAME_OVER_STATUS] = 0x01u;
+    core->ram[CONTRA_RAM_PLAYER_STATE] = 0x01u;
+    core->ram[CONTRA_RAM_PLAYER_HIDDEN] = 0x00u;
+    core->ram[CONTRA_RAM_PLAYER_JUMP_STATUS] = 0x00u;
+    core->ram[CONTRA_RAM_PLAYER_WATER_STATE] = 0x00u;
+    core->ram[CONTRA_RAM_ELECTROCUTED_TIMER] = 0x00u;
+    core->ram[CONTRA_RAM_NEW_LIFE_INVINCIBILITY_TIMER] = 0x80u;
+    core->ram[CONTRA_RAM_INVINCIBILITY_TIMER] = 0x80u;
+    core->ram[CONTRA_RAM_SPRITE_X_POS] = 0x80u;
+    core->ram[CONTRA_RAM_SPRITE_Y_POS] = 0x80u;
+    core->ram[CONTRA_RAM_PLAYER_AIM_DIR] = 0x02u;
+    core->ram[CONTRA_RAM_PLAYER_AIM_PREV_FRAME] = 0x02u;
+}
+
+static void prepare_level1_enemy_matrix_state(ContraCore *core)
+{
+    prepare_level1_weapon_state(core);
+    memset(core->enemies, 0, sizeof(core->enemies));
+    memset(core->enemy_projectiles, 0, sizeof(core->enemy_projectiles));
+    core->ram[CONTRA_RAM_NEW_LIFE_INVINCIBILITY_TIMER] = 0x00u;
+    core->ram[CONTRA_RAM_INVINCIBILITY_TIMER] = 0x80u;
+    core->ram[CONTRA_RAM_SPRITE_X_POS] = 0x80u;
+    core->ram[CONTRA_RAM_SPRITE_Y_POS] = 0x80u;
+}
+
+static ContraNativeEnemy *seed_enemy(
+    ContraCore *core,
+    size_t index,
+    uint8_t type,
+    uint8_t state,
+    int16_t x,
+    int16_t y
+)
+{
+    ContraNativeEnemy *const enemy = &core->enemies[index];
+
+    memset(enemy, 0, sizeof(*enemy));
+    enemy->active = 0x01u;
+    enemy->type = type;
+    enemy->state = state;
+    enemy->hp = 0x01u;
+    enemy->x = x;
+    enemy->y = y;
+    return enemy;
 }
 
 static bool test_title_start_reaches_level1_gameplay(void)
@@ -1425,6 +1518,429 @@ static bool test_level2_boss_room_wall_cannons_fire_projectiles(void)
     return true;
 }
 
+static bool test_broad_weapon_gameover_and_alt_graphics_matrix(void)
+{
+    ContraCore core;
+    uint32_t initial_pattern_hash;
+    bool laser_visible = false;
+    bool alt_graphics_finished = false;
+    unsigned frame;
+    size_t index;
+
+    contra_core_init(&core);
+    CHECK(run_until_gameplay(&core, 900u));
+
+    prepare_level1_weapon_state(&core);
+    core.ram[CONTRA_RAM_P1_CURRENT_WEAPON] = 0x01u;
+    for (frame = 0u; frame < 12u; ++frame)
+    {
+        step_with_input(&core, CONTRA_BUTTON_B);
+    }
+    CHECK(count_player_bullets_with_slot(&core, 0x02u) != 0u);
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_M_WEAPON_FIRE_TIME] != 0u);
+
+    prepare_level1_weapon_state(&core);
+    core.ram[CONTRA_RAM_P1_CURRENT_WEAPON] = 0x12u;
+    core.ram[CONTRA_RAM_PLAYER_AIM_DIR] = 0x02u;
+    step_with_input(&core, CONTRA_BUTTON_B);
+    CHECK(count_player_bullets_with_slot(&core, 0x03u) == 1u);
+    for (frame = 0u; frame < 4u; ++frame)
+    {
+        step_no_input(&core);
+    }
+    CHECK(core.ram[CONTRA_RAM_PLAYER_BULLET_TIMER] != 0u);
+
+    prepare_level1_weapon_state(&core);
+    core.ram[CONTRA_RAM_P1_CURRENT_WEAPON] = 0x02u;
+    core.ram[CONTRA_RAM_PLAYER_AIM_DIR] = 0x06u;
+    step_with_input(&core, CONTRA_BUTTON_B);
+    CHECK(count_player_bullets_with_slot(&core, 0x03u) == 1u);
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_BULLET_TIMER] != 0u);
+
+    prepare_level1_weapon_state(&core);
+    core.ram[CONTRA_RAM_P1_CURRENT_WEAPON] = 0x13u;
+    core.ram[CONTRA_RAM_PLAYER_AIM_DIR] = 0x02u;
+    step_with_input(&core, CONTRA_BUTTON_B);
+    CHECK(count_player_bullets_with_slot(&core, 0x04u) >= 5u);
+    for (frame = 0u; frame < 34u; ++frame)
+    {
+        step_no_input(&core);
+    }
+    CHECK(core.ram[CONTRA_RAM_PLAYER_BULLET_SPRITE_CODE] >= 0x20u);
+
+    prepare_level1_weapon_state(&core);
+    core.ram[CONTRA_RAM_P1_CURRENT_WEAPON] = 0x04u;
+    core.ram[CONTRA_RAM_PLAYER_AIM_DIR] = 0x02u;
+    step_with_input(&core, CONTRA_BUTTON_B);
+    CHECK(count_player_bullets_with_slot(&core, 0x05u) >= 2u);
+    for (frame = 0u; frame < 12u; ++frame)
+    {
+        step_no_input(&core);
+    }
+    for (index = 0u; index < TEST_PLAYER_BULLET_COUNT; ++index)
+    {
+        if (((core.ram[CONTRA_RAM_PLAYER_BULLET_SLOT + index] & 0x0Fu) == 0x05u) &&
+            (core.ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE + index] == 0x01u) &&
+            (core.ram[CONTRA_RAM_PLAYER_BULLET_SPRITE_CODE + index] != 0u))
+        {
+            laser_visible = true;
+        }
+    }
+    CHECK(laser_visible);
+    step_with_input(&core, CONTRA_BUTTON_B);
+    CHECK(count_player_bullets_with_slot(&core, 0x05u) >= 2u);
+
+    prepare_level1_weapon_state(&core);
+    core.ram[CONTRA_RAM_PLAYER_WATER_STATE] = 0x01u;
+    core.ram[CONTRA_RAM_PLAYER_AIM_DIR] = 0x06u;
+    step_no_input(&core);
+    CHECK((core.ram[CONTRA_RAM_PLAYER_WATER_STATE] & 0x80u) != 0u);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_WATER_TIMER] != 0u);
+
+    prepare_level1_weapon_state(&core);
+    core.ram[CONTRA_RAM_ALT_GRAPHIC_DATA_LOADING_FLAG] = 0x01u;
+    initial_pattern_hash = hash_bytes(core.ppu_pattern, sizeof(core.ppu_pattern));
+    for (frame = 0u; frame < 128u; ++frame)
+    {
+        step_no_input(&core);
+        if (core.ram[CONTRA_RAM_ALT_GRAPHIC_DATA_LOADING_FLAG] == 0x00u)
+        {
+            alt_graphics_finished = true;
+            break;
+        }
+    }
+    CHECK(alt_graphics_finished);
+    CHECK(hash_bytes(core.ppu_pattern, sizeof(core.ppu_pattern)) != initial_pattern_hash);
+
+    contra_core_init(&core);
+    core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
+    core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x05u;
+    core.ram[CONTRA_RAM_CURRENT_LEVEL] = 0x00u;
+    core.ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] = 0x00u;
+    core.ram[CONTRA_RAM_NUM_CONTINUES] = 0x01u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x06u);
+    CHECK(core.ram[CONTRA_RAM_NUM_CONTINUES] == 0x00u);
+    step_with_input(&core, CONTRA_BUTTON_SELECT);
+    CHECK(core.ram[CONTRA_RAM_CONT_END_SELECTION] == 0x01u);
+    step_with_input(&core, CONTRA_BUTTON_START);
+    CHECK(core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] == 0x00u);
+
+    contra_core_init(&core);
+    core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
+    core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x05u;
+    core.ram[CONTRA_RAM_CURRENT_LEVEL] = 0x00u;
+    core.ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] = 0x00u;
+    core.ram[CONTRA_RAM_NUM_CONTINUES] = 0x00u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x07u);
+    step_with_input(&core, CONTRA_BUTTON_START);
+    CHECK(core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] == 0x00u);
+
+    contra_core_init(&core);
+    core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
+    core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x05u;
+    core.ram[CONTRA_RAM_CURRENT_LEVEL] = 0x07u;
+    core.ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] = 0x01u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] == 0x06u);
+    CHECK(core.ram[CONTRA_RAM_CURRENT_LEVEL] == 0x09u);
+    return true;
+}
+
+static bool test_broad_enemy_pause_and_player_state_matrix(void)
+{
+    ContraCore core;
+    ContraNativeEnemy *enemy;
+    unsigned projectile_count;
+
+    contra_core_init(&core);
+    CHECK(run_until_gameplay(&core, 900u));
+
+    prepare_level1_enemy_matrix_state(&core);
+    enemy = seed_enemy(&core, 0u, 0x00u, 0x00u, 0xE8, 0x60);
+    enemy->attrs = 0x06u;
+    enemy->vx = 1;
+    enemy->vy = 1;
+    enemy->x_frac = 0x80u;
+    enemy = seed_enemy(&core, 1u, 0x02u, 0x00u, 0x40, 0x70);
+    enemy->timer = 0x00u;
+    enemy = seed_enemy(&core, 2u, 0x02u, 0x01u, 0x48, 0x70);
+    enemy->flags = 0x02u;
+    enemy = seed_enemy(&core, 3u, 0x03u, 0x00u, 0x130, 0x70);
+    enemy->origin_x = 0x80u;
+    enemy->origin_y = 0x70u;
+    enemy = seed_enemy(&core, 4u, 0x04u, 0x01u, 0x58, 0x70);
+    enemy->flags = 0x02u;
+    enemy = seed_enemy(&core, 5u, 0x04u, 0x02u, 0x70, 0x70);
+    enemy->cooldown = 0x00u;
+    seed_enemy(&core, 6u, 0x04u, 0x02u, 0x10, 0x70);
+    enemy = seed_enemy(&core, 7u, 0x05u, 0x02u, 0x20, 0x20);
+    enemy->attrs = 0x02u;
+    enemy->vx = 1;
+    seed_enemy(&core, 8u, 0x06u, 0x02u, 0x08, 0x70);
+    enemy = seed_enemy(&core, 9u, 0x07u, 0x01u, 0x50, 0x70);
+    enemy->flags = 0x03u;
+    enemy = seed_enemy(&core, 10u, 0x07u, 0x02u, 0x20, 0x70);
+    enemy->cooldown = 0x00u;
+    enemy = seed_enemy(&core, 11u, 0x07u, 0x03u, 0x50, 0x70);
+    enemy->flags = 0x00u;
+    enemy->timer = 0x00u;
+    seed_enemy(&core, 12u, 0x10u, 0x02u, 0x10, 0x70);
+    seed_enemy(&core, 13u, 0x12u, 0x00u, -120, 0x90);
+    enemy = seed_enemy(&core, 14u, 0xFEu, 0x02u, 0x70, 0x70);
+    enemy->flags = 0x00u;
+    enemy->timer = 0x00u;
+    seed_enemy(&core, 15u, 0x55u, 0x00u, 0x70, 0x70);
+
+    step_no_input(&core);
+    CHECK(core.enemies[1].state == 0x01u);
+    CHECK(core.enemies[2].state == 0x02u);
+    CHECK(core.enemies[4].state == 0x02u);
+    CHECK(core.enemies[6].active == 0x00u);
+    CHECK(core.enemies[8].active == 0x00u);
+    CHECK(core.enemies[10].state == 0x03u);
+    CHECK(core.enemies[11].active == 0x00u);
+    CHECK(core.enemies[12].active == 0x00u);
+    CHECK(core.enemies[13].active == 0x00u);
+    CHECK(core.enemies[14].active == 0x00u);
+    CHECK(core.enemies[15].active == 0x00u);
+
+    prepare_level1_enemy_matrix_state(&core);
+    enemy = seed_enemy(&core, 0u, 0x03u, 0x00u, 0x70, 0x70);
+    enemy->hp = 0x01u;
+    core.ram[CONTRA_RAM_PLAYER_BULLET_SLOT] = 0x01u;
+    core.ram[CONTRA_RAM_PLAYER_BULLET_X_POS] = 0x70u;
+    core.ram[CONTRA_RAM_PLAYER_BULLET_Y_POS] = 0x70u;
+    step_no_input(&core);
+    CHECK(core.enemies[0].type == 0x00u);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_BULLET_SLOT] == 0x00u);
+    core.enemies[0].x = (int16_t)core.ram[CONTRA_RAM_SPRITE_X_POS];
+    core.enemies[0].y = (int16_t)core.ram[CONTRA_RAM_SPRITE_Y_POS];
+    core.enemies[0].attrs = 0x05u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_INVINCIBILITY_TIMER] >= 0x7Fu);
+
+    force_level2_gameplay(&core);
+    memset(core.enemies, 0, sizeof(core.enemies));
+    memset(core.enemy_projectiles, 0, sizeof(core.enemy_projectiles));
+    core.ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] = 0x80u;
+    core.ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] = 0x05u;
+    enemy = seed_enemy(&core, 0u, 0x08u, 0x01u, 0x70, 0x60);
+    enemy->timer = 0x00u;
+    seed_enemy(&core, 1u, 0x13u, 0x00u, 0x80, 0x80);
+    enemy = seed_enemy(&core, 2u, 0x14u, 0x08u, 0x80, 0x80);
+    enemy->cooldown = 0x02u;
+    enemy = seed_enemy(&core, 3u, 0x14u, 0x09u, 0x88, 0x80);
+    enemy->timer = 0x00u;
+    projectile_count = count_active_projectiles_from_owner(&core, 0x08u);
+    step_no_input(&core);
+    CHECK(count_active_projectiles_from_owner(&core, 0x08u) > projectile_count);
+    CHECK(core.enemies[3].active == 0x00u);
+
+    contra_core_init(&core);
+    CHECK(run_until_gameplay(&core, 900u));
+    core.ram[CONTRA_RAM_PPU_READY] = 0x00u;
+    step_with_input(&core, CONTRA_BUTTON_START);
+    CHECK(core.ram[CONTRA_RAM_PAUSE_STATE] == 0x01u);
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_PAUSE_STATE] == 0x01u);
+    step_with_input(&core, CONTRA_BUTTON_START);
+    CHECK(core.ram[CONTRA_RAM_PAUSE_STATE] == 0x00u);
+
+    contra_core_init(&core);
+    core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x01u;
+    core.ram[CONTRA_RAM_INTRO_THEME_DELAY] = 0x01u;
+    step_with_input(&core, CONTRA_BUTTON_SELECT);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_MODE] == 0x01u);
+    step_no_input(&core);
+    step_with_input(&core, CONTRA_BUTTON_SELECT);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_MODE] == 0x00u);
+    step_with_input(&core, CONTRA_BUTTON_START);
+    CHECK(core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] == 0x03u);
+
+    contra_core_init(&core);
+    core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x02u;
+    core.ram[CONTRA_RAM_DEMO_MODE] = 0x01u;
+    core.ram[CONTRA_RAM_INTRO_THEME_DELAY] = 0x01u;
+    step_with_input(&core, CONTRA_BUTTON_START);
+    CHECK(core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] == 0x01u);
+
+    contra_core_init(&core);
+    core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
+    core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x0Au;
+    core.ram[CONTRA_RAM_CURRENT_LEVEL] = 0x00u;
+    core.ram[CONTRA_RAM_GAME_OVER_DELAY_TIMER] = 0x01u;
+    core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] = 0x01u;
+    core.ram[CONTRA_RAM_P2_GAME_OVER_STATUS] = 0x01u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x05u);
+    return true;
+}
+
+static bool test_broad_player_ui_and_end_level_matrix(void)
+{
+    ContraCore core;
+    unsigned frame;
+
+    contra_core_init(&core);
+    CHECK(run_until_gameplay(&core, 900u));
+
+    prepare_level1_weapon_state(&core);
+    core.ram[CONTRA_RAM_LEVEL_STOP_SCROLL] = 0x00u;
+    core.ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] = 0x01u;
+    step_with_input(&core, (uint8_t)(CONTRA_BUTTON_A | CONTRA_BUTTON_DOWN));
+    CHECK(core.ram[CONTRA_RAM_EDGE_FALL_CODE] != 0x00u);
+    step_no_input(&core);
+
+    prepare_level1_weapon_state(&core);
+    core.ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] = 0x01u;
+    core.ram[CONTRA_RAM_LEVEL_STOP_SCROLL] = 0xFFu;
+    core.ram[CONTRA_RAM_EDGE_FALL_CODE] = 0x00u;
+    core.ram[CONTRA_RAM_PLAYER_BG_FLAG_EDGE_DETECT] = 0x01u;
+    step_with_input(&core, (uint8_t)(CONTRA_BUTTON_A | CONTRA_BUTTON_DOWN));
+    CHECK(core.ram[CONTRA_RAM_EDGE_FALL_CODE] == 0x00u);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_JUMP_STATUS] == 0x00u);
+
+    prepare_level1_weapon_state(&core);
+    core.ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] = 0x01u;
+    core.ram[CONTRA_RAM_PLAYER_WATER_STATE] = 0x04u;
+    core.ram[CONTRA_RAM_PLAYER_WATER_TIMER] = 0x00u;
+    core.ram[CONTRA_RAM_PLAYER_RECOIL_TIMER] = 0x01u;
+    core.ram[CONTRA_RAM_PLAYER_AIM_DIR] = 0x04u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_SPRITE_CODE] != 0x00u);
+
+    prepare_level1_weapon_state(&core);
+    core.ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] = 0x01u;
+    core.ram[CONTRA_RAM_PLAYER_WATER_STATE] = 0x04u;
+    core.ram[CONTRA_RAM_PLAYER_WATER_TIMER] = 0x00u;
+    core.ram[CONTRA_RAM_PLAYER_RECOIL_TIMER] = 0x00u;
+    core.ram[CONTRA_RAM_FRAME_COUNTER] = 0x00u;
+    step_no_input(&core);
+    CHECK((core.ram[CONTRA_RAM_PLAYER_WATER_STATE] & 0x04u) != 0x00u);
+    core.ram[CONTRA_RAM_FRAME_COUNTER] = 0x01u;
+    step_no_input(&core);
+    CHECK((core.ram[CONTRA_RAM_PLAYER_WATER_STATE] & 0x04u) != 0x00u);
+
+    prepare_level1_weapon_state(&core);
+    core.ram[CONTRA_RAM_PLAYER_WATER_STATE] = 0x0Cu;
+    core.ram[CONTRA_RAM_PLAYER_WATER_TIMER] = 0x03u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_WATER_TIMER] < 0x03u);
+    prepare_level1_weapon_state(&core);
+    core.ram[CONTRA_RAM_PLAYER_WATER_STATE] = 0x0Cu;
+    core.ram[CONTRA_RAM_PLAYER_WATER_TIMER] = 0x00u;
+    step_no_input(&core);
+    CHECK((core.ram[CONTRA_RAM_PLAYER_WATER_STATE] & 0x08u) == 0x00u);
+
+    contra_core_init(&core);
+    core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
+    core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x06u;
+    core.ram[CONTRA_RAM_CONT_END_SELECTION] = 0x00u;
+    core.ram[CONTRA_RAM_PLAYER_MODE] = 0x01u;
+    core.ram[CONTRA_RAM_HIGH_SCORE_LOW] = 0x99u;
+    core.ram[CONTRA_RAM_HIGH_SCORE_HIGH] = 0x09u;
+    core.ram[CONTRA_RAM_PLAYER_1_SCORE_LOW] = 0x56u;
+    core.ram[CONTRA_RAM_PLAYER_1_SCORE_HIGH] = 0x34u;
+    core.ram[CONTRA_RAM_PLAYER_2_SCORE_LOW] = 0x78u;
+    core.ram[CONTRA_RAM_PLAYER_2_SCORE_HIGH] = 0x12u;
+    core.ram[CONTRA_RAM_FRAME_COUNTER] = 0x00u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_SPRITE_X_POS] == 0x52u);
+    CHECK(core.ram[CONTRA_RAM_CPU_SPRITE_BUFFER] == 0xAAu);
+    step_with_input(&core, CONTRA_BUTTON_START);
+    CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x00u);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_1_SCORE_LOW] == 0x00u);
+    CHECK(core.ram[CONTRA_RAM_P1_NUM_LIVES] != 0x00u);
+
+    contra_core_init(&core);
+    core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
+    core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x07u;
+    core.ram[CONTRA_RAM_PLAYER_MODE] = 0x01u;
+    core.ram[CONTRA_RAM_PLAYER_2_SCORE_LOW] = 0x21u;
+    core.ram[CONTRA_RAM_PLAYER_2_SCORE_HIGH] = 0x43u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] == 0x05u);
+
+    contra_core_init(&core);
+    core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
+    core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x04u;
+    core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] = 0x01u;
+    core.ram[CONTRA_RAM_P2_GAME_OVER_STATUS] = 0x01u;
+    core.ram[CONTRA_RAM_GAME_OVER_DELAY_TIMER] = 0x00u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x0Au);
+    CHECK(core.ram[CONTRA_RAM_GAME_OVER_DELAY_TIMER] != 0x00u);
+
+    contra_core_init(&core);
+    core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
+    core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x08u;
+    core.ram[CONTRA_RAM_DELAY_TIME_LOW_BYTE] = 0xFFu;
+    core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] = 0x00u;
+    core.ram[CONTRA_RAM_P2_GAME_OVER_STATUS] = 0x01u;
+    core.ram[CONTRA_RAM_PLAYER_STATE] = 0x01u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x08u);
+    core.ram[CONTRA_RAM_DELAY_TIME_LOW_BYTE] = 0x01u;
+    core.ram[CONTRA_RAM_DELAY_TIME_HIGH_BYTE] = 0x00u;
+    for (frame = 0u; (frame < 4u) && (core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x08u); ++frame)
+    {
+        step_no_input(&core);
+    }
+    CHECK(core.ram[CONTRA_RAM_LEVEL_END_PLAYERS_ALIVE] != 0x00u);
+    CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x09u);
+
+    contra_core_init(&core);
+    core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
+    core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x09u;
+    core.ram[CONTRA_RAM_CURRENT_LEVEL] = 0x00u;
+    core.ram[CONTRA_RAM_END_LEVEL_ROUTINE_INDEX] = 0x01u;
+    core.ram[CONTRA_RAM_LEVEL_END_DELAY_TIMER] = 0x00u;
+    core.ram[CONTRA_RAM_LEVEL_END_LVL_ROUTINE_STATE] = 0x01u;
+    core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] = 0x00u;
+    core.ram[CONTRA_RAM_PLAYER_STATE] = 0x01u;
+    core.ram[CONTRA_RAM_SPRITE_X_POS] = 0x80u;
+    core.ram[CONTRA_RAM_SPRITE_Y_POS] = 0x80u;
+    step_no_input(&core);
+    CHECK((core.ram[CONTRA_RAM_CONTROLLER_STATE] & CONTRA_BUTTON_RIGHT) != 0x00u);
+    core.ram[CONTRA_RAM_SPRITE_X_POS] = 0x90u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_LEVEL_END_LVL_ROUTINE_STATE] >= 0x02u);
+    core.ram[CONTRA_RAM_PLAYER_JUMP_STATUS] = 0x00u;
+    step_no_input(&core);
+    CHECK((core.ram[CONTRA_RAM_CONTROLLER_STATE] & CONTRA_BUTTON_A) != 0x00u);
+    core.ram[CONTRA_RAM_PLAYER_JUMP_STATUS] = 0x01u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_LEVEL_END_LVL_ROUTINE_STATE] >= 0x03u);
+
+    contra_core_init(&core);
+    core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
+    core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x01u;
+    core.ram[CONTRA_RAM_DEMO_MODE] = 0x00u;
+    core.ram[CONTRA_RAM_PLAYER_MODE] = 0x00u;
+    core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] = 0x01u;
+    core.ram[CONTRA_RAM_P1_NUM_LIVES] = 0x00u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x02u);
+
+    contra_core_init(&core);
+    core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
+    core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x01u;
+    core.ram[CONTRA_RAM_DEMO_MODE] = 0x00u;
+    core.ram[CONTRA_RAM_PLAYER_MODE] = 0x01u;
+    core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] = 0x00u;
+    core.ram[CONTRA_RAM_P1_NUM_LIVES] = 0x2Au;
+    core.ram[CONTRA_RAM_P2_GAME_OVER_STATUS] = 0x00u;
+    core.ram[CONTRA_RAM_P2_NUM_LIVES] = 0xFFu;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x02u);
+
+    return true;
+}
+
 int main(void)
 {
     const TestCase tests[] = {
@@ -1454,7 +1970,10 @@ int main(void)
         {"level2_repeated_room_advances_reach_boss_state", test_level2_repeated_room_advances_reach_boss_state},
         {"level2_boss_room_loads_rom_enemy_data", test_level2_boss_room_loads_rom_enemy_data},
         {"level2_boss_room_plating_and_eye_can_be_destroyed", test_level2_boss_room_plating_and_eye_can_be_destroyed},
-        {"level2_boss_room_wall_cannons_fire_projectiles", test_level2_boss_room_wall_cannons_fire_projectiles}
+        {"level2_boss_room_wall_cannons_fire_projectiles", test_level2_boss_room_wall_cannons_fire_projectiles},
+        {"broad_weapon_gameover_and_alt_graphics_matrix", test_broad_weapon_gameover_and_alt_graphics_matrix},
+        {"broad_enemy_pause_and_player_state_matrix", test_broad_enemy_pause_and_player_state_matrix},
+        {"broad_player_ui_and_end_level_matrix", test_broad_player_ui_and_end_level_matrix}
     };
     const size_t test_count = sizeof(tests) / sizeof(tests[0]);
     size_t index;

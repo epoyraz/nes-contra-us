@@ -218,7 +218,8 @@ int main(int argc, char **argv)
         "level2-first-room",
         "level2-after-room-1",
         "level2-after-room-4",
-        "level2-boss-state"
+        "level2-boss-state",
+        "level2-boss-defeated"
     };
     TraceRows expected;
     TraceRows actual;

@@ -19,6 +19,7 @@ local level2_checkpoint_index = 1
 local room_chain_checkpoint_index = 1
 local phase = "level1"
 local room_chain_forced = false
+local boss_damage_started = false
 local level1_checkpoints = {
     { name = "level1-title", frame = 180 },
     { name = "level1-gameplay-start", frame = 900 },
@@ -156,6 +157,27 @@ local function force_level2_room_chain()
     debug_log("forced level 2 room chain")
 end
 
+local function damage_level2_boss_actors()
+    local damaged = false
+
+    for slot = 0, 15 do
+        local enemy_type = read_ram(0x0528 + slot)
+
+        if enemy_type == 0x0A or enemy_type == 0x10 then
+            write_ram(0x0578 + slot, 0x00)
+            damaged = true
+        end
+    end
+
+    return damaged
+end
+
+local function force_level2_boss_defeated()
+    write_ram(0x0037, 0x01)
+    write_ram(0x003B, 0x01)
+    damage_level2_boss_actors()
+end
+
 local function on_input_polled()
     emu.setInput(input_for_next_frame(), 0)
 end
@@ -235,6 +257,21 @@ local function on_end_frame()
             force_level2_room_chain()
         end
 
+        if room_chain_checkpoint_index == 5 and boss_damage_started then
+            if read_ram(0x30) == 0x01 and
+                read_ram(0x40) == 0x80 and
+                read_ram(0x64) == 0x05 and
+                read_ram(0x2C) == 0x08 and
+                read_ram(0x37) == 0x01 then
+                capture("level2_room_chain", "level2-boss-defeated", frame)
+                output:close()
+                emu.stop(0)
+                return
+            end
+
+            force_level2_boss_defeated()
+        end
+
         if read_ram(0x2C) == 0x04 then
             local should_capture = false
             local name = ""
@@ -271,9 +308,20 @@ local function on_end_frame()
             end
 
             if read_ram(0x40) == 0x80 then
-                output:close()
-                emu.stop((room_chain_checkpoint_index > 4) and 0 or 1)
-                return
+                if room_chain_checkpoint_index == 5 then
+                    boss_damage_started = true
+                    debug_log("damaging level 2 boss actors")
+                end
+
+                if room_chain_checkpoint_index > 5 then
+                    output:close()
+                    emu.stop(0)
+                    return
+                end
+            end
+
+            if boss_damage_started then
+                force_level2_boss_defeated()
             end
 
             if read_ram(0x86) ~= 0 and read_ram(0x37) == 0x00 then
