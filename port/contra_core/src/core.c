@@ -110,6 +110,7 @@
 
 static void contra_render_level_1_nametable_update_supertile(
     ContraCore *core, int enemy_x, int enemy_y, uint8_t supertile_index);
+static void contra_rom_update_enemy_pos(ContraCore *core, uint8_t x);
 
 /* Faithful enemy types that render as background super-tiles (nametable writes)
    rather than OAM sprites: pill box, rotating gun, red turret, bomb turret,
@@ -8378,6 +8379,88 @@ static void contra_rom_enable_enemy_collision(ContraCore *core, uint8_t x)
         (uint8_t)(core->ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x7Eu);
 }
 
+/* --- enemy bullets (type 0x01), bank0/bank7 --- */
+/* quadrant aim direction -> offset into the fractional-velocity table */
+static const uint8_t contra_bullet_fract_vel_dir_lookup_tbl[24] = {
+    0x00u, 0x02u, 0x04u, 0x06u, 0x08u, 0x0Au, 0x0Cu, 0x0Au, 0x08u, 0x06u, 0x04u, 0x02u,
+    0x00u, 0x02u, 0x04u, 0x06u, 0x08u, 0x0Au, 0x0Cu, 0x0Au, 0x08u, 0x06u, 0x04u, 0x02u};
+/* {y_fract, x_fract} pairs (fast byte starts 0); bank7 bullet_fract_vel_tbl */
+static const uint8_t contra_bullet_fract_vel_tbl[14] = {
+    0x00u, 0xFFu, 0x42u, 0xF7u, 0x80u, 0xDDu, 0xB5u, 0xB5u, 0xDDu, 0x80u, 0xF7u, 0x42u, 0xFFu, 0x00u};
+static const uint8_t contra_bullet_sprite_tbl[6] = {0x1Eu, 0x21u, 0x21u, 0x1Eu, 0x79u, 0x07u};
+static const uint8_t contra_bullet_palette_tbl[6] = {0x01u, 0x02u, 0x02u, 0x01u, 0x01u, 0x02u};
+static const uint8_t contra_bullet_collision_code_tbl[6] = {0x01u, 0x05u, 0x05u, 0x01u, 0x02u, 0x00u};
+/* adjust_bullet_velocity speed scaling reduces to vel*mult/8: 0.5x .. 1.875x */
+static const uint8_t contra_bullet_speed_mult[8] = {4u, 6u, 8u, 10u, 12u, 13u, 14u, 15u};
+
+static uint16_t contra_rom_adjust_bullet_velocity(uint8_t fract, uint8_t speed)
+{
+    return (uint16_t)(((uint16_t)fract * contra_bullet_speed_mult[speed & 0x07u]) >> 3u);
+}
+
+/* create_enemy_bullet (bank7): spawn a type-1 enemy bullet at (px,py) aimed by
+   (angle, quadrant: bit0 up, bit1 left) at the given speed. */
+static bool contra_rom_create_enemy_bullet(
+    ContraCore *core, uint8_t btype, uint8_t angle, uint8_t quadrant, uint8_t speed,
+    uint8_t px, uint8_t py)
+{
+    uint8_t *const ram = core->ram;
+    const int slot = contra_rom_find_next_enemy_slot(core);
+    uint8_t sx;
+    uint8_t idx;
+    uint16_t xv;
+    uint16_t yv;
+
+    if (slot < 0)
+    {
+        return false;
+    }
+    sx = (uint8_t)slot;
+    ram[CONTRA_RAM_ENEMY_TYPE + sx] = 0x01u;
+    contra_rom_initialize_enemy(core, sx);
+    ram[CONTRA_RAM_ENEMY_VAR_1 + sx] = btype;
+    ram[CONTRA_RAM_ENEMY_Y_POS + sx] = py;
+    ram[CONTRA_RAM_ENEMY_X_POS + sx] = px;
+
+    idx = contra_bullet_fract_vel_dir_lookup_tbl[angle % 24u];
+    xv = contra_rom_adjust_bullet_velocity(contra_bullet_fract_vel_tbl[idx + 1u], speed);
+    yv = contra_rom_adjust_bullet_velocity(contra_bullet_fract_vel_tbl[idx], speed);
+    if ((quadrant & 0x01u) != 0u)
+    {
+        yv = (uint16_t)(0u - yv); /* up */
+    }
+    if ((quadrant & 0x02u) != 0u)
+    {
+        xv = (uint16_t)(0u - xv); /* left */
+    }
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + sx] = (uint8_t)(yv >> 8u);
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + sx] = (uint8_t)yv;
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + sx] = (uint8_t)(xv >> 8u);
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + sx] = (uint8_t)xv;
+    return true;
+}
+
+/* enemy_bullet_routine_00/01 (bank0:377): set collision code, then each frame
+   set the bullet sprite and apply velocity. */
+static void contra_rom_enemy_bullet_routine_00(ContraCore *core, uint8_t x)
+{
+    const uint8_t btype = core->ram[CONTRA_RAM_ENEMY_VAR_1 + x];
+
+    core->ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] =
+        contra_bullet_collision_code_tbl[(btype < 6u) ? btype : 0u];
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+static void contra_rom_enemy_bullet_routine_01(ContraCore *core, uint8_t x)
+{
+    const uint8_t btype = (core->ram[CONTRA_RAM_ENEMY_VAR_1 + x] < 6u)
+        ? core->ram[CONTRA_RAM_ENEMY_VAR_1 + x] : 0u;
+
+    core->ram[CONTRA_RAM_ENEMY_SPRITES + x] = contra_bullet_sprite_tbl[btype];
+    core->ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = contra_bullet_palette_tbl[btype];
+    contra_rom_update_enemy_pos(core, x); /* removes itself off-screen */
+}
+
 /* --- sniper (enemy type 0x06), bank0.asm:1738 --- */
 static const uint8_t contra_sniper_animation_delay_tbl[3] = {0x01u, 0x30u, 0x80u};
 static const uint8_t contra_sniper_frame_tbl[3] = {0x03u, 0x00u, 0x00u};
@@ -8431,7 +8514,28 @@ static void contra_rom_sniper_routine_02(ContraCore *core, uint8_t x)
     ram[CONTRA_RAM_ENEMY_VAR_4 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_4 + x] - 1u);
     if ((int8_t)ram[CONTRA_RAM_ENEMY_VAR_4 + x] >= 0)
     {
-        ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x18u; /* TODO: spawn bullet here */
+        ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x18u;
+        if (ram[CONTRA_RAM_ENEMY_ATTACK_FLAG] != 0u)
+        {
+            /* fire a bullet at the nearest player (horizontal aim; the ROM's
+               diagonal angle solve is deferred) */
+            static const uint8_t sniper_bullet_speed[3] = {0x03u, 0x05u, 0x03u};
+            const uint8_t ex = ram[CONTRA_RAM_ENEMY_X_POS + x];
+            const uint8_t p0 = ram[CONTRA_RAM_SPRITE_X_POS + 0u];
+            const uint8_t p1 = ram[CONTRA_RAM_SPRITE_X_POS + 1u];
+            const uint8_t d0 = (p0 >= ex) ? (uint8_t)(p0 - ex) : (uint8_t)(ex - p0);
+            const uint8_t d1 = (p1 >= ex) ? (uint8_t)(p1 - ex) : (uint8_t)(ex - p1);
+            const uint8_t player_x = ((p1 != 0u) && ((p0 == 0u) || (d1 < d0))) ? p1 : p0;
+            const bool firing_left = (player_x < ex);
+            const uint8_t idx = (attr < 3u) ? attr : 0u;
+
+            ram[CONTRA_RAM_ENEMY_VAR_2 + x] = firing_left ? 0u : 1u;
+            (void)contra_rom_create_enemy_bullet(
+                core, 0u, 0u, firing_left ? 0x02u : 0x00u, sniper_bullet_speed[idx],
+                (uint8_t)(ex + (firing_left ? 0xF3u : 0x0Du)),
+                (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + 0xEEu));
+            ram[CONTRA_RAM_ENEMY_VAR_3 + x] = 0x06u; /* gun recoil */
+        }
         return;
     }
 
@@ -9033,6 +9137,14 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
 
     switch (type)
     {
+        case 0x01u: /* enemy bullet */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_enemy_bullet_routine_00(core, x); break;
+                case 0x02u: contra_rom_enemy_bullet_routine_01(core, x); break;
+                default: break;
+            }
+            break;
         case 0xFEu: /* explosion actor (killed enemy) */
             contra_rom_enemy_routine_explosion(core, x);
             break;
