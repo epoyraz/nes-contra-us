@@ -4,10 +4,30 @@ Last updated: 2026-04-16
 
 This file tracks native-port coverage by ROM bank and subsystem.
 
+## Visualization (line-weighted)
+
+For a per-bank bar chart, weighted by assembly line count, run:
+
+```
+python3 tools/port_coverage.py             # per-bank line-weighted % bar chart
+python3 tools/port_coverage.py --uncited 7 # bank-7 routines not yet cited as ported
+```
+
+It sums the ASM line ranges that `core.c` cites (convention
+`bank<N>:<from>-<to>`, e.g. `bank7:7315-7352`) and divides by each bank's total
+lines. This is an **objective, reproducible lower bound on faithful porting** —
+a faithful port that doesn't cite its range isn't credited, so the number reads
+low today (the older engine code predates the convention and still needs its
+ranges backfilled). Cite the ASM range whenever you faithfully port a routine.
+
 Important limits:
 
-- This is not line coverage.
-- This is not yet a per-label or per-address translation ledger.
+- The bar chart counts faithfully-cited lines only; it under-reports until
+  ranges are backfilled.
+- **`Translated` below means "a native runtime path exists" — NOT "faithfully
+  ported."** Some `Translated` subsystems (notably the level-1 enemy AI) are
+  invented native heuristics, not translations of the original routines. The
+  faithful real-RAM enemy effort is what `tools/port_coverage.py` measures.
 - Status is based on the current native runtime path in `port/contra_core/src/core.c`.
 - "ROM-backed" means the native port is consuming original bank data directly, but the original bank logic is not necessarily translated 1:1.
 

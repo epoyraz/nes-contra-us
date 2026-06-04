@@ -1,3 +1,11 @@
+/* Contra native port — core runtime.
+ *
+ * Faithful-port coverage by ROM bank: see docs/Native Port Coverage.md and run
+ *   python3 tools/port_coverage.py
+ * for a per-bank, line-weighted bar chart. Convention: when a function
+ * faithfully ports an original routine, cite that routine's ASM line RANGE in a
+ * comment as bank<N>:<from>-<to> (e.g. "bank7:7315-7352 exe_all_enemy_routine"),
+ * so the coverage ledger credits the right number of assembly lines. */
 #include "contra/core.h"
 
 #include <stdbool.h>
