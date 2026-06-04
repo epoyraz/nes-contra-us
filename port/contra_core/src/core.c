@@ -101,6 +101,32 @@
 
 #include "contra/buttons.h"
 
+/* Faithful real-RAM enemy system toggle (see the block before
+   contra_run_level_enemy_logic). Defined here too so render code earlier in the
+   file can gate on it. Default 0 keeps the working invented layer. */
+#ifndef CONTRA_USE_ROM_ENEMY_SYSTEM
+#define CONTRA_USE_ROM_ENEMY_SYSTEM 0
+#endif
+
+/* Faithful enemy types that render as background super-tiles (nametable writes)
+   rather than OAM sprites: pill box, rotating gun, red turret, bomb turret,
+   plated door, bridge. */
+static bool contra_rom_enemy_type_is_supertile(uint8_t type)
+{
+    switch (type)
+    {
+        case 0x02u:
+        case 0x04u:
+        case 0x07u:
+        case 0x10u:
+        case 0x11u:
+        case 0x12u:
+            return true;
+        default:
+            return false;
+    }
+}
+
 static const uint8_t contra_player_select_cursor_pos[2] = {0xA2u, 0xB2u};
 static const uint8_t contra_player_mode_1d_table[2] = {0x01u, 0x07u};
 static const uint8_t contra_p2_game_over_status_table[2] = {0x01u, 0x00u};
@@ -1503,6 +1529,15 @@ static void contra_build_oam_for_next_frame(ContraCore *core)
 
     while (sprite_index-- != 0u)
     {
+        /* In the faithful enemy system the enemy slots (10..25) hold real enemy
+           state. Background-tile enemy types (pill box, turrets, bridge) draw to
+           the nametable, not OAM, so skip them here to avoid a stray sprite. */
+        if (CONTRA_USE_ROM_ENEMY_SYSTEM && (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0u) &&
+            (sprite_index >= 10u) &&
+            contra_rom_enemy_type_is_supertile(core->ram[CONTRA_RAM_ENEMY_TYPE + (sprite_index - 10u)]))
+        {
+            continue;
+        }
         contra_write_cpu_sprite_to_oam(core, sprite_index, oam, &offset, &remaining);
     }
 
@@ -10055,6 +10090,34 @@ static void contra_render_native_enemies(ContraCore *core)
 
     if (!contra_is_native_combat_active(core))
     {
+        return;
+    }
+
+    if (CONTRA_USE_ROM_ENEMY_SYSTEM && level_1_active)
+    {
+        /* Faithful real-RAM render of background super-tile enemies. CPU-sprite
+           enemies (soldier/sniper/capsule) render via the OAM build directly
+           from their sprite-object slots; only the nametable-tile enemies need a
+           pass here. Pill box (0x02) for now; turrets/bridge to follow. */
+        static const uint8_t weapon_box_supertile_tbl[3] = {0x00u, 0x01u, 0x02u};
+
+        for (enemy_index = 0u; enemy_index < CONTRA_RAM_ENEMY_SLOT_COUNT; ++enemy_index)
+        {
+            if ((core->ram[CONTRA_RAM_ENEMY_ROUTINE + enemy_index] == 0u) ||
+                (core->ram[CONTRA_RAM_ENEMY_TYPE + enemy_index] != 0x02u))
+            {
+                continue;
+            }
+            {
+                const uint8_t frame = core->ram[CONTRA_RAM_ENEMY_FRAME + enemy_index];
+
+                contra_render_level_1_nametable_update_supertile(
+                    core,
+                    (int)core->ram[CONTRA_RAM_ENEMY_X_POS + enemy_index],
+                    (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + enemy_index],
+                    weapon_box_supertile_tbl[(frame < 3u) ? frame : 0u]);
+            }
+        }
         return;
     }
 
