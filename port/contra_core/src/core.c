@@ -9128,6 +9128,99 @@ static void contra_rom_begin_enemy_explosion(ContraCore *core, uint8_t x)
     ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = 0x00u;
 }
 
+/* --- red turret (enemy type 0x07), bank0.asm:973 --- */
+/* red_turret_supertile_1_tbl flows into _2_tbl (11 bytes): emerge frames 0..3
+   then the rotation/active frames. */
+static const uint8_t contra_red_turret_supertile_tbl[11] = {
+    0x16u, 0x14u, 0x18u, 0x11u, 0x17u, 0x15u, 0x18u, 0x11u, 0x11u, 0x12u, 0x13u};
+
+static bool contra_rom_red_turret_load_supertile(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t idx;
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return false; /* delay not elapsed -- nothing drawn this frame */
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x04u;
+    idx = ram[CONTRA_RAM_ENEMY_FRAME + x];
+    if ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x01u) != 0u)
+    {
+        idx = (uint8_t)(idx + 3u); /* alternate background variant */
+    }
+    contra_render_level_1_nametable_update_supertile(
+        core,
+        (int)core->ram[CONTRA_RAM_ENEMY_X_POS + x],
+        (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + x],
+        contra_red_turret_supertile_tbl[(idx < 11u) ? idx : 0u]);
+    return true;
+}
+
+/* red_turret_routine_00..02 (bank0): aim left, wait for the player to approach,
+   then emerge (super-tile animation) and become collidable. The active rotating
+   aim + firing + retract (routine_03..05) are DEFERRED: the turret emerges,
+   renders, and can be shot/destroyed (via the kill path -> explosion). */
+static void contra_rom_red_turret_routine_00(ContraCore *core, uint8_t x)
+{
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    core->ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0x06u; /* face left */
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+static void contra_rom_red_turret_routine_01(ContraCore *core, uint8_t x)
+{
+    if (!contra_rom_past_trigger_x(core, x, 0xF0u))
+    {
+        contra_rom_add_scroll_to_enemy_pos(core, x);
+        return; /* player not close yet */
+    }
+    core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u;
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+static void contra_rom_red_turret_routine_02(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    if (!contra_rom_red_turret_load_supertile(core, x))
+    {
+        contra_rom_add_scroll_to_enemy_pos(core, x);
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+    if (ram[CONTRA_RAM_ENEMY_FRAME + x] < 0x04u)
+    {
+        contra_rom_add_scroll_to_enemy_pos(core, x);
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = 0x02u;
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x28u;
+    ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x7Fu); /* enable bullet collision */
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x10u;
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+/* red_turret_routine_03 (active): keep tracking scroll and hold the emerged
+   super-tile so the turret stays on the wall and remains shootable. Firing,
+   rotation, and retract are deferred. */
+static void contra_rom_red_turret_routine_03(ContraCore *core, uint8_t x)
+{
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    (void)contra_rom_red_turret_load_supertile(core, x);
+}
+
 /* dispatch one enemy slot to its type routine by (ENEMY_TYPE, ENEMY_ROUTINE).
    Only ported types act; others hold until their routine is ported. */
 static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
@@ -9137,6 +9230,16 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
 
     switch (type)
     {
+        case 0x07u: /* red turret */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_red_turret_routine_00(core, x); break;
+                case 0x02u: contra_rom_red_turret_routine_01(core, x); break;
+                case 0x03u: contra_rom_red_turret_routine_02(core, x); break;
+                case 0x04u: contra_rom_red_turret_routine_03(core, x); break;
+                default: break; /* fire/rotate/retract deferred */
+            }
+            break;
         case 0x01u: /* enemy bullet */
             switch (routine)
             {
