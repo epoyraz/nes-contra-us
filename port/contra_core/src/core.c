@@ -8488,6 +8488,17 @@ static void contra_exe_game_routine(ContraCore *core)
 {
     uint8_t routine;
 
+    /* Faithful (approximate) port of the ROM's RANDOM_NUM generator. Between
+       NMIs the ROM spins in a busy loop (bank7.asm:284) repeatedly doing
+       RANDOM_NUM += FRAME_COUNTER. The iteration count is CPU-timing dependent
+       and cannot be reproduced exactly without cycle-accurate emulation, so we
+       model a single iteration per frame using the pre-increment frame counter
+       (the value the loop was adding during the gap before this NMI). This
+       restores RNG variation — the port previously froze RANDOM_NUM at 0 — but
+       does not reproduce the ROM's exact RNG sequence. */
+    core->ram[CONTRA_RAM_RANDOM_NUM] =
+        (uint8_t)(core->ram[CONTRA_RAM_RANDOM_NUM] + core->ram[CONTRA_RAM_FRAME_COUNTER]);
+
     core->ram[CONTRA_RAM_FRAME_COUNTER] = (uint8_t)(core->ram[CONTRA_RAM_FRAME_COUNTER] + 1u);
 
     routine = core->ram[CONTRA_RAM_GAME_ROUTINE_INDEX];
