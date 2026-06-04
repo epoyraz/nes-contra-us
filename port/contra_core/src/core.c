@@ -108,6 +108,9 @@
 #define CONTRA_USE_ROM_ENEMY_SYSTEM 0
 #endif
 
+static void contra_render_level_1_nametable_update_supertile(
+    ContraCore *core, int enemy_x, int enemy_y, uint8_t supertile_index);
+
 /* Faithful enemy types that render as background super-tiles (nametable writes)
    rather than OAM sprites: pill box, rotating gun, red turret, bomb turret,
    plated door, bridge. */
@@ -8538,15 +8541,20 @@ static bool contra_rom_past_trigger_x(const ContraCore *core, uint8_t x, uint8_t
     return core->ram[CONTRA_RAM_ENEMY_X_POS + x] < trigger_x;
 }
 
-/* set_weapon_box_supertile (bank0.asm:603): draws the pill-box background
-   super-tile for ENEMY_FRAME. The nametable-supertile render path is not ported
-   yet, so this is a no-op that reports success (buffer not full). The state
-   machine (open/close cycle, HP) below is faithful; only the draw is stubbed.
-   TODO: port draw_enemy_supertile_a with the nametable render chunk. */
+/* set_weapon_box_supertile (bank0.asm:603): draw the pill-box background
+   super-tile for ENEMY_FRAME, at the enemy position. Called from the routine on
+   each animation step (like the ROM) -- not every render frame -- so the box
+   doesn't flicker. */
+static const uint8_t contra_weapon_box_supertile_tbl[3] = {0x00u, 0x01u, 0x02u};
 static bool contra_rom_set_weapon_box_supertile(ContraCore *core, uint8_t x)
 {
-    (void)core;
-    (void)x;
+    const uint8_t frame = core->ram[CONTRA_RAM_ENEMY_FRAME + x];
+
+    contra_render_level_1_nametable_update_supertile(
+        core,
+        (int)core->ram[CONTRA_RAM_ENEMY_X_POS + x],
+        (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + x],
+        contra_weapon_box_supertile_tbl[(frame < 3u) ? frame : 0u]);
     return false; /* carry clear == drew successfully */
 }
 
@@ -10095,29 +10103,9 @@ static void contra_render_native_enemies(ContraCore *core)
 
     if (CONTRA_USE_ROM_ENEMY_SYSTEM && level_1_active)
     {
-        /* Faithful real-RAM render of background super-tile enemies. CPU-sprite
-           enemies (soldier/sniper/capsule) render via the OAM build directly
-           from their sprite-object slots; only the nametable-tile enemies need a
-           pass here. Pill box (0x02) for now; turrets/bridge to follow. */
-        static const uint8_t weapon_box_supertile_tbl[3] = {0x00u, 0x01u, 0x02u};
-
-        for (enemy_index = 0u; enemy_index < CONTRA_RAM_ENEMY_SLOT_COUNT; ++enemy_index)
-        {
-            if ((core->ram[CONTRA_RAM_ENEMY_ROUTINE + enemy_index] == 0u) ||
-                (core->ram[CONTRA_RAM_ENEMY_TYPE + enemy_index] != 0x02u))
-            {
-                continue;
-            }
-            {
-                const uint8_t frame = core->ram[CONTRA_RAM_ENEMY_FRAME + enemy_index];
-
-                contra_render_level_1_nametable_update_supertile(
-                    core,
-                    (int)core->ram[CONTRA_RAM_ENEMY_X_POS + enemy_index],
-                    (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + enemy_index],
-                    weapon_box_supertile_tbl[(frame < 3u) ? frame : 0u]);
-            }
-        }
+        /* Faithful enemies render their own super-tiles during their routines
+           (set_weapon_box_supertile etc.) and their OAM sprites via the OAM
+           build; nothing to do per-frame here. */
         return;
     }
 
