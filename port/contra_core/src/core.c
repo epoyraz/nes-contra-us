@@ -8426,6 +8426,149 @@ static void contra_rom_sniper_routine_01(ContraCore *core, uint8_t x)
     contra_rom_advance_enemy_routine(core, x);
 }
 
+/* set_enemy_routine_to_a (bank7.asm:7698): ENEMY_ROUTINE = a. */
+static void contra_rom_set_enemy_routine_to_a(ContraCore *core, uint8_t x, uint8_t a)
+{
+    core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] = a;
+}
+
+/* set_enemy_delay_adv_routine (bank7.asm:7585): ENEMY_ANIMATION_DELAY = a; advance. */
+static void contra_rom_set_enemy_delay_adv_routine(ContraCore *core, uint8_t x, uint8_t a)
+{
+    core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = a;
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+/* set_carry_if_past_trigger_point (bank0.asm:947), horizontal: true if the
+   enemy has scrolled left past trigger_x (ENEMY_X_POS < trigger_x). */
+static bool contra_rom_past_trigger_x(const ContraCore *core, uint8_t x, uint8_t trigger_x)
+{
+    return core->ram[CONTRA_RAM_ENEMY_X_POS + x] < trigger_x;
+}
+
+/* set_weapon_box_supertile (bank0.asm:603): draws the pill-box background
+   super-tile for ENEMY_FRAME. The nametable-supertile render path is not ported
+   yet, so this is a no-op that reports success (buffer not full). The state
+   machine (open/close cycle, HP) below is faithful; only the draw is stubbed.
+   TODO: port draw_enemy_supertile_a with the nametable render chunk. */
+static bool contra_rom_set_weapon_box_supertile(ContraCore *core, uint8_t x)
+{
+    (void)core;
+    (void)x;
+    return false; /* carry clear == drew successfully */
+}
+
+/* weapon_box_routine_00 (bank0.asm:518): init frame, delay, advance. */
+static void contra_rom_weapon_box_routine_00(ContraCore *core, uint8_t x)
+{
+    core->ram[CONTRA_RAM_ENEMY_FRAME + x] = 0x01u;
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x20u);
+}
+
+/* weapon_box_routine_01 (bank0.asm:529): track scroll; once scrolled past the
+   activation trigger, start the open animation; close if near the left edge. */
+static void contra_rom_weapon_box_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    if (!contra_rom_past_trigger_x(core, x, 0xF0u))
+    {
+        return; /* not yet at activation point */
+    }
+    if (contra_rom_past_trigger_x(core, x, 0x18u))
+    {
+        contra_rom_set_enemy_routine_to_a(core, x, 0x04u); /* near left edge: close */
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x08u); /* -> routine_02 */
+}
+
+/* weapon_box_routine_02 (bank0.asm:550): open/close animation cycle (HP toggles
+   between 0xF0 while open/invulnerable-frame and 0x01 while closed). */
+static void contra_rom_weapon_box_routine_02(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    if (contra_rom_past_trigger_x(core, x, 0x18u))
+    {
+        contra_rom_set_enemy_routine_to_a(core, x, 0x04u);
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x08u;
+
+    if (ram[CONTRA_RAM_ENEMY_VAR_2 + x] != 0u)
+    {
+        /* @open_weapon_box: animate toward open */
+        if (contra_rom_set_weapon_box_supertile(core, x))
+        {
+            return;
+        }
+        if (ram[CONTRA_RAM_ENEMY_FRAME + x] != 0u)
+        {
+            ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] - 1u);
+            return;
+        }
+        ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+        ram[CONTRA_RAM_ENEMY_HP + x] = 0xF0u;
+        ram[CONTRA_RAM_ENEMY_VAR_2 + x] = 0x00u;
+    }
+    else
+    {
+        /* closed: animate toward closed */
+        if (contra_rom_set_weapon_box_supertile(core, x))
+        {
+            return;
+        }
+        if (ram[CONTRA_RAM_ENEMY_FRAME + x] < 0x02u)
+        {
+            ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+            return;
+        }
+        ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] - 1u);
+        ram[CONTRA_RAM_ENEMY_HP + x] = 0x01u;
+        ram[CONTRA_RAM_ENEMY_VAR_2 + x] = 0x01u;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x40u;
+    contra_rom_set_enemy_routine_to_a(core, x, 0x02u); /* -> routine_01 */
+}
+
+/* weapon_box_routine_03 (bank0.asm:617): deactivated; draw closed, then remove. */
+static void contra_rom_weapon_box_routine_03(ContraCore *core, uint8_t x)
+{
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    if (contra_rom_set_weapon_box_supertile(core, x))
+    {
+        return; /* buffer full: drawn next frame */
+    }
+    contra_rom_clear_enemy(core, x); /* remove_enemy */
+}
+
 /* dispatch one enemy slot to its type routine by (ENEMY_TYPE, ENEMY_ROUTINE).
    Only ported types act; others hold until their routine is ported. */
 static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
@@ -8435,6 +8578,16 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
 
     switch (type)
     {
+        case 0x02u: /* pill box / weapon box */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_weapon_box_routine_00(core, x); break;
+                case 0x02u: contra_rom_weapon_box_routine_01(core, x); break;
+                case 0x03u: contra_rom_weapon_box_routine_02(core, x); break;
+                case 0x04u: contra_rom_weapon_box_routine_03(core, x); break;
+                default: break; /* explosion/remove routines not yet ported */
+            }
+            break;
         case 0x06u: /* sniper */
             switch (routine)
             {
