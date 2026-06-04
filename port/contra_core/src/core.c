@@ -8346,14 +8346,71 @@ static const uint8_t contra_sniper_frame_tbl[3] = {0x03u, 0x00u, 0x00u};
 static const uint8_t contra_sniper_attack_delay_tbl[3] = {0x40u, 0x04u, 0x10u};
 static const uint8_t contra_sniper_bullet_attack_count_tbl[3] = {0x03u, 0x01u, 0x01u};
 
-/* sniper_set_sprite: sets the sniper's display sprite. The pattern/attr mapping
-   is part of the (not-yet-ported) sprite render path; for now keep ENEMY_SPRITES
-   non-zero (from the animation frame) so the dispatcher's "has sprite" path runs.
-   TODO: port the real sniper_set_sprite tile/aim mapping with the render chunk. */
+/* sniper sprite codes by ENEMY_FRAME (bank0.asm:2073): regular/hiding vs boss. */
+static const uint8_t contra_sniper_sprite_00[7] = {0x44u, 0x45u, 0x46u, 0x43u, 0x42u, 0x41u, 0x29u};
+static const uint8_t contra_sniper_sprite_01[7] = {0x44u, 0x45u, 0x46u, 0x2Cu, 0x42u, 0x2Du, 0x29u};
+
+/* set_soldier... sniper_set_sprite (bank0.asm:1709-area): sprite code from
+   ENEMY_FRAME and sniper type, flip from firing angle (VAR_2), recoil (VAR_3). */
 static void contra_rom_sniper_set_sprite(ContraCore *core, uint8_t x)
 {
-    core->ram[CONTRA_RAM_ENEMY_SPRITES + x] =
-        (uint8_t)(core->ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+    uint8_t *const ram = core->ram;
+    const uint8_t *const tbl =
+        (ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] >= 0x02u) ? contra_sniper_sprite_01 : contra_sniper_sprite_00;
+    const uint8_t frame = ram[CONTRA_RAM_ENEMY_FRAME + x];
+    uint8_t attr;
+
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = tbl[(frame < 7u) ? frame : 0u];
+    attr = ((ram[CONTRA_RAM_ENEMY_VAR_2 + x] & 0x01u) == 0u) ? 0x40u : 0x00u;
+    if (ram[CONTRA_RAM_ENEMY_VAR_3 + x] != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_VAR_3 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_3 + x] - 1u);
+        attr = (uint8_t)(attr | 0x08u);
+    }
+    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = attr;
+}
+
+/* sniper_routine_02 (bank0.asm): render, track scroll, run the attack cadence.
+   DEFERRED: the actual bullet creation (no enemy-bullet system yet) — when the
+   sniper would fire, the delay is reset but no bullet spawns. */
+static void contra_rom_sniper_routine_02(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t attr;
+
+    contra_rom_sniper_set_sprite(core, x);
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_4 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_4 + x] - 1u);
+    if ((int8_t)ram[CONTRA_RAM_ENEMY_VAR_4 + x] >= 0)
+    {
+        ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x18u; /* TODO: spawn bullet here */
+        return;
+    }
+
+    attr = ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x];
+    if (attr == 0u)
+    {
+        /* standing sniper: reset the burst and the between-attack delay */
+        ram[CONTRA_RAM_ENEMY_VAR_4 + x] = contra_sniper_bullet_attack_count_tbl[0];
+        ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x80u;
+    }
+    else
+    {
+        /* crouching / boss sniper: re-hide and advance to the post-attack routine */
+        ram[CONTRA_RAM_ENEMY_FRAME + x] = ((attr & 0x01u) != 0u) ? 0x02u : 0x03u;
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x80u;
+        contra_rom_advance_enemy_routine(core, x);
+    }
 }
 
 /* sniper_routine_00 (bank0.asm:1751): init delay/frame from attributes, nudge Y
@@ -8864,7 +8921,8 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
             {
                 case 0x01u: contra_rom_sniper_routine_00(core, x); break;
                 case 0x02u: contra_rom_sniper_routine_01(core, x); break;
-                default: break; /* attack/explosion routines not yet ported */
+                case 0x03u: contra_rom_sniper_routine_02(core, x); break;
+                default: break; /* post-attack/explosion routines not yet ported */
             }
             break;
         default:
