@@ -8888,6 +8888,54 @@ static void contra_rom_soldier_routine_02(ContraCore *core, uint8_t x)
     contra_rom_update_enemy_pos(core, x);
 }
 
+/* --- flying capsule / weapon zeppelin (enemy type 0x03), bank0.asm:680 --- */
+
+/* set_flying_capsule_y_vel + set_flying_capsule_path (bank7.asm:8712/8765):
+   harmonic weave -- pull the Y velocity toward the base height VAR_1 by
+   subtracting 2*(ENEMY_Y_POS - VAR_1) (16-bit) from the Y velocity. */
+static void contra_rom_set_flying_capsule_y_vel(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t pos = ram[CONTRA_RAM_ENEMY_Y_POS + x];
+    const uint8_t base = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
+    uint16_t dist = (uint16_t)(((pos < base) ? 0xFF00u : 0x0000u) | (uint8_t)(pos - base));
+    uint16_t vel;
+
+    dist = (uint16_t)(dist << 1u); /* shift count = 1 (outdoor) */
+    vel = (uint16_t)(((uint16_t)ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] << 8u) |
+                     ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x]);
+    vel = (uint16_t)(vel - dist);
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] = (uint8_t)(vel >> 8u);
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = (uint8_t)vel;
+}
+
+/* flying_capsule_routine_00 (bank0.asm:680): record the base position, enter
+   from the left, set the cruise velocity (right + weave), advance. */
+static void contra_rom_flying_capsule_routine_00(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = 0x03u;
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = ram[CONTRA_RAM_ENEMY_Y_POS + x];
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = ram[CONTRA_RAM_ENEMY_X_POS + x];
+    contra_rom_add_a_to_enemy_y_pos(core, x, 0x20u);
+    ram[CONTRA_RAM_ENEMY_X_POS + x] = 0x10u;
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = 0x00u; /* flying_capsule_vel_tbl[0] */
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] = 0x00u;
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x] = 0x80u;
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] = 0x01u;
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+/* flying_capsule_routine_01 (bank0.asm): sprite 0x4D, weave the Y velocity,
+   apply velocity + scroll. */
+static void contra_rom_flying_capsule_routine_01(ContraCore *core, uint8_t x)
+{
+    core->ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x4Du;
+    contra_rom_set_flying_capsule_y_vel(core, x);
+    contra_rom_update_enemy_pos(core, x);
+}
+
 /* dispatch one enemy slot to its type routine by (ENEMY_TYPE, ENEMY_ROUTINE).
    Only ported types act; others hold until their routine is ported. */
 static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
@@ -8897,6 +8945,14 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
 
     switch (type)
     {
+        case 0x03u: /* flying capsule / weapon zeppelin */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_flying_capsule_routine_00(core, x); break;
+                case 0x02u: contra_rom_flying_capsule_routine_01(core, x); break;
+                default: break; /* explosion routine not yet ported */
+            }
+            break;
         case 0x05u: /* soldier / running man */
             switch (routine)
             {
