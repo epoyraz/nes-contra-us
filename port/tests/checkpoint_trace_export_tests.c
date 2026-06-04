@@ -18,24 +18,24 @@ typedef struct ExpectedTraceRow
 
 static const ExpectedTraceRow expected_rows[] = {
     {"level1_right_run", "level1-title", 180u, 0u, 0u, 0u, 0u, 0u, 0u},
-    {"level1_right_run", "level1-gameplay-start", 900u, 0u, 0u, 0u, 0u, 0u, 0u},
-    {"level1_right_run", "level1-scroll-mid", 1200u, 0u, 0u, 0u, 0u, 0u, 0u},
-    {"level1_right_run", "level1-enemy-window", 1500u, 0u, 0u, 1u, 0u, 0u, 0u},
+    {"level1_right_run", "level1-gameplay-start", 900u, 0u, 0u, 1u, 0u, 0u, 0u},
+    {"level1_right_run", "level1-scroll-mid", 1200u, 0u, 0u, 2u, 0u, 0u, 0u},
+    {"level1_right_run", "level1-enemy-window", 1500u, 0u, 0u, 3u, 0u, 0u, 0u},
     {"attract_level1_demo", "level1-title", 180u, 0u, 0u, 0u, 0u, 0u, 0u},
     {"attract_level1_demo", "level1-gameplay-start", 900u, 0u, 0u, 0u, 0u, 0u, 0u},
     {"attract_level1_demo", "level1-scroll-mid", 1200u, 0u, 0u, 1u, 0u, 0u, 0u},
     {"attract_level1_demo", "level1-enemy-window", 1500u, 0u, 0u, 2u, 0u, 0u, 0u},
-    {"attract_level2_demo", "level2-attract-first-room", 2981u, 1u, 1u, 0u, 0u, 0u, 0u},
-    {"attract_level2_demo", "level2-wall-core-loaded", 2982u, 1u, 1u, 0u, 0u, 0u, 1u},
-    {"attract_level2_demo", "level2-wall-core-destroyed", 3230u, 1u, 1u, 0u, 0u, 0u, 0u},
-    {"attract_level2_demo", "level2-room-cleared", 3253u, 1u, 1u, 0u, 0u, 1u, 0u},
-    {"attract_level2_demo", "level2-after-room-1", 3630u, 1u, 1u, 1u, 0u, 0u, 1u},
-    {"attract_level2_demo", "level2-demo-finished", 4598u, 1u, 1u, 1u, 0u, 0u, 1u},
-    {"level2_room_chain", "level2-first-room", 228u, 1u, 1u, 0u, 0u, 0u, 1u},
-    {"level2_room_chain", "level2-after-room-1", 395u, 1u, 1u, 1u, 0u, 0u, 1u},
-    {"level2_room_chain", "level2-after-room-4", 803u, 1u, 1u, 4u, 0u, 0u, 1u},
-    {"level2_room_chain", "level2-boss-state", 939u, 1u, 128u, 5u, 0u, 0u, 1u},
-    {"level2_room_chain", "level2-boss-defeated", 984u, 1u, 128u, 5u, 0u, 1u, 1u}
+    {"attract_level2_demo", "level2-attract-first-room", 3006u, 1u, 1u, 0u, 0u, 0u, 0u},
+    {"attract_level2_demo", "level2-wall-core-loaded", 3007u, 1u, 1u, 0u, 0u, 0u, 1u},
+    {"attract_level2_demo", "level2-wall-core-destroyed", 3255u, 1u, 1u, 0u, 0u, 0u, 0u},
+    {"attract_level2_demo", "level2-room-cleared", 3278u, 1u, 1u, 0u, 0u, 1u, 0u},
+    {"attract_level2_demo", "level2-after-room-1", 3655u, 1u, 1u, 1u, 0u, 0u, 1u},
+    {"attract_level2_demo", "level2-demo-finished", 4623u, 1u, 1u, 1u, 0u, 0u, 1u},
+    {"level2_room_chain", "level2-first-room", 236u, 1u, 1u, 0u, 0u, 0u, 1u},
+    {"level2_room_chain", "level2-after-room-1", 403u, 1u, 1u, 1u, 0u, 0u, 1u},
+    {"level2_room_chain", "level2-after-room-4", 811u, 1u, 1u, 4u, 0u, 0u, 1u},
+    {"level2_room_chain", "level2-boss-state", 947u, 1u, 128u, 5u, 0u, 0u, 1u},
+    {"level2_room_chain", "level2-boss-defeated", 992u, 1u, 128u, 5u, 0u, 1u, 1u}
 };
 
 static bool contains_string_field(const char *line, const char *key, const char *value)

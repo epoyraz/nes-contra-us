@@ -68,6 +68,19 @@ typedef struct ContraCore
     ContraNativeEnemy enemies[CONTRA_NATIVE_MAX_ENEMIES];
     ContraNativeProjectile enemy_projectiles[CONTRA_NATIVE_MAX_ENEMY_PROJECTILES];
     ContraInputSnapshot pending_input;
+    uint8_t startup_wait_frames;
+    uint8_t level_graphics_wait_frames;
+    uint8_t level1_weapon_box_restore_timer;
+    int16_t level1_weapon_box_restore_x;
+    int16_t level1_weapon_box_restore_y;
+    uint8_t pending_horizontal_column_write;
+    uint8_t pending_horizontal_column_tile_offset;
+    uint8_t pending_horizontal_column_supertile_offset;
+    uint16_t pending_horizontal_column_ppu_addr;
+    uint8_t pending_horizontal_attr_write;
+    uint8_t pending_horizontal_attr_tile_offset;
+    uint8_t pending_horizontal_attr_supertile_offset;
+    uint8_t pending_horizontal_attr_high;
 } ContraCore;
 
 void contra_core_init(ContraCore *core);

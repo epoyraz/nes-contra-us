@@ -420,6 +420,26 @@ static void contra_load_alternate_graphics(ContraCore *core);
 static void contra_load_bank_6_write_text_palette_to_mem(ContraCore *core, uint8_t text_code);
 static void contra_init_apu_channels(ContraCore *core);
 static void contra_run_level_routine(ContraCore *core);
+static void contra_finish_level_graphics_load(ContraCore *core);
+static void contra_write_level_1_nametable_update_supertile_to_ppu(
+    ContraCore *core,
+    int enemy_x,
+    int enemy_y,
+    uint8_t supertile_index
+);
+static void contra_calculate_level_1_nametable_update_supertile_ppu_addr(
+    const ContraCore *core,
+    int enemy_x,
+    int enemy_y,
+    uint16_t *tile_ppu_addr,
+    uint16_t *attr_ppu_addr
+);
+static void contra_write_level_1_nametable_update_supertile_to_ppu_addr(
+    ContraCore *core,
+    uint16_t tile_ppu_addr,
+    uint16_t attr_ppu_addr,
+    uint8_t supertile_index
+);
 
 static bool contra_load_rom_image(void)
 {
@@ -834,6 +854,193 @@ static void contra_load_supertiles_screen_indexes(ContraCore *core, uint8_t scre
         core->level_screen_supertiles,
         core->ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET]
     );
+}
+
+static void contra_write_horizontal_level_column_snapshot_to_ppu(
+    ContraCore *core,
+    uint16_t ppu_addr,
+    uint8_t tile_offset,
+    uint8_t supertile_nametable_offset
+)
+{
+    const uint8_t *const ram = core->ram;
+    const uint16_t supertile_ptr = (uint16_t)(
+        (uint16_t)ram[CONTRA_RAM_LEVEL_SUPERTILE_DATA_PTR] |
+        ((uint16_t)ram[CONTRA_RAM_LEVEL_SUPERTILE_DATA_PTR + 1u] << 8u)
+    );
+    const uint8_t tile_x = tile_offset & 0x1Fu;
+    const uint8_t supertile_column = (uint8_t)(tile_x >> 2u);
+    const uint8_t tile_x_in_supertile = (uint8_t)(tile_x & 0x03u);
+    uint8_t tile_y;
+
+    if ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u) ||
+        (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u) ||
+        (!contra_load_rom_image()))
+    {
+        return;
+    }
+
+    for (tile_y = 0u; tile_y < 28u; ++tile_y)
+    {
+        const uint8_t supertile_row = (uint8_t)(tile_y >> 2u);
+        const uint8_t supertile_offset = (uint8_t)(
+            supertile_nametable_offset +
+            (uint8_t)(supertile_row * 8u) +
+            supertile_column
+        );
+        const uint8_t supertile_index = core->level_screen_supertiles[supertile_offset];
+        const uint16_t supertile_data_addr = (uint16_t)(
+            supertile_ptr + ((uint16_t)supertile_index * 16u)
+        );
+        const uint8_t tile_in_supertile = (uint8_t)(((tile_y & 0x03u) << 2u) | tile_x_in_supertile);
+        const uint8_t pattern_index = contra_rom_read_u8(
+            3u,
+            (uint16_t)(supertile_data_addr + tile_in_supertile)
+        );
+
+        contra_write_ppu_byte(core, ppu_addr, pattern_index);
+        ppu_addr = (uint16_t)(ppu_addr + 0x20u);
+    }
+}
+
+static void contra_write_horizontal_level_column_to_ppu(ContraCore *core)
+{
+    const uint8_t *const ram = core->ram;
+    const uint16_t ppu_addr = (uint16_t)(
+        ((uint16_t)ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] << 8u) |
+        (uint16_t)ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE]
+    );
+
+    contra_write_horizontal_level_column_snapshot_to_ppu(
+        core,
+        ppu_addr,
+        ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET],
+        ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET]
+    );
+}
+
+static void contra_write_horizontal_level_column_attributes_snapshot_to_ppu(
+    ContraCore *core,
+    uint8_t tile_offset,
+    uint8_t supertile_nametable_offset,
+    uint8_t attr_high
+)
+{
+    const uint8_t *const ram = core->ram;
+    const uint16_t palette_ptr = (uint16_t)(
+        (uint16_t)ram[CONTRA_RAM_LEVEL_SUPERTILE_PALETTE_DATA] |
+        ((uint16_t)ram[CONTRA_RAM_LEVEL_SUPERTILE_PALETTE_DATA + 1u] << 8u)
+    );
+    const uint8_t attr_col = (uint8_t)((tile_offset >> 2u) & 0x07u);
+    uint8_t attr_low = (uint8_t)(0xC0u | attr_col);
+    uint8_t attr_row;
+
+    if ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u) ||
+        (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u) ||
+        (!contra_load_rom_image()))
+    {
+        return;
+    }
+
+    for (attr_row = 0u; attr_row < 7u; ++attr_row)
+    {
+        const uint8_t supertile_offset = (uint8_t)(
+            supertile_nametable_offset +
+            (uint8_t)(attr_row * 8u) +
+            attr_col
+        );
+        const uint8_t supertile_index = core->level_screen_supertiles[supertile_offset];
+        const uint8_t attr = contra_rom_read_u8(3u, (uint16_t)(palette_ptr + supertile_index));
+        const uint16_t ppu_addr = (uint16_t)(
+            ((uint16_t)attr_high << 8u) |
+            (uint16_t)attr_low
+        );
+
+        contra_write_ppu_byte(core, ppu_addr, attr);
+        attr_low = (uint8_t)(attr_low + 0x08u);
+    }
+}
+
+static void contra_write_horizontal_level_column_attributes_to_ppu(ContraCore *core)
+{
+    const uint8_t *const ram = core->ram;
+
+    contra_write_horizontal_level_column_attributes_snapshot_to_ppu(
+        core,
+        ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET],
+        ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET],
+        ram[CONTRA_RAM_ATTRIBUTE_TBL_WRITE_HIGH_BYTE]
+    );
+}
+
+static void contra_schedule_horizontal_level_column_write(ContraCore *core)
+{
+    const uint8_t *const ram = core->ram;
+
+    core->pending_horizontal_column_write = 0x01u;
+    core->pending_horizontal_column_tile_offset = ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET];
+    core->pending_horizontal_column_supertile_offset = ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET];
+    core->pending_horizontal_column_ppu_addr = (uint16_t)(
+        ((uint16_t)ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] << 8u) |
+        (uint16_t)ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE]
+    );
+}
+
+static void contra_schedule_horizontal_level_column_attributes_write(ContraCore *core)
+{
+    const uint8_t *const ram = core->ram;
+
+    core->pending_horizontal_attr_write = 0x01u;
+    core->pending_horizontal_attr_tile_offset = ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET];
+    core->pending_horizontal_attr_supertile_offset = ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET];
+    core->pending_horizontal_attr_high = ram[CONTRA_RAM_ATTRIBUTE_TBL_WRITE_HIGH_BYTE];
+}
+
+static void contra_flush_pending_horizontal_level_writes(ContraCore *core)
+{
+    if (core->pending_horizontal_column_write != 0u)
+    {
+        contra_write_horizontal_level_column_snapshot_to_ppu(
+            core,
+            core->pending_horizontal_column_ppu_addr,
+            core->pending_horizontal_column_tile_offset,
+            core->pending_horizontal_column_supertile_offset
+        );
+        core->pending_horizontal_column_write = 0x00u;
+    }
+
+    if (core->pending_horizontal_attr_write != 0u)
+    {
+        contra_write_horizontal_level_column_attributes_snapshot_to_ppu(
+            core,
+            core->pending_horizontal_attr_tile_offset,
+            core->pending_horizontal_attr_supertile_offset,
+            core->pending_horizontal_attr_high
+        );
+        core->pending_horizontal_attr_write = 0x00u;
+    }
+}
+
+static void contra_advance_horizontal_level_ppu_column(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] =
+        (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] + 1u);
+    ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] =
+        (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] + 1u);
+
+    if (ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] < 0x20u)
+    {
+        return;
+    }
+
+    ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET] ^= 0x40u;
+    contra_load_supertiles_screen_indexes(core, (uint8_t)(ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] + 2u));
+    ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = 0x00u;
+    ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] = 0x00u;
+    ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] ^= 0x04u;
+    ram[CONTRA_RAM_ATTRIBUTE_TBL_WRITE_HIGH_BYTE] ^= 0x04u;
 }
 
 static uint8_t contra_read_nametable_byte(const ContraCore *core, uint8_t nametable_index, uint16_t offset)
@@ -1263,7 +1470,6 @@ static void contra_zero_out_nametables(ContraCore *core)
     core->ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER] = 0x00u;
     memset(&core->ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER], 0, CONTRA_CPU_GRAPHICS_BUFFER_SIZE);
     memset(core->ppu_nametable, 0, sizeof(core->ppu_nametable));
-    memset(core->level_screen_supertiles, 0, sizeof(core->level_screen_supertiles));
 }
 
 static void contra_load_intro_graphics(ContraCore *core)
@@ -3385,6 +3591,21 @@ static bool contra_update_indoor_player_transition(ContraCore *core, uint8_t pla
     return true;
 }
 
+/* Snap a screen Y to the standing height the game settles a grounded actor to on
+   the outdoor horizontal level: align to the 16px grid (relative to the vertical
+   scroll) and add the 4px fine offset that seats feet on the grass surface. */
+static uint8_t contra_outdoor_landing_snap_y(const ContraCore *core, uint8_t reference_y)
+{
+    const uint8_t vertical_offset =
+        (uint8_t)((core->ram[CONTRA_RAM_VERTICAL_SCROLL] & 0x0Fu) | 0xF0u);
+    uint8_t landing_y = (uint8_t)(reference_y + vertical_offset);
+
+    landing_y &= 0xF0u;
+    landing_y = (uint8_t)(landing_y - vertical_offset);
+    landing_y = (uint8_t)(landing_y + 0x04u);
+    return landing_y;
+}
+
 static void contra_set_player_landing_y_offset(ContraCore *core, uint8_t player_index)
 {
     uint8_t *const ram = core->ram;
@@ -3402,15 +3623,8 @@ static void contra_set_player_landing_y_offset(ContraCore *core, uint8_t player_
         return;
     }
 
-    {
-        const uint8_t vertical_offset = (uint8_t)((ram[CONTRA_RAM_VERTICAL_SCROLL] & 0x0Fu) | 0xF0u);
-        uint8_t landing_y = (uint8_t)(ram[CONTRA_RAM_SPRITE_Y_POS + player_index] + vertical_offset);
-
-        landing_y &= 0xF0u;
-        landing_y = (uint8_t)(landing_y - vertical_offset);
-        landing_y = (uint8_t)(landing_y + 0x04u);
-        ram[CONTRA_RAM_SPRITE_Y_POS + player_index] = landing_y;
-    }
+    ram[CONTRA_RAM_SPRITE_Y_POS + player_index] =
+        contra_outdoor_landing_snap_y(core, ram[CONTRA_RAM_SPRITE_Y_POS + player_index]);
 }
 
 static void contra_land_player_on_ground(ContraCore *core, uint8_t player_index)
@@ -4134,6 +4348,60 @@ static bool contra_find_level_1_floor_y_below(
     return false;
 }
 
+/* Find the screen Y of the top of the first solid floor tile at or below
+   start_y, scanning at the 8px collision-tile resolution (the coarse finder
+   above steps 16px). Returns false if no solid ground is found. */
+static bool contra_find_outdoor_floor_surface_y(
+    const ContraCore *core,
+    uint8_t world_x,
+    uint8_t start_y,
+    uint8_t *surface_y_out
+)
+{
+    uint8_t test_y = (start_y < 0x10u) ? 0x10u : start_y;
+
+    /* Align the first probe to the 8px tile grid (tiles begin at the 0x10
+       status-bar offset) so each step samples a distinct floor tile. */
+    test_y = (uint8_t)(((uint8_t)(test_y - 0x10u) & 0xF8u) + 0x10u);
+
+    while (test_y < 0xF0u)
+    {
+        if (contra_get_outdoor_horizontal_bg_collision(core, world_x, test_y) == 0x01u)
+        {
+            *surface_y_out = test_y;
+            return true;
+        }
+
+        test_y = (uint8_t)(test_y + 0x08u);
+    }
+
+    return false;
+}
+
+/* Seat a grounded enemy at the same height the player would settle to on the
+   floor beneath it. The enemy and player share the +0x10 foot anchor, so
+   running the detected floor surface through the player's landing snap keeps
+   ground enemies aligned with the player instead of sitting below the floor. */
+static void contra_snap_native_enemy_to_outdoor_floor(ContraCore *core, ContraNativeEnemy *enemy)
+{
+    uint8_t surface_y;
+
+    if ((core->ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u) ||
+        (core->ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u))
+    {
+        return;
+    }
+
+    if (contra_find_outdoor_floor_surface_y(
+            core,
+            (uint8_t)enemy->x,
+            (uint8_t)enemy->y,
+            &surface_y))
+    {
+        enemy->y = (int16_t)contra_outdoor_landing_snap_y(core, (uint8_t)(surface_y - 0x10u));
+    }
+}
+
 static void contra_spawn_level_1_weapon_item(ContraNativeEnemy *enemy)
 {
     enemy->type = 0x00u;
@@ -4205,7 +4473,7 @@ static void contra_spawn_level_1_enemy_explosion(ContraNativeEnemy *enemy, uint8
     enemy->y = explosion_y;
 }
 
-static void contra_handle_level_1_enemy_destroyed(ContraNativeEnemy *enemy)
+static void contra_handle_level_1_enemy_destroyed(ContraCore *core, ContraNativeEnemy *enemy)
 {
     const uint8_t enemy_type = enemy->type;
 
@@ -4213,6 +4481,29 @@ static void contra_handle_level_1_enemy_destroyed(ContraNativeEnemy *enemy)
     {
         contra_spawn_level_1_weapon_item(enemy);
         return;
+    }
+
+    if (enemy_type == 0x02u)
+    {
+        uint16_t tile_ppu_addr;
+        uint16_t attr_ppu_addr;
+
+        contra_calculate_level_1_nametable_update_supertile_ppu_addr(
+            core,
+            (int)enemy->x,
+            (int)enemy->y,
+            &tile_ppu_addr,
+            &attr_ppu_addr
+        );
+        contra_write_level_1_nametable_update_supertile_to_ppu_addr(
+            core,
+            tile_ppu_addr,
+            attr_ppu_addr,
+            0x02u
+        );
+        core->level1_weapon_box_restore_timer = 0x3Du;
+        core->level1_weapon_box_restore_x = (int16_t)tile_ppu_addr;
+        core->level1_weapon_box_restore_y = (int16_t)attr_ppu_addr;
     }
 
     contra_spawn_level_1_enemy_explosion(enemy, contra_get_level_1_enemy_explosion_type(enemy_type));
@@ -4296,7 +4587,9 @@ static bool contra_try_spawn_level_1_enemy_projectile(
     int spawn_y,
     int8_t vx,
     int8_t vy,
-    uint8_t owner
+    uint8_t owner,
+    uint8_t sprite_code,
+    uint8_t sprite_attr
 )
 {
     size_t projectile_index;
@@ -4313,8 +4606,8 @@ static bool contra_try_spawn_level_1_enemy_projectile(
         memset(projectile, 0, sizeof(*projectile));
         projectile->active = 0x01u;
         projectile->damage = 0x01u;
-        projectile->sprite_code = 0x1Eu;
-        projectile->sprite_attr = 0x03u;
+        projectile->sprite_code = sprite_code;
+        projectile->sprite_attr = sprite_attr;
         projectile->owner = owner;
         projectile->timer = 0x70u;
         projectile->x = (int16_t)spawn_x;
@@ -4325,6 +4618,67 @@ static bool contra_try_spawn_level_1_enemy_projectile(
     }
 
     return false;
+}
+
+static bool contra_try_spawn_level_1_regular_projectile(
+    ContraCore *core,
+    int spawn_x,
+    int spawn_y,
+    int8_t vx,
+    int8_t vy,
+    uint8_t owner
+)
+{
+    return contra_try_spawn_level_1_enemy_projectile(
+        core,
+        spawn_x,
+        spawn_y,
+        vx,
+        vy,
+        owner,
+        0x1Eu,
+        0x03u
+    );
+}
+
+static uint8_t contra_level_1_boss_bomb_turret_sprite_code(const ContraNativeEnemy *enemy)
+{
+    static const uint8_t boss_bomb_turret_supertile_tbl[6] = {
+        0x29u, 0x26u, 0x2Au, 0x27u, 0x2Bu, 0x28u
+    };
+    uint8_t frame_offset = (uint8_t)(enemy->flags & 0x06u);
+
+    if (frame_offset > 0x04u)
+    {
+        frame_offset = 0x00u;
+    }
+
+    return boss_bomb_turret_supertile_tbl[frame_offset + (enemy->attrs & 0x01u)];
+}
+
+static int contra_level_1_boss_bomb_turret_render_x(const ContraNativeEnemy *enemy)
+{
+    return (int)enemy->x - (((enemy->attrs & 0x01u) != 0u) ? 8 : 0);
+}
+
+static bool contra_try_spawn_level_1_boss_bomb_turret_projectile(
+    ContraCore *core,
+    const ContraNativeEnemy *enemy
+)
+{
+    static const int8_t boss_bomb_turret_bomb_velocity_tbl[4] = {-1, -3, -5, -7};
+    const int8_t vx = boss_bomb_turret_bomb_velocity_tbl[core->ram[CONTRA_RAM_RANDOM_NUM] & 0x03u];
+
+    return contra_try_spawn_level_1_enemy_projectile(
+        core,
+        (int)enemy->x - 8,
+        (int)enemy->y,
+        vx,
+        -1,
+        enemy->type,
+        0x21u,
+        0x02u
+    );
 }
 
 static bool contra_try_fire_level_1_turret(
@@ -4347,27 +4701,42 @@ static bool contra_try_fire_level_1_turret(
 
     contra_select_level_1_projectile_velocity(target_dx, target_dy, &vx, &vy);
 
+    /*
+     * The turret is rendered with its supertile snapped to the world's
+     * 8-pixel grid (see contra_render_level_1_nametable_update_supertile).
+     * Spawn bullets from the same snapped center so the muzzle position
+     * tracks the visible turret instead of the unaligned enemy->x.
+     */
     {
-        /*
-         * The turret is rendered with its supertile snapped to the world's
-         * 8-pixel grid (see contra_render_level_1_nametable_update_supertile).
-         * Spawn bullets from the same snapped center so the muzzle position
-         * tracks the visible turret instead of the unaligned enemy->x.
-         */
         const int scroll_offset = (int)core->ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET];
         const int aligned_x = ((((int)enemy->x - 12) + scroll_offset) & ~7) - scroll_offset + 12;
         const int aligned_y = (((int)enemy->y - 12) & ~7) + 12;
 
         if (enemy->type == 0x07u)
         {
-            spawn_x = aligned_x - 10;
-            spawn_y = aligned_y + 8;
+            static const int8_t red_turret_muzzle_offsets[3][2] = {
+                {-14, 0},
+                {-14, -8},
+                {-8, -16}
+            };
+            uint8_t muzzle_index = 0u;
+
+            if (target_dy < -24)
+            {
+                muzzle_index = 2u;
+            }
+            else if (target_dy < -4)
+            {
+                muzzle_index = 1u;
+            }
+
+            spawn_x = aligned_x + red_turret_muzzle_offsets[muzzle_index][0];
+            spawn_y = aligned_y + red_turret_muzzle_offsets[muzzle_index][1];
+            return contra_try_spawn_level_1_regular_projectile(core, spawn_x, spawn_y, vx, vy, enemy->type);
         }
-        else
-        {
-            spawn_x = aligned_x + 4;
-            spawn_y = aligned_y + 8;
-        }
+
+        spawn_x = aligned_x + 4;
+        spawn_y = aligned_y + 8;
     }
 
     if (vx > 0)
@@ -4388,7 +4757,7 @@ static bool contra_try_fire_level_1_turret(
         spawn_y -= 8;
     }
 
-    return contra_try_spawn_level_1_enemy_projectile(core, spawn_x, spawn_y, vx, vy, enemy->type);
+    return contra_try_spawn_level_1_regular_projectile(core, spawn_x, spawn_y, vx, vy, enemy->type);
 }
 
 static void contra_update_native_enemy_projectiles(ContraCore *core)
@@ -4520,7 +4889,7 @@ static void contra_check_native_player_collisions(ContraCore *core)
 
                 if (barrier_invincible)
                 {
-                    contra_handle_level_1_enemy_destroyed(enemy);
+                    contra_handle_level_1_enemy_destroyed(core, enemy);
                     continue;
                 }
 
@@ -4604,7 +4973,7 @@ static void contra_apply_outdoor_horizontal_frame_scroll(ContraCore *core, uint8
     if (((active_players & 0x01u) != 0u) &&
         (ram[CONTRA_RAM_PLAYER_STATE + 0u] == 0x01u) &&
         (ram[CONTRA_RAM_PLAYER_X_VELOCITY + 0u] == 0x01u) &&
-        (ram[CONTRA_RAM_SPRITE_X_POS + 0u] >= trigger_x))
+        (ram[CONTRA_RAM_SPRITE_X_POS + 0u] > trigger_x))
     {
         scroller = 0;
     }
@@ -4612,7 +4981,7 @@ static void contra_apply_outdoor_horizontal_frame_scroll(ContraCore *core, uint8
     if (((active_players & 0x02u) != 0u) &&
         (ram[CONTRA_RAM_PLAYER_STATE + 1u] == 0x01u) &&
         (ram[CONTRA_RAM_PLAYER_X_VELOCITY + 1u] == 0x01u) &&
-        (ram[CONTRA_RAM_SPRITE_X_POS + 1u] >= trigger_x))
+        (ram[CONTRA_RAM_SPRITE_X_POS + 1u] > trigger_x))
     {
         if ((scroller < 0) || (ram[CONTRA_RAM_SPRITE_X_POS + 1u] > ram[CONTRA_RAM_SPRITE_X_POS + (size_t)scroller]))
         {
@@ -4627,11 +4996,18 @@ static void contra_apply_outdoor_horizontal_frame_scroll(ContraCore *core, uint8
 
     if ((active_players == 0x03u) && (ram[CONTRA_RAM_SPRITE_X_POS + (size_t)(scroller ^ 1)] < 0x21u))
     {
+        ram[CONTRA_RAM_PLAYER_X_VELOCITY + (size_t)scroller] = 0x00u;
+        if (ram[CONTRA_RAM_SPRITE_X_POS + (size_t)scroller] > trigger_x)
+        {
+            ram[CONTRA_RAM_SPRITE_X_POS + (size_t)scroller] =
+                (uint8_t)(ram[CONTRA_RAM_SPRITE_X_POS + (size_t)scroller] - 1u);
+        }
         return;
     }
 
     ram[CONTRA_RAM_FRAME_SCROLL] = 0x01u;
     ram[CONTRA_RAM_PLAYER_FRAME_SCROLL + (size_t)scroller] = 0x01u;
+    ram[CONTRA_RAM_PLAYER_X_VELOCITY + (size_t)scroller] = 0x00u;
 
     if (ram[CONTRA_RAM_SPRITE_X_POS + (size_t)scroller] != 0u)
     {
@@ -4730,8 +5106,6 @@ static void contra_load_bank_3_handle_scroll(ContraCore *core)
     {
         ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] =
             (uint8_t)(ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] + 1u);
-        ram[CONTRA_RAM_HORIZONTAL_SCROLL] =
-            (uint8_t)(ram[CONTRA_RAM_HORIZONTAL_SCROLL] + 1u);
 
         if (ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] == 0u)
         {
@@ -4746,6 +5120,19 @@ static void contra_load_bank_3_handle_scroll(ContraCore *core)
                 contra_load_alternate_graphics(core);
             }
         }
+
+        if ((ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] & 0x07u) == 0u)
+        {
+            contra_schedule_horizontal_level_column_write(core);
+            contra_advance_horizontal_level_ppu_column(core);
+        }
+        else if ((ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] & 0x0Fu) == 0x03u)
+        {
+            contra_schedule_horizontal_level_column_attributes_write(core);
+        }
+
+        ram[CONTRA_RAM_HORIZONTAL_SCROLL] =
+            (uint8_t)(ram[CONTRA_RAM_HORIZONTAL_SCROLL] + 1u);
     }
 }
 
@@ -4822,7 +5209,7 @@ static void contra_load_bank_0_exe_all_enemy_routine(ContraCore *core)
 
                         for (shot_index = 0u; shot_index < 3u; ++shot_index)
                         {
-                            (void)contra_try_spawn_level_1_enemy_projectile(
+                            (void)contra_try_spawn_level_1_regular_projectile(
                                 core,
                                 (int)enemy->x + cannon_x_offset[shot_index],
                                 (int)enemy->y + 8,
@@ -5076,7 +5463,7 @@ static void contra_load_bank_0_exe_all_enemy_routine(ContraCore *core)
                                     &projectile_vx,
                                     &projectile_vy
                                 );
-                                if (contra_try_spawn_level_1_enemy_projectile(
+                                if (contra_try_spawn_level_1_regular_projectile(
                                         core,
                                         (int)enemy->x,
                                         (int)enemy->y,
@@ -5348,11 +5735,13 @@ static void contra_load_bank_0_exe_all_enemy_routine(ContraCore *core)
                     {
                         enemy->state = CONTRA_NATIVE_LEVEL1_STATE_ACTIVE;
                         enemy->sprite_code = 0x02u;
+                        contra_snap_native_enemy_to_outdoor_floor(core, enemy);
                     }
                 }
                 else
                 {
                     enemy->sprite_code = 0x02u;
+                    contra_snap_native_enemy_to_outdoor_floor(core, enemy);
                 }
                 break;
 
@@ -5526,6 +5915,7 @@ static void contra_load_bank_0_exe_all_enemy_routine(ContraCore *core)
                 enemy->sprite_code = contra_level_1_soldier_walk_sprites[(enemy->timer >> 3u) % 6u];
                 enemy->x = (int16_t)(enemy->x + enemy->vx);
                 enemy->sprite_attr = (uint8_t)(enemy->vx < 0 ? 0x40u : 0x00u);
+                contra_snap_native_enemy_to_outdoor_floor(core, enemy);
                 if ((enemy->x < -16) || (enemy->x > 0x110))
                 {
                     memset(enemy, 0, sizeof(*enemy));
@@ -5535,6 +5925,10 @@ static void contra_load_bank_0_exe_all_enemy_routine(ContraCore *core)
 
             case 0x06u:
                 enemy->sprite_attr = (uint8_t)((has_target && (target_dx > 0)) ? 0x00u : 0x40u);
+                if ((enemy->attrs & 0x03u) == 0x00u)
+                {
+                    contra_snap_native_enemy_to_outdoor_floor(core, enemy);
+                }
                 if (enemy->x < 0x10)
                 {
                     memset(enemy, 0, sizeof(*enemy));
@@ -5645,6 +6039,26 @@ static void contra_load_bank_0_exe_all_enemy_routine(ContraCore *core)
                 if (enemy->x < 0x18)
                 {
                     memset(enemy, 0, sizeof(*enemy));
+                    break;
+                }
+
+                if (enemy->cooldown != 0u)
+                {
+                    enemy->cooldown = (uint8_t)(enemy->cooldown - 1u);
+                    enemy->sprite_code = contra_level_1_boss_bomb_turret_sprite_code(enemy);
+                    break;
+                }
+
+                {
+                    const uint8_t current_frame = (uint8_t)(enemy->flags & 0x02u);
+
+                    enemy->cooldown = (current_frame == 0u) ? 0x28u : 0x08u;
+                    enemy->flags = (uint8_t)(current_frame ^ 0x02u);
+                    enemy->sprite_code = contra_level_1_boss_bomb_turret_sprite_code(enemy);
+                    if ((enemy->flags & 0x02u) != 0u)
+                    {
+                        (void)contra_try_spawn_level_1_boss_bomb_turret_projectile(core, enemy);
+                    }
                 }
                 break;
 
@@ -5816,7 +6230,7 @@ static void contra_load_bank_0_exe_all_enemy_routine(ContraCore *core)
 
             if (enemy->hp == 0u)
             {
-                contra_handle_level_1_enemy_destroyed(enemy);
+                contra_handle_level_1_enemy_destroyed(core, enemy);
             }
 
             break;
@@ -6085,6 +6499,7 @@ static void contra_load_bank_2_load_screen_enemy_data(ContraCore *core)
                         {
                             enemy->x = 0x0A;
                         }
+                        contra_snap_native_enemy_to_outdoor_floor(core, enemy);
                         break;
 
                     case 0x06u:
@@ -6104,6 +6519,10 @@ static void contra_load_bank_2_load_screen_enemy_data(ContraCore *core)
                             enemy->y = (int16_t)(enemy->y + 4);
                         }
                         enemy->hp = 0x01u;
+                        if ((enemy->attrs & 0x03u) == 0x00u)
+                        {
+                            contra_snap_native_enemy_to_outdoor_floor(core, enemy);
+                        }
                         break;
 
                     case 0x07u:
@@ -6113,7 +6532,9 @@ static void contra_load_bank_2_load_screen_enemy_data(ContraCore *core)
                         break;
 
                     case 0x10u:
-                        enemy->sprite_code = (uint8_t)(((enemy->attrs & 0x01u) != 0u) ? 0x29u : 0x26u);
+                        enemy->cooldown = 0x20u;
+                        enemy->flags = 0x00u;
+                        enemy->sprite_code = contra_level_1_boss_bomb_turret_sprite_code(enemy);
                         enemy->hp = 0x08u;
                         break;
 
@@ -6317,6 +6738,7 @@ static void contra_try_spawn_level_1_generated_soldier(ContraCore *core)
         enemy->x = spawn_x;
         enemy->y = spawn_y;
         enemy->vx = spawn_on_right ? -1 : 1;
+        contra_snap_native_enemy_to_outdoor_floor(core, enemy);
         ram[CONTRA_RAM_SCREEN_GEN_SOLDIERS] = (uint8_t)(ram[CONTRA_RAM_SCREEN_GEN_SOLDIERS] + 1u);
         return;
     }
@@ -6628,6 +7050,13 @@ static void contra_clear_level_runtime_memory(ContraCore *core)
 {
     memset(&core->ram[0x40u], 0, 0xF0u - 0x40u);
     memset(&core->ram[CONTRA_RAM_CPU_SPRITE_BUFFER], 0, CONTRA_RAM_CPU_GRAPHICS_BUFFER - CONTRA_RAM_CPU_SPRITE_BUFFER);
+    memset(core->enemies, 0, sizeof(core->enemies));
+    memset(core->enemy_projectiles, 0, sizeof(core->enemy_projectiles));
+    core->level1_weapon_box_restore_timer = 0x00u;
+    core->level1_weapon_box_restore_x = 0;
+    core->level1_weapon_box_restore_y = 0;
+    core->pending_horizontal_column_write = 0x00u;
+    core->pending_horizontal_attr_write = 0x00u;
 }
 
 static bool contra_init_lvl_nametable_animation_elapsed(ContraCore *core)
@@ -6656,6 +7085,12 @@ static bool contra_init_lvl_nametable_animation_elapsed(ContraCore *core)
         ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] = 0x23u;
         contra_load_next_supertiles_screen_indexes(core);
         return true;
+    }
+
+    if (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0u)
+    {
+        contra_write_horizontal_level_column_to_ppu(core);
+        contra_write_horizontal_level_column_attributes_to_ppu(core);
     }
 
     ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] + 1u);
@@ -7103,6 +7538,11 @@ static void contra_level_routine_00(ContraCore *core)
     contra_zero_out_nametables(core);
     memset(core->enemies, 0, sizeof(core->enemies));
     memset(core->enemy_projectiles, 0, sizeof(core->enemy_projectiles));
+    core->level1_weapon_box_restore_timer = 0x00u;
+    core->level1_weapon_box_restore_x = 0;
+    core->level1_weapon_box_restore_y = 0;
+    core->pending_horizontal_column_write = 0x00u;
+    core->pending_horizontal_attr_write = 0x00u;
     contra_load_bank_6_write_text_palette_to_mem(core, 0x06u);
     core->ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] = 0x00u;
     core->ram[CONTRA_RAM_LEVEL_END_PLAYERS_ALIVE] = 0x00u;
@@ -7137,8 +7577,6 @@ static void contra_level_routine_01(ContraCore *core)
 
 static void contra_level_routine_02(ContraCore *core)
 {
-    const uint8_t level = core->ram[CONTRA_RAM_CURRENT_LEVEL];
-
     if (!contra_decrement_delay_timer_elapsed(core))
     {
         contra_draw_the_scores(core);
@@ -7146,6 +7584,13 @@ static void contra_level_routine_02(ContraCore *core)
     }
 
     contra_zero_out_nametables(core);
+    core->level_graphics_wait_frames = 0x08u;
+}
+
+static void contra_finish_level_graphics_load(ContraCore *core)
+{
+    const uint8_t level = core->ram[CONTRA_RAM_CURRENT_LEVEL];
+
     contra_load_level_graphics(core);
     contra_load_palettes_color_to_cpu(core, 0x20u);
 
@@ -7658,6 +8103,7 @@ static void contra_level_routine_0a(ContraCore *core)
     }
 
     contra_set_to_level_routine_05(core);
+    contra_level_routine_05(core);
 }
 
 static void contra_run_level_routine(ContraCore *core)
@@ -7917,6 +8363,218 @@ static void contra_render_overlay_supertile(
     }
 }
 
+static void contra_calculate_update_supertile_ppu_addr(
+    const ContraCore *core,
+    int dest_x,
+    int dest_y,
+    uint16_t *tile_ppu_addr,
+    uint16_t *attr_ppu_addr
+)
+{
+    const uint8_t *const ram = core->ram;
+    uint8_t rounded_y;
+    uint8_t nt_low;
+    uint8_t nt_high_bits = 0u;
+    uint8_t attr_low_base;
+    uint8_t scrolled_x;
+    uint8_t nametable_index;
+    uint8_t coarse_x;
+    uint8_t attr_column_offset;
+    unsigned carry;
+
+    {
+        const unsigned vertical_sum = (unsigned)(uint8_t)dest_y + (unsigned)ram[CONTRA_RAM_VERTICAL_SCROLL];
+        rounded_y = (uint8_t)vertical_sum;
+        if ((vertical_sum > 0xFFu) || (rounded_y >= 0xF0u))
+        {
+            rounded_y = (uint8_t)(rounded_y + 0x10u);
+        }
+        rounded_y &= 0xF8u;
+    }
+
+    nt_low = rounded_y;
+    attr_low_base = (uint8_t)((rounded_y >> 2u) & 0x38u);
+    carry = (unsigned)(nt_low >> 7u);
+    nt_low = (uint8_t)(nt_low << 1u);
+    nt_high_bits = (uint8_t)((nt_high_bits << 1u) | (uint8_t)carry);
+    carry = (unsigned)(nt_low >> 7u);
+    nt_low = (uint8_t)(nt_low << 1u);
+    nt_high_bits = (uint8_t)((nt_high_bits << 1u) | (uint8_t)carry);
+
+    {
+        const unsigned horizontal_sum = (unsigned)(uint8_t)dest_x + (unsigned)ram[CONTRA_RAM_HORIZONTAL_SCROLL];
+        scrolled_x = (uint8_t)horizontal_sum;
+        nametable_index = (uint8_t)(ram[CONTRA_RAM_PPUCTRL_SETTINGS] & 0x01u);
+        if (horizontal_sum > 0xFFu)
+        {
+            nametable_index ^= 0x01u;
+        }
+    }
+
+    coarse_x = (uint8_t)((scrolled_x & 0xF8u) >> 3u);
+    attr_column_offset = (uint8_t)((coarse_x >> 2u) | attr_low_base);
+
+    *tile_ppu_addr = (uint16_t)(
+        ((uint16_t)((nametable_index == 0u ? 0x20u : 0x24u) | nt_high_bits) << 8u) |
+        (uint16_t)(nt_low | coarse_x)
+    );
+    *attr_ppu_addr = (uint16_t)(
+        ((uint16_t)((nametable_index == 0u ? 0x23u : 0x27u) | 0x03u) << 8u) |
+        (uint16_t)(0xC0u | attr_column_offset)
+    );
+}
+
+static void contra_write_overlay_supertile_to_ppu_addr(
+    ContraCore *core,
+    uint16_t supertile_data_addr,
+    uint16_t palette_data_addr,
+    uint16_t tile_ppu_addr,
+    uint16_t attr_ppu_addr,
+    uint8_t supertile_index
+)
+{
+    const bool update_palette = (supertile_index & 0x80u) == 0u;
+    const uint8_t stripped_index = (uint8_t)(supertile_index & 0x7Fu);
+    const uint16_t supertile_addr = (uint16_t)(
+        supertile_data_addr + ((uint16_t)stripped_index * 16u)
+    );
+    unsigned tile_y;
+
+    if (!contra_load_rom_image())
+    {
+        return;
+    }
+
+    if (update_palette)
+    {
+        contra_write_ppu_byte(
+            core,
+            attr_ppu_addr,
+            contra_rom_read_u8(3u, (uint16_t)(palette_data_addr + stripped_index))
+        );
+    }
+
+    for (tile_y = 0u; tile_y < 4u; ++tile_y)
+    {
+        unsigned tile_x;
+
+        for (tile_x = 0u; tile_x < 4u; ++tile_x)
+        {
+            const uint8_t pattern_index = contra_rom_read_u8(
+                3u,
+                (uint16_t)(supertile_addr + ((uint16_t)tile_y * 4u) + tile_x)
+            );
+
+            contra_write_ppu_byte(core, (uint16_t)(tile_ppu_addr + tile_x), pattern_index);
+        }
+
+        tile_ppu_addr = (uint16_t)(tile_ppu_addr + 0x20u);
+    }
+}
+
+static void contra_write_overlay_supertile_to_ppu(
+    ContraCore *core,
+    uint16_t supertile_data_addr,
+    uint16_t palette_data_addr,
+    int dest_x,
+    int dest_y,
+    uint8_t supertile_index
+)
+{
+    uint16_t tile_ppu_addr;
+    uint16_t attr_ppu_addr;
+
+    contra_calculate_update_supertile_ppu_addr(core, dest_x, dest_y, &tile_ppu_addr, &attr_ppu_addr);
+    contra_write_overlay_supertile_to_ppu_addr(
+        core,
+        supertile_data_addr,
+        palette_data_addr,
+        tile_ppu_addr,
+        attr_ppu_addr,
+        supertile_index
+    );
+}
+
+static void contra_calculate_level_1_nametable_update_supertile_ppu_addr(
+    const ContraCore *core,
+    int enemy_x,
+    int enemy_y,
+    uint16_t *tile_ppu_addr,
+    uint16_t *attr_ppu_addr
+)
+{
+    const int scroll_offset = (int)core->ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET];
+    const int aligned_x = (((enemy_x - 12) + scroll_offset) & ~7) - scroll_offset;
+    const int aligned_y = (enemy_y - 12) & ~7;
+
+    contra_calculate_update_supertile_ppu_addr(core, aligned_x, aligned_y, tile_ppu_addr, attr_ppu_addr);
+}
+
+static void contra_write_level_1_nametable_update_supertile_to_ppu_addr(
+    ContraCore *core,
+    uint16_t tile_ppu_addr,
+    uint16_t attr_ppu_addr,
+    uint8_t supertile_index
+)
+{
+    contra_write_overlay_supertile_to_ppu_addr(
+        core,
+        contra_level_1_nametable_update_supertile_data_addr,
+        contra_level_1_nametable_update_palette_data_addr,
+        tile_ppu_addr,
+        attr_ppu_addr,
+        supertile_index
+    );
+}
+
+static void contra_write_level_1_nametable_update_supertile_to_ppu(
+    ContraCore *core,
+    int enemy_x,
+    int enemy_y,
+    uint8_t supertile_index
+)
+{
+    uint16_t tile_ppu_addr;
+    uint16_t attr_ppu_addr;
+
+    contra_calculate_level_1_nametable_update_supertile_ppu_addr(
+        core,
+        enemy_x,
+        enemy_y,
+        &tile_ppu_addr,
+        &attr_ppu_addr
+    );
+    contra_write_level_1_nametable_update_supertile_to_ppu_addr(
+        core,
+        tile_ppu_addr,
+        attr_ppu_addr,
+        supertile_index
+    );
+}
+
+static void contra_process_level_1_weapon_box_restore(ContraCore *core)
+{
+    if (core->level1_weapon_box_restore_timer == 0u)
+    {
+        return;
+    }
+
+    core->level1_weapon_box_restore_timer = (uint8_t)(core->level1_weapon_box_restore_timer - 1u);
+    if (core->level1_weapon_box_restore_timer != 0u)
+    {
+        return;
+    }
+
+    contra_write_level_1_nametable_update_supertile_to_ppu_addr(
+        core,
+        (uint16_t)core->level1_weapon_box_restore_x,
+        (uint16_t)core->level1_weapon_box_restore_y,
+        0x16u
+    );
+    core->level1_weapon_box_restore_x = 0;
+    core->level1_weapon_box_restore_y = 0;
+}
+
 static void contra_render_level_1_overlay_supertile(
     ContraCore *core,
     int dest_x,
@@ -7924,6 +8582,14 @@ static void contra_render_level_1_overlay_supertile(
     uint8_t supertile_index
 )
 {
+    contra_write_overlay_supertile_to_ppu(
+        core,
+        contra_level_1_nametable_update_supertile_data_addr,
+        contra_level_1_nametable_update_palette_data_addr,
+        dest_x,
+        dest_y,
+        supertile_index
+    );
     contra_render_overlay_supertile(
         core,
         contra_level_1_nametable_update_supertile_data_addr,
@@ -7941,6 +8607,14 @@ static void contra_render_level_2_overlay_supertile(
     uint8_t supertile_index
 )
 {
+    contra_write_overlay_supertile_to_ppu(
+        core,
+        contra_level_2_nametable_update_supertile_data_addr,
+        contra_level_2_nametable_update_palette_data_addr,
+        dest_x,
+        dest_y,
+        supertile_index
+    );
     contra_render_overlay_supertile(
         core,
         contra_level_2_nametable_update_supertile_data_addr,
@@ -7970,6 +8644,7 @@ static void contra_render_level_1_nametable_update_supertile(
     const int aligned_x = (((enemy_x - 12) + scroll_offset) & ~7) - scroll_offset;
     const int aligned_y = (enemy_y - 12) & ~7;
 
+    contra_write_level_1_nametable_update_supertile_to_ppu(core, enemy_x, enemy_y, supertile_index);
     contra_render_level_1_overlay_supertile(core, aligned_x, aligned_y, supertile_index);
 }
 
@@ -8061,7 +8736,9 @@ static void contra_render_native_enemies(ContraCore *core)
                 case 0x10u:
                     contra_render_level_1_nametable_update_supertile(
                         core,
-                        (int)enemy->x,
+                        (enemy->type == 0x10u)
+                            ? contra_level_1_boss_bomb_turret_render_x(enemy)
+                            : (int)enemy->x,
                         (int)enemy->y,
                         enemy->sprite_code
                     );
@@ -8224,7 +8901,10 @@ static void contra_render_frame(ContraCore *core)
         contra_render_level_background(core);
     }
 
-    contra_render_native_enemies(core);
+    if (!game_over_screen_scene)
+    {
+        contra_render_native_enemies(core);
+    }
     contra_render_cpu_sprites(core);
 }
 
@@ -8238,6 +8918,7 @@ void contra_core_reset(ContraCore *core)
     size_t index;
 
     memset(core, 0, sizeof(*core));
+    core->startup_wait_frames = 0x0Au;
 
     for (index = 0u; index < 16u; ++index)
     {
@@ -8269,6 +8950,58 @@ void contra_core_set_input(ContraCore *core, const ContraInputSnapshot *input)
 
 void contra_core_step_frame(ContraCore *core)
 {
+    if (core->startup_wait_frames != 0u)
+    {
+        const bool startup_state =
+            (core->ram[CONTRA_RAM_GAME_ROUTINE_INDEX] == 0u) &&
+            (core->ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0u) &&
+            (core->ram[CONTRA_RAM_HORIZONTAL_SCROLL] == 0u);
+
+        if (startup_state)
+        {
+            const uint8_t startup_frame = (uint8_t)(0x0Bu - core->startup_wait_frames);
+
+            if (startup_frame >= 0x04u)
+            {
+                core->ram[CONTRA_RAM_FRAME_COUNTER] = 0x01u;
+            }
+
+            if (startup_frame >= 0x05u)
+            {
+                core->ram[CONTRA_RAM_DEMO_MODE] = 0x01u;
+            }
+
+            if (startup_frame == 0x0Au)
+            {
+                core->startup_wait_frames = 0u;
+                contra_game_routine_00(core);
+                contra_flush_cpu_graphics_buffer_to_ppu(core);
+                contra_render_frame(core);
+                return;
+            }
+
+            core->startup_wait_frames = (uint8_t)(core->startup_wait_frames - 1u);
+            contra_render_frame(core);
+            return;
+        }
+
+        core->startup_wait_frames = 0u;
+    }
+
+    if (core->level_graphics_wait_frames != 0u)
+    {
+        core->level_graphics_wait_frames = (uint8_t)(core->level_graphics_wait_frames - 1u);
+        if (core->level_graphics_wait_frames == 0u)
+        {
+            contra_finish_level_graphics_load(core);
+            contra_flush_cpu_graphics_buffer_to_ppu(core);
+        }
+        contra_render_frame(core);
+        return;
+    }
+
+    contra_flush_pending_horizontal_level_writes(core);
+    contra_process_level_1_weapon_box_restore(core);
     contra_apply_controller_state(core);
     contra_exe_game_routine(core);
     contra_flush_cpu_graphics_buffer_to_ppu(core);

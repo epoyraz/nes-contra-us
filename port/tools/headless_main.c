@@ -134,6 +134,7 @@ int main(void)
     const uint32_t *hud_framebuffer;
     const uint32_t *gameplay_framebuffer;
     const uint32_t *jump_framebuffer;
+    const uint32_t *game_over_framebuffer;
     const uint32_t *framebuffer;
     unsigned frame;
     unsigned bullet_index;
@@ -830,6 +831,7 @@ int main(void)
     game_over_core.ram[CONTRA_RAM_PAUSE_STATE] = 0x00u;
     game_over_core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] = 0x01u;
     game_over_core.ram[CONTRA_RAM_P2_GAME_OVER_STATUS] = 0x01u;
+    game_over_core.ram[CONTRA_RAM_NUM_CONTINUES] = 0x01u;
 
     contra_core_set_input(&game_over_core, &input);
     contra_core_step_frame(&game_over_core);
@@ -841,13 +843,16 @@ int main(void)
     }
 
     game_over_ram = contra_core_ram(&game_over_core);
+    game_over_framebuffer = contra_core_framebuffer(&game_over_core);
     printf(
-        "gameover frame=%u level_routine=%u game_over_delay=%u boss=%u end_level=%u\n",
+        "gameover frame=%u level_routine=%u game_over_delay=%u boss=%u end_level=%u colors=%u image=%s\n",
         (unsigned)game_over_ram[CONTRA_RAM_FRAME_COUNTER],
         (unsigned)game_over_ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX],
         (unsigned)game_over_ram[CONTRA_RAM_GAME_OVER_DELAY_TIMER],
         (unsigned)game_over_ram[CONTRA_RAM_BOSS_DEFEATED_FLAG],
-        (unsigned)game_over_ram[CONTRA_RAM_END_LEVEL_ROUTINE_INDEX]
+        (unsigned)game_over_ram[CONTRA_RAM_END_LEVEL_ROUTINE_INDEX],
+        count_unique_colors_in_region(game_over_framebuffer, 0u, 0u, 256u, 224u),
+        write_framebuffer_bmp("tmp/contra_game_over.bmp", game_over_framebuffer) ? "saved" : "failed"
     );
 
     return 0;

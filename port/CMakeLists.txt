@@ -38,6 +38,15 @@ target_link_libraries(contra_port_headless PRIVATE contra_core)
 contra_apply_warnings(contra_port_headless)
 contra_apply_coverage(contra_port_headless)
 
+add_executable(contra_level1_frame_trace
+    tools/level1_frame_trace.c
+)
+
+target_link_libraries(contra_level1_frame_trace PRIVATE contra_core)
+
+contra_apply_warnings(contra_level1_frame_trace)
+contra_apply_coverage(contra_level1_frame_trace)
+
 if(CONTRA_PORT_BUILD_TESTS)
     add_executable(contra_core_tests
         tests/core_behavior_tests.c
