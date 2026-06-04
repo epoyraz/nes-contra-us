@@ -13,7 +13,8 @@ typedef struct ContraInputSnapshot
 enum
 {
     CONTRA_NATIVE_MAX_ENEMIES = 24u,
-    CONTRA_NATIVE_MAX_ENEMY_PROJECTILES = 8u
+    CONTRA_NATIVE_MAX_ENEMY_PROJECTILES = 8u,
+    CONTRA_CPU_SPRITE_RENDER_SLOTS = 26u
 };
 
 typedef struct ContraNativeEnemy
@@ -65,6 +66,24 @@ typedef struct ContraCore
     uint32_t framebuffer[CONTRA_FRAMEBUFFER_WIDTH * CONTRA_FRAMEBUFFER_HEIGHT];
     uint8_t background_opaque[CONTRA_FRAMEBUFFER_WIDTH * CONTRA_FRAMEBUFFER_HEIGHT];
     uint8_t sprite_priority[CONTRA_FRAMEBUFFER_WIDTH * CONTRA_FRAMEBUFFER_HEIGHT];
+    uint8_t latched_cpu_sprite_buffer[CONTRA_CPU_SPRITE_RENDER_SLOTS];
+    uint8_t latched_sprite_y[CONTRA_CPU_SPRITE_RENDER_SLOTS];
+    uint8_t latched_sprite_x[CONTRA_CPU_SPRITE_RENDER_SLOTS];
+    uint8_t latched_sprite_attr[CONTRA_CPU_SPRITE_RENDER_SLOTS];
+    uint8_t latched_sprite_load_type;
+    uint8_t latched_demo_mode;
+    uint8_t latched_player_mode;
+    uint8_t latched_num_lives[2];
+    uint8_t latched_game_over_status[2];
+    uint8_t latched_oam[0x100u];
+    uint8_t latched_horizontal_scroll;
+    uint8_t latched_vertical_scroll;
+    uint8_t latched_level_screen_number;
+    uint8_t latched_level_screen_scroll_offset;
+    uint8_t latched_ppuctrl_settings;
+    uint8_t pending_palette_write;
+    uint8_t pending_palette_count;
+    uint8_t pending_palette[CONTRA_PPU_PALETTE_SIZE];
     ContraNativeEnemy enemies[CONTRA_NATIVE_MAX_ENEMIES];
     ContraNativeProjectile enemy_projectiles[CONTRA_NATIVE_MAX_ENEMY_PROJECTILES];
     ContraInputSnapshot pending_input;

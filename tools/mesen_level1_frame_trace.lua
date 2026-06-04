@@ -3,6 +3,12 @@ local output = io.open(output_path, "w")
 local dump_frame = tonumber(os.getenv("CONTRA_MESEN_LEVEL1_NAMETABLE_DUMP_FRAME") or "0")
 local dump_path = os.getenv("CONTRA_MESEN_LEVEL1_NAMETABLE_DUMP_PATH")
 local supertile_dump_path = os.getenv("CONTRA_MESEN_LEVEL1_SUPERTILE_DUMP_PATH")
+local enemy_dump_path = os.getenv("CONTRA_MESEN_LEVEL1_ENEMY_DUMP_PATH")
+local framebuffer_dump_path = os.getenv("CONTRA_MESEN_LEVEL1_FRAMEBUFFER_DUMP_PATH")
+local ram_dump_path = os.getenv("CONTRA_MESEN_LEVEL1_RAM_DUMP_PATH")
+local oam_dump_path = os.getenv("CONTRA_MESEN_LEVEL1_OAM_DUMP_PATH")
+local palette_dump_path = os.getenv("CONTRA_MESEN_LEVEL1_PALETTE_DUMP_PATH")
+local max_frame = tonumber(os.getenv("CONTRA_MESEN_LEVEL1_MAX_FRAME") or "1500")
 local frame = 0
 
 if output == nil then
@@ -12,8 +18,10 @@ if output == nil then
 end
 
 local RAM = emu.memType.nesInternalRam
+local CHR = emu.memType.nesChrRam
 local NAMETABLE = emu.memType.nesNametableRam
 local PALETTE = emu.memType.nesPaletteRam
+local OAM = emu.memType.nesSpriteRam
 
 local function band(value, mask)
     return value & mask
@@ -83,6 +91,79 @@ local function emit_frame()
             dump:close()
         end
     end
+    if dump_frame ~= nil and dump_frame ~= 0 and frame == dump_frame and enemy_dump_path ~= nil then
+        local dump = io.open(enemy_dump_path, "w")
+
+        if dump ~= nil then
+            for slot = 0, 15 do
+                local enemy_type = read_ram(0x528 + slot)
+
+                if enemy_type ~= 0 then
+                    dump:write(string.format(
+                        "%u type=%02X routine=%02X delay=%02X sprite=%02X x=%u y=%u var1=%02X var2=%02X hp=%02X\n",
+                        slot,
+                        enemy_type,
+                        read_ram(0x4B8 + slot),
+                        read_ram(0x538 + slot),
+                        read_ram(0x30A + slot),
+                        read_ram(0x33E + slot),
+                        read_ram(0x324 + slot),
+                        read_ram(0x5B8 + slot),
+                        read_ram(0x5C8 + slot),
+                        read_ram(0x548 + slot)
+                    ))
+                end
+            end
+            dump:close()
+        end
+    end
+    if dump_frame ~= nil and dump_frame ~= 0 and frame == dump_frame and framebuffer_dump_path ~= nil then
+        local dump = io.open(framebuffer_dump_path, "wb")
+
+        if dump ~= nil then
+            local screen = emu.getScreenBuffer()
+
+            for index = 1, #screen do
+                local value = screen[index]
+
+                dump:write(string.char(band(value, 0xFF)))
+                dump:write(string.char(band(value >> 8, 0xFF)))
+                dump:write(string.char(band(value >> 16, 0xFF)))
+                dump:write(string.char(band(value >> 24, 0xFF)))
+            end
+            dump:close()
+        end
+    end
+    if dump_frame ~= nil and dump_frame ~= 0 and frame == dump_frame and ram_dump_path ~= nil then
+        local dump = io.open(ram_dump_path, "wb")
+
+        if dump ~= nil then
+            for offset = 0, 0x7FF do
+                dump:write(string.char(read_ram(offset)))
+            end
+            dump:close()
+        end
+    end
+    if dump_frame ~= nil and dump_frame ~= 0 and frame == dump_frame and oam_dump_path ~= nil then
+        local dump = io.open(oam_dump_path, "wb")
+
+        if dump ~= nil then
+            for offset = 0, 0xFF do
+                dump:write(string.char(emu.read(offset, OAM, false)))
+            end
+            dump:close()
+        end
+    end
+    if dump_frame ~= nil and dump_frame ~= 0 and frame == dump_frame and palette_dump_path ~= nil then
+        local dump = io.open(palette_dump_path, "wb")
+
+        if dump ~= nil then
+            for offset = 0, 0x1F do
+                dump:write(string.char(emu.read(offset, PALETTE, false)))
+            end
+            dump:close()
+        end
+    end
 
     output:write(string.format(
         "{\"frame\":%u,\"game_routine\":%u,\"level_routine\":%u,\"level\":%u," ..
@@ -96,8 +177,13 @@ local function emit_frame()
         "\"ppu_tile_offset\":%u,\"ppu_addr_low\":%u,\"ppu_addr_high\":%u," ..
         "\"attr_addr_high\":%u,\"supertile_nt_offset\":%u," ..
         "\"player_state\":%u,\"p2_state\":%u,\"player_x\":%u,\"p2_x\":%u,\"player_y\":%u,\"p2_y\":%u," ..
+        "\"controller\":%u,\"p2_controller\":%u,\"controller_diff\":%u,\"p2_controller_diff\":%u," ..
+        "\"jump\":%u,\"p2_jump\":%u,\"edge_fall\":%u,\"p2_edge_fall\":%u," ..
+        "\"y_fast\":%u,\"p2_y_fast\":%u,\"y_fract\":%u,\"p2_y_fract\":%u," ..
+        "\"fall_freeze\":%u,\"p2_fall_freeze\":%u," ..
         "\"lives\":%u,\"game_over\":%u,\"p2_game_over\":%u,\"demo_end\":%u," ..
-        "\"ram_hash\":\"%s\",\"nametable_hash\":\"%s\"," ..
+        "\"oam_offset\":%u," ..
+        "\"ram_hash\":\"%s\",\"pattern_hash\":\"%s\",\"nametable_hash\":\"%s\"," ..
         "\"palette_hash\":\"%s\",\"framebuffer_hash\":\"%s\"}\n",
         frame,
         read_ram(0x18),
@@ -132,11 +218,27 @@ local function emit_frame()
         read_ram(0x335),
         read_ram(0x31A),
         read_ram(0x31B),
+        read_ram(0xF1),
+        read_ram(0xF2),
+        read_ram(0xF5),
+        read_ram(0xF6),
+        read_ram(0xA0),
+        read_ram(0xA1),
+        read_ram(0xA4),
+        read_ram(0xA5),
+        read_ram(0xC6),
+        read_ram(0xC7),
+        read_ram(0xC4),
+        read_ram(0xC5),
+        read_ram(0xB8),
+        read_ram(0xB9),
         read_ram(0x32),
         read_ram(0x38),
         read_ram(0x39),
         read_ram(0x1F),
+        read_ram(0x35),
         hex32(hash_memory(RAM, 0x0000, 0x0800)),
+        hex32(hash_memory(CHR, 0x0000, 0x2000)),
         hex32(hash_memory(NAMETABLE, 0x0000, 0x0800)),
         hex32(hash_memory(PALETTE, 0x0000, 0x0020)),
         hex32(hash_screen())
@@ -160,7 +262,7 @@ local function on_end_frame()
     frame = frame + 1
     emit_frame()
 
-    if frame >= 1500 then
+    if frame >= max_frame then
         output:close()
         emu.stop(0)
     end

@@ -858,10 +858,12 @@ static bool test_level1_bridge_destruction_changes_render_state(void)
     CHECK(bridge_active);
     CHECK(core.enemies[0].active != 0x00u);
     CHECK(core.enemies[0].type == 0x12u);
-    CHECK(core.enemies[0].screen_id == 0x1Bu);
-    CHECK(core.enemies[0].sprite_code == 0x19u);
-    CHECK(core.enemies[0].sprite_attr == 0x19u);
-    CHECK(core.enemies[0].hp == 0x1Du);
+    CHECK(core.enemies[0].flags == 0x00u);
+    CHECK(core.enemies[0].cooldown == 0x04u);
+    CHECK(core.enemies[0].screen_id == 0x1Au);
+    CHECK(core.enemies[0].sprite_code == 0x00u);
+    CHECK(core.enemies[0].sprite_attr == 0x00u);
+    CHECK(core.enemies[0].hp == 0x00u);
     active_overlay_hash =
         ((uint32_t)core.enemies[0].screen_id << 24u) |
         ((uint32_t)core.enemies[0].sprite_code << 16u) |
@@ -873,7 +875,7 @@ static bool test_level1_bridge_destruction_changes_render_state(void)
     core.ram[CONTRA_RAM_PLAYER_BG_FLAG_EDGE_DETECT] = 0x00u;
     core.ram[CONTRA_RAM_EDGE_FALL_CODE] = 0x00u;
     core.ram[CONTRA_RAM_PLAYER_JUMP_STATUS] = 0x00u;
-    core.ram[CONTRA_RAM_SPRITE_X_POS] = 0x90u;
+    core.ram[CONTRA_RAM_SPRITE_X_POS] = 0x70u;
     core.ram[CONTRA_RAM_SPRITE_Y_POS] = 0x90u;
     step_no_input(&core);
     CHECK(core.ram[CONTRA_RAM_EDGE_FALL_CODE] != 0x00u);
@@ -960,6 +962,36 @@ static bool test_level1_organic_bridge_load_changes_collision(void)
 
     CHECK(core.ram[CONTRA_RAM_EDGE_FALL_CODE] != 0x00u);
     CHECK(core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] == 0x00u);
+    return true;
+}
+
+static bool test_attract_level1_bridge_demo_keeps_p2_on_rom_route(void)
+{
+    ContraCore core;
+    unsigned frame;
+
+    contra_core_init(&core);
+
+    for (frame = 1u; frame <= 1601u; ++frame)
+    {
+        step_no_input(&core);
+
+        if (frame == 1597u)
+        {
+            CHECK(core.ram[CONTRA_RAM_CURRENT_LEVEL] == 0x00u);
+            CHECK(core.ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] == 0x02u);
+            CHECK(core.ram[CONTRA_RAM_PLAYER_BG_FLAG_EDGE_DETECT + 1u] == 0x00u);
+            CHECK(core.ram[CONTRA_RAM_EDGE_FALL_CODE + 1u] == 0x00u);
+            CHECK(core.ram[CONTRA_RAM_PLAYER_JUMP_STATUS + 1u] == 0x00u);
+            CHECK(core.ram[CONTRA_RAM_SPRITE_Y_POS + 1u] == 0x64u);
+        }
+    }
+
+    CHECK(core.ram[CONTRA_RAM_PLAYER_BG_FLAG_EDGE_DETECT + 1u] == 0x00u);
+    CHECK(core.ram[CONTRA_RAM_EDGE_FALL_CODE + 1u] == 0x00u);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_JUMP_STATUS + 1u] == 0x11u);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_Y_FAST_VELOCITY + 1u] == 0xFBu);
+    CHECK(core.ram[CONTRA_RAM_SPRITE_Y_POS + 1u] == 0x64u);
     return true;
 }
 
@@ -2336,6 +2368,7 @@ int main(void)
         {"level1_weapon_item_pickup_changes_weapon_and_bullet", test_level1_weapon_item_pickup_changes_weapon_and_bullet},
         {"level1_bridge_destruction_reaches_overlay_state", test_level1_bridge_destruction_changes_render_state},
         {"level1_organic_bridge_load_changes_collision", test_level1_organic_bridge_load_changes_collision},
+        {"attract_level1_bridge_demo_keeps_p2_on_rom_route", test_attract_level1_bridge_demo_keeps_p2_on_rom_route},
         {"level1_forced_boss_clear_hands_off_to_level2", test_level1_forced_boss_clear_hands_off_to_level2},
         {"attract_reaches_level2_gameplay", test_attract_reaches_level2_gameplay},
         {"attract_level1_matches_rom_startup_timing", test_attract_level1_matches_rom_startup_timing},
