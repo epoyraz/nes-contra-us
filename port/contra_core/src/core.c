@@ -8192,16 +8192,200 @@ static void contra_rom_load_screen_enemy_data(ContraCore *core)
     ram[CONTRA_RAM_ENEMY_SCREEN_READ_OFFSET] = y;
 }
 
+/* --- shared enemy helpers (bank7.asm), real-RAM ports --- */
+
+/* clear_enemy (bank7.asm:9070): zero a slot's state, freeing it. */
+static void contra_rom_clear_enemy(ContraCore *core, uint8_t x)
+{
+    core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] = 0u;
+    core->ram[CONTRA_RAM_ENEMY_HP + x] = 0u;
+    core->ram[CONTRA_RAM_ENEMY_TYPE + x] = 0u;
+    core->ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0u;
+    contra_rom_clear_enemy_pt_2(core, x);
+}
+
+/* add_a_to_enemy_y_pos / add_a_to_enemy_x_pos (bank7.asm:8387/8394). */
+static void contra_rom_add_a_to_enemy_y_pos(ContraCore *core, uint8_t x, uint8_t a)
+{
+    core->ram[CONTRA_RAM_ENEMY_Y_POS + x] = (uint8_t)(core->ram[CONTRA_RAM_ENEMY_Y_POS + x] + a);
+}
+
+static void contra_rom_add_a_to_enemy_x_pos(ContraCore *core, uint8_t x, uint8_t a)
+{
+    core->ram[CONTRA_RAM_ENEMY_X_POS + x] = (uint8_t)(core->ram[CONTRA_RAM_ENEMY_X_POS + x] + a);
+}
+
+/* add_scroll_to_enemy_pos (bank7.asm:7824), horizontal: X -= FRAME_SCROLL,
+   remove the enemy if it scrolls off the left edge (X < 0x08). */
+static void contra_rom_add_scroll_to_enemy_pos(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t new_x = (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] - ram[CONTRA_RAM_FRAME_SCROLL]);
+
+    ram[CONTRA_RAM_ENEMY_X_POS + x] = new_x;
+    if (new_x < 0x08u)
+    {
+        contra_rom_clear_enemy(core, x);
+    }
+}
+
+/* advance_enemy_routine (bank7.asm:7591): ++ENEMY_ROUTINE if non-zero. */
+static void contra_rom_advance_enemy_routine(ContraCore *core, uint8_t x)
+{
+    if (core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] != 0u)
+    {
+        core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] =
+            (uint8_t)(core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] + 1u);
+    }
+}
+
+/* enable_enemy_collision (bank7.asm:8376): ENEMY_STATE_WIDTH &= 0x7E (clear the
+   inactive bit 7 and the skip-collision bit 0). */
+static void contra_rom_enable_enemy_collision(ContraCore *core, uint8_t x)
+{
+    core->ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
+        (uint8_t)(core->ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x7Eu);
+}
+
+/* --- sniper (enemy type 0x06), bank0.asm:1738 --- */
+static const uint8_t contra_sniper_animation_delay_tbl[3] = {0x01u, 0x30u, 0x80u};
+static const uint8_t contra_sniper_frame_tbl[3] = {0x03u, 0x00u, 0x00u};
+static const uint8_t contra_sniper_attack_delay_tbl[3] = {0x40u, 0x04u, 0x10u};
+static const uint8_t contra_sniper_bullet_attack_count_tbl[3] = {0x03u, 0x01u, 0x01u};
+
+/* sniper_set_sprite: sets the sniper's display sprite. The pattern/attr mapping
+   is part of the (not-yet-ported) sprite render path; for now keep ENEMY_SPRITES
+   non-zero (from the animation frame) so the dispatcher's "has sprite" path runs.
+   TODO: port the real sniper_set_sprite tile/aim mapping with the render chunk. */
+static void contra_rom_sniper_set_sprite(ContraCore *core, uint8_t x)
+{
+    core->ram[CONTRA_RAM_ENEMY_SPRITES + x] =
+        (uint8_t)(core->ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+}
+
+/* sniper_routine_00 (bank0.asm:1751): init delay/frame from attributes, nudge Y
+   down (+4, plus +5 for the crouching sniper), advance. */
+static void contra_rom_sniper_routine_00(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t attr = ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x];
+    const uint8_t idx = (attr < 3u) ? attr : 0u;
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = contra_sniper_animation_delay_tbl[idx];
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = contra_sniper_frame_tbl[idx];
+    contra_rom_add_a_to_enemy_y_pos(core, x, 0x04u);
+    if (attr == 0x01u)
+    {
+        contra_rom_add_a_to_enemy_y_pos(core, x, 0x05u);
+    }
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+/* sniper_routine_01 (bank0.asm:1787): set sprite, track scroll, run the crouch
+   animation for hiding snipers, then enable collision and advance to attack. */
+static void contra_rom_sniper_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t attr;
+
+    contra_rom_sniper_set_sprite(core, x);
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return; /* scrolled off and removed */
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+
+    attr = ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x];
+    if (attr != 0u)
+    {
+        /* crouching / boss sniper: cycle the un-hiding animation */
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x08u;
+        ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+        if (ram[CONTRA_RAM_ENEMY_FRAME + x] < 0x03u)
+        {
+            return;
+        }
+        if (attr == 0x01u)
+        {
+            ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] - 1u);
+            /* dec left frame at 2 (non-zero) -> fall through to enable collision */
+        }
+        else
+        {
+            contra_rom_add_a_to_enemy_y_pos(core, x, 0xF2u); /* -14 */
+            contra_rom_add_a_to_enemy_x_pos(core, x, 0x01u);
+        }
+    }
+
+    contra_rom_enable_enemy_collision(core, x);
+    ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = 0x30u;
+    {
+        const uint8_t idx = (attr < 3u) ? attr : 0u;
+        ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = contra_sniper_attack_delay_tbl[idx];
+        ram[CONTRA_RAM_ENEMY_VAR_4 + x] = contra_sniper_bullet_attack_count_tbl[idx];
+    }
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+/* dispatch one enemy slot to its type routine by (ENEMY_TYPE, ENEMY_ROUTINE).
+   Only ported types act; others hold until their routine is ported. */
+static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
+{
+    const uint8_t type = core->ram[CONTRA_RAM_ENEMY_TYPE + x];
+    const uint8_t routine = core->ram[CONTRA_RAM_ENEMY_ROUTINE + x];
+
+    switch (type)
+    {
+        case 0x06u: /* sniper */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_sniper_routine_00(core, x); break;
+                case 0x02u: contra_rom_sniper_routine_01(core, x); break;
+                default: break; /* attack/explosion routines not yet ported */
+            }
+            break;
+        default:
+            break; /* type not yet ported */
+    }
+}
+
+/* exe_all_enemy_routine (bank7.asm:7315): run every active enemy's routine.
+   Collision checks (check_players_collision / bullet_enemy_collision_test) are
+   not ported yet — added with the collision chunk. */
+static void contra_rom_exe_all_enemy_routine(ContraCore *core)
+{
+    int slot;
+
+    for (slot = 0x0F; slot >= 0; --slot)
+    {
+        if (core->ram[CONTRA_RAM_ENEMY_ROUTINE + (unsigned)slot] != 0u)
+        {
+            contra_rom_exe_enemy_type(core, (uint8_t)slot);
+        }
+    }
+}
+
 static void contra_run_level_enemy_logic(ContraCore *core)
 {
     contra_load_bank_3_handle_scroll(core);
-    contra_load_bank_0_exe_all_enemy_routine(core);
-    if (CONTRA_USE_ROM_ENEMY_SYSTEM)
+    if (CONTRA_USE_ROM_ENEMY_SYSTEM && (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0u))
     {
+        /* faithful real-RAM enemy system (level 1, work in progress) */
+        contra_rom_exe_all_enemy_routine(core);
         contra_rom_load_screen_enemy_data(core);
     }
-    contra_load_bank_2_load_screen_enemy_data(core);
-    contra_load_bank_2_exe_soldier_generation(core);
+    else
+    {
+        contra_load_bank_0_exe_all_enemy_routine(core);
+        contra_load_bank_2_load_screen_enemy_data(core);
+        contra_load_bank_2_exe_soldier_generation(core);
+    }
 
     contra_update_native_enemy_projectiles(core);
     contra_check_native_player_collisions(core);
