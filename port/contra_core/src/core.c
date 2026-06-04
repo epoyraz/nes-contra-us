@@ -9664,6 +9664,16 @@ static void contra_sync_native_sprite_objects_to_cpu_buffer(ContraCore *core)
     int sprite_slot;
     size_t enemy_index;
 
+    if (CONTRA_USE_ROM_ENEMY_SYSTEM && (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0u))
+    {
+        /* The faithful enemy system maintains the enemy sprite-object slots
+           (ENEMY_SPRITES / ENEMY_Y_POS / ENEMY_X_POS = sprite slots 10..25)
+           directly in RAM, exactly as the ROM does — they are persistent enemy
+           state, not a per-frame rebuild. Don't clear them and rebuild from the
+           invented core->enemies[] struct. */
+        return;
+    }
+
     for (sprite_slot = (int)CONTRA_CPU_SPRITE_RENDER_SLOTS - 1; sprite_slot >= 10; --sprite_slot)
     {
         contra_write_cpu_sprite_slot(core, (size_t)sprite_slot, 0x00u, 0x00u, 0x00u, 0x00u);
