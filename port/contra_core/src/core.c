@@ -8979,6 +8979,51 @@ static void contra_rom_flying_capsule_routine_01(ContraCore *core, uint8_t x)
     contra_rom_update_enemy_pos(core, x);
 }
 
+/* enemy_routine_explosion (bank7.asm:7616): animate the explosion sprite
+   sequence (explosion_type_00) then remove. A killed enemy becomes a shared
+   explosion actor (ENEMY_TYPE 0xFE) running this; that's a small simplification
+   of the ROM (which keeps the type and uses per-type explosion routine slots)
+   but produces the faithful explosion sprites. */
+static void contra_rom_enemy_routine_explosion(ContraCore *core, uint8_t x)
+{
+    static const uint8_t explosion_type_00[3] = {0x38u, 0x39u, 0x3Au};
+    uint8_t *const ram = core->ram;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+    if (ram[CONTRA_RAM_ENEMY_FRAME + x] >= 0x03u)
+    {
+        contra_rom_clear_enemy(core, x);
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x0Au;
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = explosion_type_00[ram[CONTRA_RAM_ENEMY_FRAME + x]];
+}
+
+/* Start the explosion actor on the enemy slot (called from the kill path). */
+static void contra_rom_begin_enemy_explosion(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_TYPE + x] = 0xFEu;
+    ram[CONTRA_RAM_ENEMY_ROUTINE + x] = 0x01u;
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = 0x00u;
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x0Au;
+    ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] | 0x80u);
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x38u;
+    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = 0x00u;
+}
+
 /* dispatch one enemy slot to its type routine by (ENEMY_TYPE, ENEMY_ROUTINE).
    Only ported types act; others hold until their routine is ported. */
 static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
@@ -8988,6 +9033,9 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
 
     switch (type)
     {
+        case 0xFEu: /* explosion actor (killed enemy) */
+            contra_rom_enemy_routine_explosion(core, x);
+            break;
         case 0x03u: /* flying capsule / weapon zeppelin */
             switch (routine)
             {
@@ -9098,7 +9146,7 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
         ram[CONTRA_RAM_ENEMY_HP + slot] = hp;
         if (hp == 0u)
         {
-            contra_rom_clear_enemy(core, slot);
+            contra_rom_begin_enemy_explosion(core, slot); /* TODO: award score */
             return;
         }
     }
