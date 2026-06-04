@@ -8569,6 +8569,146 @@ static void contra_rom_weapon_box_routine_03(ContraCore *core, uint8_t x)
     contra_rom_clear_enemy(core, x); /* remove_enemy */
 }
 
+/* add_4_to_enemy_y_pos (bank7.asm): ENEMY_Y_POS += 4. */
+static void contra_rom_add_4_to_enemy_y_pos(ContraCore *core, uint8_t x)
+{
+    contra_rom_add_a_to_enemy_y_pos(core, x, 0x04u);
+}
+
+/* add_y_to_y_pos_get_bg_collision (bank7.asm:8679): bg collision code at
+   (ENEMY_X_POS, ENEMY_Y_POS + y_off) without modifying the stored position.
+   Codes match the ROM: 0 empty, 1 floor, 2 water, 0x80 solid. */
+static uint8_t contra_rom_add_y_to_y_pos_get_bg_collision(const ContraCore *core, uint8_t x, uint8_t y_off)
+{
+    const uint8_t ey = (uint8_t)(core->ram[CONTRA_RAM_ENEMY_Y_POS + x] + y_off);
+    return contra_get_outdoor_horizontal_bg_collision(core, core->ram[CONTRA_RAM_ENEMY_X_POS + x], ey);
+}
+
+/* set_enemy_y_velocity_to_0 (bank7.asm). */
+static void contra_rom_set_enemy_y_velocity_to_0(ContraCore *core, uint8_t x)
+{
+    core->ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] = 0u;
+    core->ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = 0u;
+    core->ram[CONTRA_RAM_ENEMY_Y_VEL_ACCUM + x] = 0u;
+}
+
+/* --- soldier / running man (enemy type 0x05), bank0.asm:1217 --- */
+static const uint8_t contra_soldier_initial_anim_delay_tbl[4] = {0x01u, 0x10u, 0x20u, 0x30u};
+/* soldier_x_vel_tbl: {fract,fast} for left/right, horizontal then vertical. */
+static const uint8_t contra_soldier_x_vel_tbl[8] = {0x00u, 0xFFu, 0x40u, 0x01u, 0x00u, 0xFFu, 0x00u, 0x01u};
+
+/* soldier_set_x_velocity (bank0.asm:1242): set X velocity from ENEMY_VAR_2
+   direction (0 left, 1 right) and the level scrolling type. */
+static void contra_rom_soldier_set_x_velocity(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t base = (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u) ? 0x04u : 0x00u;
+    const uint8_t off = (uint8_t)((uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_2 + x] << 1u) + base);
+
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x] = contra_soldier_x_vel_tbl[off];
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] = contra_soldier_x_vel_tbl[off + 1u];
+}
+
+/* soldier_stop_y_set_x_velocity (bank0.asm:1237): set X velocity, zero Y. */
+static void contra_rom_soldier_stop_y_set_x_velocity(ContraCore *core, uint8_t x)
+{
+    contra_rom_soldier_set_x_velocity(core, x);
+    contra_rom_set_enemy_y_velocity_to_0(core, x);
+}
+
+/* soldier_routine_00 (bank0.asm:1217): track scroll, nudge to ground, set the
+   initial animation delay from attributes, advance. */
+static void contra_rom_soldier_routine_00(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t idx;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    contra_rom_add_4_to_enemy_y_pos(core, x);
+    idx = (uint8_t)((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] >> 4u) & 0x03u);
+    contra_rom_set_enemy_delay_adv_routine(core, x, contra_soldier_initial_anim_delay_tbl[idx]);
+}
+
+/* soldier_routine_01 (bank0.asm:1275): tick the spawn delay (faithful to the
+   ROM's quirky double-decrement for left-runners), then verify there is ground
+   under the soldier, enable collision, pick a direction and walk velocity, and
+   advance to the walk routine. Removes the soldier if there is no ground (e.g.
+   a destroyed bridge). */
+static void contra_rom_soldier_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    bool enable_set_vel = false;
+
+    /* horizontal level (level 1) */
+    if (ram[CONTRA_RAM_FRAME_SCROLL] == 0u)
+    {
+        /* @dec_delay_enable_set_vel */
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+        if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+        {
+            return;
+        }
+        enable_set_vel = true;
+    }
+    else if ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x01u) != 0u)
+    {
+        /* running right: only tick on odd frames */
+        if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x01u) == 0u)
+        {
+            return;
+        }
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+        if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+        {
+            return;
+        }
+        enable_set_vel = true;
+    }
+    else
+    {
+        /* running left: @continue — decrement, and if not yet zero, decrement
+           again (the ROM falls through @continue into @dec_delay_enable_set_vel) */
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+        if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+        {
+            ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+                (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+            if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+            {
+                return;
+            }
+        }
+        enable_set_vel = true;
+    }
+
+    if (!enable_set_vel)
+    {
+        return;
+    }
+
+    /* @enable_set_vel: require ground #$10 below, else remove */
+    if (contra_rom_add_y_to_y_pos_get_bg_collision(core, x, 0x10u) == 0u)
+    {
+        contra_rom_clear_enemy(core, x); /* no ground (e.g. destroyed bridge) */
+        return;
+    }
+    contra_rom_enable_enemy_collision(core, x);
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x01u);
+    if (ram[CONTRA_RAM_ENEMY_VAR_2 + x] != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_X_POS + x] = 0x0Au; /* running right: enter from left */
+    }
+    contra_rom_soldier_stop_y_set_x_velocity(core, x);
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x10u); /* -> routine_02 (walk) */
+}
+
 /* dispatch one enemy slot to its type routine by (ENEMY_TYPE, ENEMY_ROUTINE).
    Only ported types act; others hold until their routine is ported. */
 static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
@@ -8578,6 +8718,14 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
 
     switch (type)
     {
+        case 0x05u: /* soldier / running man */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_soldier_routine_00(core, x); break;
+                case 0x02u: contra_rom_soldier_routine_01(core, x); break;
+                default: break; /* walk/fire/hit routines not yet ported */
+            }
+            break;
         case 0x02u: /* pill box / weapon box */
             switch (routine)
             {
