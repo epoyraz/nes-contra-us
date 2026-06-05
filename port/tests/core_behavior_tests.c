@@ -1588,12 +1588,12 @@ static bool test_level2_wall_core_destroy_updates_back_wall_quadrants(void)
     CHECK(l2_enemy_active(&core, wall_core_index));
     CHECK(l2_enemy_type(&core, wall_core_index) == 0x14u);
     CHECK(l2_core_destroying(&core, wall_core_index));
-    CHECK(core.ram[CONTRA_RAM_WALL_CORE_REMAINING] == 0x00u);
-    CHECK(core.ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] == 0x00u);
-    CHECK(!l2_blowopen_started(&core, wall_core_index));
     initial_framebuffer_hash = hash_bytes(core.framebuffer, sizeof(core.framebuffer));
 
-    for (frame = 0u; frame < 24u; ++frame)
+    /* the destruction chain registers the kill (WALL_CORE_REMAINING) and blows the
+       back wall open over the next frames (the faithful chain is multi-frame, where
+       the invented path did it immediately) */
+    for (frame = 0u; frame < 48u; ++frame)
     {
         step_no_input(&core);
         if (l2_blowopen_started(&core, wall_core_index))
@@ -1604,6 +1604,7 @@ static bool test_level2_wall_core_destroy_updates_back_wall_quadrants(void)
     }
 
     CHECK(saw_quadrant_update);
+    CHECK(core.ram[CONTRA_RAM_WALL_CORE_REMAINING] == 0x00u);
     CHECK(core.ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] == 0x00u);
     CHECK(hash_bytes(core.framebuffer, sizeof(core.framebuffer)) != initial_framebuffer_hash);
 
@@ -1633,7 +1634,10 @@ static bool test_level2_soldier_generator_uses_scripted_attack_rounds(void)
     CHECK(count_active_enemy_type(&core, 0x19u) == 1u);
     CHECK(core.ram[CONTRA_RAM_INDOOR_ENEMY_ATTACK_COUNT] == 0x00u);
 
-    for (frame = 0u; frame < 180u; ++frame)
+    /* The faithful generator's per-round cadence differs from the invented one, so
+       running soldiers can arrive in a later round; widen the window and assert the
+       intent (both soldier kinds spawn and attack rounds increment). */
+    for (frame = 0u; frame < 360u; ++frame)
     {
         step_no_input(&core);
         saw_jumping_soldier = saw_jumping_soldier || (count_active_enemy_type(&core, 0x16u) != 0u);
@@ -1650,7 +1654,7 @@ static bool test_level2_soldier_generator_uses_scripted_attack_rounds(void)
     CHECK(saw_jumping_soldier);
     CHECK(saw_running_soldier);
     CHECK(attack_round_incremented);
-    CHECK(core.ram[CONTRA_RAM_INDOOR_ENEMY_ATTACK_COUNT] == 0x01u);
+    CHECK(core.ram[CONTRA_RAM_INDOOR_ENEMY_ATTACK_COUNT] >= 0x01u);
     CHECK(core.ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] == 0x00u);
     CHECK(core.ram[CONTRA_RAM_WALL_CORE_REMAINING] == 0x01u);
     CHECK(core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] == 0x00u);
@@ -1972,7 +1976,9 @@ static bool test_level2_boss_room_plating_and_eye_can_be_destroyed(void)
 
     while (count_active_enemy_type(&core, 0x0Au) != 0u)
     {
-        CHECK(shoot_enemy_until_removed_or_changed(&core, 0x0Au, 8u));
+        /* platings start invulnerable (HP 0xF0) and deploy over time; the faithful
+           deploy is slower than the invented one, so allow more frames to land hits */
+        CHECK(shoot_enemy_until_removed_or_changed(&core, 0x0Au, 96u));
     }
 
     CHECK(core.ram[CONTRA_RAM_WALL_PLATING_DESTROYED_COUNT] == 0x04u);
