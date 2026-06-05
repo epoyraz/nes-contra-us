@@ -9752,24 +9752,124 @@ static void contra_rom_indoor_soldier_routine_01(ContraCore *core, uint8_t x)
     /* grenade (weapon 1) / roller (weapon 2,3) deferred */
 }
 
+/* jumping_soldier_y_vel_tbl (bank0:3648): signed per-frame Y deltas over one jump
+   arc (up, hang, then down). */
+static const int8_t contra_jumping_soldier_y_vel_tbl[20] = {
+    -3, -3, -2, -2, -2, -1, -1, -1, 0, 0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3};
+
+/* jumping_soldier_routine_00 (bank0:3548): decide whether this is the room's one
+   red weapon-dropping soldier (only after the first attack round, one per room;
+   others get their red bit cleared), then init position/velocity. The red
+   weapon DROP on death is deferred -- red soldiers die via the generic explosion. */
+static void contra_rom_jumping_soldier_routine_00(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    if ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x02u) != 0u)
+    {
+        if ((ram[CONTRA_RAM_INDOOR_RED_SOLDIER_CREATED] != 0u) ||
+            (ram[CONTRA_RAM_INDOOR_ENEMY_ATTACK_COUNT] == 0u))
+        {
+            ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] =
+                (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0xFDu); /* not the red one */
+        }
+        else
+        {
+            ram[CONTRA_RAM_INDOOR_RED_SOLDIER_CREATED] = 0x01u;
+        }
+    }
+    contra_rom_init_indoor_enemy_pos_and_vel(core, x, 2u);
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+/* jumping_soldier_routine_01 (bank0:3572): sprite by jump phase, walk
+   horizontally, follow the parabolic jump arc, and -- during the landing pause,
+   if not red -- fire once at the player via the diagonal aim. */
+static void contra_rom_jumping_soldier_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t delay = ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x];
+    const uint8_t pal = ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x02u) != 0u) ? 0x05u : 0x00u;
+    uint8_t attr;
+
+    if (delay == 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x97u; /* in the air */
+    }
+    else if (delay < 0x04u)
+    {
+        ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x93u;
+    }
+    else
+    {
+        ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x98u;
+    }
+
+    attr = ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x];
+    if ((ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] & 0x80u) != 0u)
+    {
+        attr = (uint8_t)(attr | 0x40u); /* moving left: flip horizontally */
+    }
+    else
+    {
+        attr = (uint8_t)(attr & 0xBFu);
+    }
+    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = (uint8_t)((attr & 0xF8u) | pal);
+
+    if (delay != 0u)
+    {
+        /* landing pause: count down; fire once (non-red) on the firing beat */
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = (uint8_t)(delay - 1u);
+        if ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x02u) != 0u)
+        {
+            return; /* the red soldier doesn't fire */
+        }
+        if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] == 0x08u)
+        {
+            contra_rom_aim_and_create_enemy_bullet(
+                core, ram[CONTRA_RAM_ENEMY_X_POS + x], ram[CONTRA_RAM_ENEMY_Y_POS + x],
+                0x03u, 0x04u, contra_quadrant_aim_dir_01);
+        }
+        return;
+    }
+
+    /* mid-jump: walk, then follow the jump arc */
+    if (contra_rom_apply_indoor_velocity(core, x))
+    {
+        return; /* walked off-screen and was removed */
+    }
+    ram[CONTRA_RAM_ENEMY_Y_POS + x] = (uint8_t)(
+        (int)ram[CONTRA_RAM_ENEMY_Y_POS + x] +
+        contra_jumping_soldier_y_vel_tbl[ram[CONTRA_RAM_ENEMY_VAR_1 + x] % 20u]);
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] + 1u);
+    if (ram[CONTRA_RAM_ENEMY_VAR_1 + x] >= 0x14u)
+    {
+        ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0u;
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x10u; /* land, pause before next jump */
+    }
+}
+
 /* create the generator sub-type soldier (bank0:2485): running (0x15), jumping
-   (0x16), group-of-4 (0x18), grenade launcher (0x17). Only the running soldier
-   is ported; other kinds are skipped -- their script entry still advances, so
-   the generator cadence and attack-round count stay faithful. */
+   (0x16), group-of-4 (0x18), grenade launcher (0x17). Running and jumping are
+   ported; group-of-4 / grenade launcher are skipped -- their script entry still
+   advances, so the generator cadence and attack-round count stay faithful. */
 static void contra_rom_create_indoor_soldier(ContraCore *core, uint8_t stype, uint8_t attrs)
 {
+    uint8_t type;
     int slot;
 
-    if (stype != 0x00u)
+    switch (stype)
     {
-        return; /* jumping / group-of-4 / grenade launcher deferred */
+        case 0x00u: type = 0x15u; break; /* running indoor soldier */
+        case 0x01u: type = 0x16u; break; /* jumping indoor soldier */
+        default: return;                 /* group-of-4 / grenade launcher deferred */
     }
     slot = contra_rom_find_next_enemy_slot(core);
     if (slot < 0)
     {
         return;
     }
-    core->ram[CONTRA_RAM_ENEMY_TYPE + slot] = 0x15u; /* running indoor soldier */
+    core->ram[CONTRA_RAM_ENEMY_TYPE + slot] = type;
     contra_rom_initialize_enemy(core, (uint8_t)slot);
     core->ram[CONTRA_RAM_ENEMY_ATTRIBUTES + slot] = attrs;
 }
@@ -10044,6 +10144,14 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
             {
                 case 0x01u: contra_rom_indoor_soldier_routine_00(core, x); break;
                 case 0x02u: contra_rom_indoor_soldier_routine_01(core, x); break;
+                default: break; /* hit/explosion via the 0xFE actor */
+            }
+            break;
+        case 0x16u: /* indoor jumping soldier */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_jumping_soldier_routine_00(core, x); break;
+                case 0x02u: contra_rom_jumping_soldier_routine_01(core, x); break;
                 default: break; /* hit/explosion via the 0xFE actor */
             }
             break;
