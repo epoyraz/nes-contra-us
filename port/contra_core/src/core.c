@@ -9471,6 +9471,19 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
         ram[CONTRA_RAM_ENEMY_HP + slot] = hp;
         if (hp == 0u)
         {
+            /* wall_core_routine_07 core mechanic: a destroyed level-2 core
+               decrements the room's remaining cores; clearing the last one marks
+               the room cleared so the level routine advances to the next room.
+               (Full destruction/back-wall animation is the wall-core follow-up.) */
+            if (ram[CONTRA_RAM_ENEMY_TYPE + slot] == 0x14u)
+            {
+                ram[CONTRA_RAM_WALL_CORE_REMAINING] =
+                    (uint8_t)(ram[CONTRA_RAM_WALL_CORE_REMAINING] - 1u);
+                if (ram[CONTRA_RAM_WALL_CORE_REMAINING] == 0u)
+                {
+                    ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] = 0x01u;
+                }
+            }
             contra_rom_begin_enemy_explosion(core, slot); /* TODO: award score */
             return;
         }
