@@ -8170,6 +8170,7 @@ static const uint8_t contra_enemy_prop_level2[][4] = {
     {0x13u, 0x16u, 0x01u, 0x00u}, /* 0x18 group of 4 */
     {0x89u, 0x00u, 0xF1u, 0x00u}, /* 0x19 indoor soldier generator */
     {0x81u, 0x00u, 0xF1u, 0x00u}, /* 0x1A roller generator */
+    {0x8Fu, 0x13u, 0x02u, 0x01u}, /* 0x1B boss eye sphere projectile */
 };
 
 /* find_next_enemy_slot (bank7.asm:9024): first free slot scanning 15->0, or -1. */
@@ -10695,6 +10696,224 @@ static void contra_rom_wall_plating_routine_03(ContraCore *core, uint8_t x)
     contra_rom_begin_enemy_explosion(core, x);
 }
 
+/* ===== level-2 boss room: boss eye (0x10) + eye projectile (0x1B) ===========
+   Once all 4 platings are gone the eye wakes, drifts across the corridor (HP=1
+   per hit, real HP 0x10 in VAR_1), and lobs aimed sphere projectiles (0x1B) that
+   grow + become hittable as they near the player. */
+
+/* set_bullet_velocities (bank7:9893): set an existing enemy slot's X/Y velocity
+   from a 24-direction angle + quadrant (the velocity half of create_enemy_bullet). */
+static void contra_rom_set_bullet_velocities(
+    ContraCore *core, uint8_t slot, uint8_t angle, uint8_t quadrant, uint8_t speed)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t idx = contra_bullet_fract_vel_dir_lookup_tbl[angle % 24u];
+    uint16_t xv = contra_rom_adjust_bullet_velocity(contra_bullet_fract_vel_tbl[idx + 1u], speed);
+    uint16_t yv = contra_rom_adjust_bullet_velocity(contra_bullet_fract_vel_tbl[idx], speed);
+
+    if ((quadrant & 0x01u) != 0u) { yv = (uint16_t)(0u - yv); }
+    if ((quadrant & 0x02u) != 0u) { xv = (uint16_t)(0u - xv); }
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + slot] = (uint8_t)(yv >> 8u);
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + slot] = (uint8_t)yv;
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + slot] = (uint8_t)(xv >> 8u);
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + slot] = (uint8_t)xv;
+}
+
+/* get_quadrant_aim_dir_for_player (bank7): aim-direction nibble from (sx,sy)
+   toward the closest normal-state player (indoor Y fixed at 0xB0; screen-center
+   if neither is normal); *quadrant gets $07. */
+static uint8_t contra_rom_aim_at_player(
+    ContraCore *core, uint8_t sx, uint8_t sy, const uint8_t *tbl, uint8_t *quadrant)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t p0 = ram[CONTRA_RAM_SPRITE_X_POS + 0u];
+    const uint8_t p1 = ram[CONTRA_RAM_SPRITE_X_POS + 1u];
+    const uint8_t d0 = (p0 >= sx) ? (uint8_t)(p0 - sx) : (uint8_t)(sx - p0);
+    const uint8_t d1 = (p1 >= sx) ? (uint8_t)(p1 - sx) : (uint8_t)(sx - p1);
+    uint8_t idx = ((p1 != 0u) && ((p0 == 0u) || (d1 < d0))) ? 1u : 0u;
+    uint8_t tx;
+    uint8_t ty;
+
+    if (ram[CONTRA_RAM_PLAYER_STATE + idx] != 0x01u) { idx ^= 0x01u; }
+    if (ram[CONTRA_RAM_PLAYER_STATE + idx] != 0x01u)
+    {
+        tx = 0x80u;
+        ty = 0xFFu;
+    }
+    else
+    {
+        tx = ram[CONTRA_RAM_SPRITE_X_POS + idx];
+        ty = (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u) ? 0xB0u : ram[CONTRA_RAM_SPRITE_Y_POS + idx];
+    }
+    return contra_rom_get_quadrant_aim_dir(sx, sy, tx, ty, tbl, quadrant);
+}
+
+/* generate_enemy_at_pos (bank7:8448): spawn an enemy of `type` at the generating
+   enemy's position. */
+static void contra_rom_generate_enemy_at_pos(ContraCore *core, uint8_t gen_slot, uint8_t type)
+{
+    uint8_t *const ram = core->ram;
+    const int slot = contra_rom_find_next_enemy_slot(core);
+
+    if (slot < 0)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_TYPE + slot] = type;
+    contra_rom_initialize_enemy(core, (uint8_t)slot);
+    ram[CONTRA_RAM_ENEMY_Y_POS + slot] = ram[CONTRA_RAM_ENEMY_Y_POS + gen_slot];
+    ram[CONTRA_RAM_ENEMY_X_POS + slot] = ram[CONTRA_RAM_ENEMY_X_POS + gen_slot];
+}
+
+static const uint8_t contra_boss_eye_sprite_code_tbl[8] = {
+    0x5Du, 0x5Eu, 0x5Fu, 0x5Eu, 0x60u, 0x61u, 0x62u, 0x61u};
+static const uint8_t contra_boss_eye_attack_delay_tbl[4] = {0x70u, 0x50u, 0x40u, 0x28u};
+
+static void contra_rom_boss_eye_routine_00(ContraCore *core, uint8_t x)
+{
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x40u);
+}
+
+static void contra_rom_boss_eye_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    if (ram[CONTRA_RAM_WALL_PLATING_DESTROYED_COUNT] < 0x04u)
+    {
+        return; /* shields still up */
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x] = 0x40u;
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] = 0x01u;
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0x10u; /* real HP */
+    ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x7Eu); /* enable collision */
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x20u;
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0xC0u);
+}
+
+static void contra_rom_boss_eye_routine_02(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t base = 0u;
+
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+        if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x08u) != 0u)
+        {
+            base = 4u; /* flash the hit frames */
+        }
+    }
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] =
+        contra_boss_eye_sprite_code_tbl[(base + ((ram[CONTRA_RAM_ENEMY_FRAME + x] >> 3u) & 0x03u)) & 0x07u];
+
+    contra_rom_update_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    {
+        const uint8_t ex = ram[CONTRA_RAM_ENEMY_X_POS + x];
+        const bool moving_left = (ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] & 0x80u) != 0u;
+
+        if (moving_left ? (ex < 0x50u) : (ex >= 0xB0u))
+        {
+            contra_rom_reverse_enemy_x_direction(core, x); /* bounce off the edges */
+        }
+    }
+    if (ram[CONTRA_RAM_ENEMY_ATTACK_FLAG] == 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] != 0u)
+    {
+        return;
+    }
+    {
+        const uint8_t ws = ram[CONTRA_RAM_PLAYER_WEAPON_STRENGTH];
+
+        ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = contra_boss_eye_attack_delay_tbl[(ws < 4u) ? ws : 3u];
+    }
+    contra_rom_generate_enemy_at_pos(core, x, 0x1Bu); /* fire an eye projectile */
+}
+
+/* boss_eye_routine_03 (bank0:2779): reached on every hit (eye HP=1). Decrement
+   the real HP (VAR_1); if it's gone the boss is defeated, otherwise flash and
+   resume drifting. */
+static void contra_rom_boss_eye_routine_03(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    int slot;
+
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_VAR_1 + x] != 0u)
+    {
+        if (ram[CONTRA_RAM_ENEMY_VAR_1 + x] == 0x01u)
+        {
+            ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = 0x52u;
+        }
+        ram[CONTRA_RAM_ENEMY_HP + x] = 0x01u;
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x20u; /* flash red */
+        contra_rom_set_enemy_routine_to_a(core, x, 0x03u); /* -> routine_02 (drift) */
+        return;
+    }
+    /* boss_defeated_routine (bank7): mark defeated, wipe the other enemies, explode. */
+    ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] = 0x01u;
+    for (slot = 0x0F; slot >= 0; --slot)
+    {
+        if ((uint8_t)slot != x)
+        {
+            contra_rom_clear_enemy(core, (uint8_t)slot);
+        }
+    }
+    contra_rom_begin_enemy_explosion(core, x);
+}
+
+static const uint8_t contra_eye_projectile_sprite_attr_tbl[4] = {0x00u, 0x40u, 0xC0u, 0x80u};
+
+static void contra_rom_eye_projectile_routine_00(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t sx = ram[CONTRA_RAM_ENEMY_X_POS + x];
+    const uint8_t sy = ram[CONTRA_RAM_ENEMY_Y_POS + x];
+    uint8_t quadrant;
+    const uint8_t nibble = contra_rom_aim_at_player(core, sx, sy, contra_quadrant_aim_dir_01, &quadrant);
+
+    contra_rom_set_bullet_velocities(core, x, nibble, quadrant, 0x06u);
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+static void contra_rom_eye_projectile_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t attr;
+
+    if (ram[CONTRA_RAM_ENEMY_Y_POS + x] < 0x48u)
+    {
+        ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x63u; /* far/small, not yet hittable */
+    }
+    else
+    {
+        ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x7Eu); /* enable collision */
+        ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x64u; /* near/big, hittable */
+    }
+    attr = (uint8_t)(ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] & 0x3Fu);
+    attr = (uint8_t)(attr | contra_eye_projectile_sprite_attr_tbl[(ram[CONTRA_RAM_FRAME_COUNTER] >> 2u) & 0x03u]);
+    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = attr;
+    contra_rom_update_enemy_pos(core, x);
+}
+
 /* --- boss bomb turret (enemy type 0x10), bank0.asm --- */
 /* super-tile per (recoil state VAR_1: 0 idle / 2 firing) and background variant
    (attr bit0: wall vs jungle), interleaved. */
@@ -10860,12 +11079,34 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
 
     switch (type)
     {
-        case 0x10u: /* boss wall bomb turret */
+        case 0x10u:
+            if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u)
+            {
+                switch (routine) /* level-2 boss eye */
+                {
+                    case 0x01u: contra_rom_boss_eye_routine_00(core, x); break;
+                    case 0x02u: contra_rom_boss_eye_routine_01(core, x); break;
+                    case 0x03u: contra_rom_boss_eye_routine_02(core, x); break;
+                    case 0x04u: contra_rom_boss_eye_routine_03(core, x); break;
+                    default: break; /* defeated/explosion handled in routine_03 */
+                }
+            }
+            else
+            {
+                switch (routine) /* level-1 boss wall bomb turret */
+                {
+                    case 0x01u: contra_rom_boss_bomb_turret_routine_00(core, x); break;
+                    case 0x02u: contra_rom_boss_bomb_turret_routine_01(core, x); break;
+                    default: break; /* explosion handled via the kill path */
+                }
+            }
+            break;
+        case 0x1Bu: /* level-2 boss eye sphere projectile */
             switch (routine)
             {
-                case 0x01u: contra_rom_boss_bomb_turret_routine_00(core, x); break;
-                case 0x02u: contra_rom_boss_bomb_turret_routine_01(core, x); break;
-                default: break; /* explosion handled via the kill path */
+                case 0x01u: contra_rom_eye_projectile_routine_00(core, x); break;
+                case 0x02u: contra_rom_eye_projectile_routine_01(core, x); break;
+                default: break; /* explosion via the 0xFE actor */
             }
             break;
         case 0x13u: /* level-2 wall turret */
