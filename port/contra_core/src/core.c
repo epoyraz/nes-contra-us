@@ -9800,10 +9800,160 @@ static void contra_rom_roller_routine_01(ContraCore *core, uint8_t x)
     }
 }
 
+/* ===== level-2 indoor grenade (0x12) ======================================
+   A thrown grenade follows a pseudo-3D arc: a height accumulator (VAR_2/VAR_3)
+   driven by a height velocity (VAR_4/VAR_B) is layered on a ground-Y (VAR_1)
+   that travels toward the player; the on-screen Y is VAR_1 + VAR_3. (ENEMY_VAR_B
+   IS ENEMY_ATTACK_DELAY -- the same $0558, so routine_00 seeding ATTACK_DELAY=
+   0xFD is the -3 upward throw, and routine_01 adding gravity to it is the arc.)
+   (level-1 0x12 is the exploding bridge, a separate future port.) */
+
+/* set_enemy_falling_arc_pos (bank0:area): advance the height + ground, place the
+   sprite at VAR_1+VAR_3, and remove the grenade if it falls off the bottom/left. */
+static void contra_rom_set_enemy_falling_arc_pos(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    unsigned acc;
+    uint8_t var1;
+
+    acc = (unsigned)ram[CONTRA_RAM_ENEMY_VAR_2 + x] + ram[CONTRA_RAM_ENEMY_VAR_4 + x];
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = (uint8_t)acc;
+    ram[CONTRA_RAM_ENEMY_VAR_3 + x] = (uint8_t)(
+        ram[CONTRA_RAM_ENEMY_VAR_3 + x] + ram[CONTRA_RAM_ENEMY_VAR_B + x] + (acc >> 8u));
+    acc = (unsigned)ram[CONTRA_RAM_ENEMY_Y_VEL_ACCUM + x] + ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x];
+    ram[CONTRA_RAM_ENEMY_Y_VEL_ACCUM + x] = (uint8_t)acc;
+    var1 = (uint8_t)(
+        ram[CONTRA_RAM_ENEMY_VAR_1 + x] + ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] + (acc >> 8u));
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = var1;
+    if (var1 >= 0xF0u)
+    {
+        contra_rom_clear_enemy(core, x); /* fell below the screen */
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_Y_POS + x] = (uint8_t)(var1 + ram[CONTRA_RAM_ENEMY_VAR_3 + x]);
+    contra_rom_update_enemy_x_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_X_POS + x] < 0x08u)
+    {
+        contra_rom_clear_enemy(core, x); /* off the left edge */
+    }
+}
+
+/* grenade sprite codes by depth size (0..2): {codes..., attrs...} pairs,
+   length per size from len_tbl (bank0:3008/2998). */
+static const uint8_t contra_grenade_sprite_y_cutoff_tbl[2] = {0x80u, 0x90u};
+static const uint8_t contra_grenade_sprite_codes_len_tbl[3] = {4u, 8u, 8u};
+static const uint8_t contra_grenade_sprite_codes_00[8] = {
+    0xA8u, 0xA9u, 0xA6u, 0xA9u, 0x00u, 0x00u, 0x00u, 0xC0u};
+static const uint8_t contra_grenade_sprite_codes_01[16] = {
+    0xA4u, 0xA5u, 0xA6u, 0xA5u, 0xA4u, 0xA7u, 0xA6u, 0xA7u,
+    0x00u, 0x00u, 0x00u, 0xC0u, 0xC0u, 0x00u, 0x00u, 0xC0u};
+static const uint8_t contra_grenade_sprite_codes_02[16] = {
+    0xA0u, 0xA1u, 0xA2u, 0xA1u, 0xA0u, 0xA3u, 0xA2u, 0xA3u,
+    0x00u, 0x00u, 0x00u, 0xC0u, 0xC0u, 0x00u, 0x00u, 0xC0u};
+static const uint8_t *const contra_grenade_sprite_codes_tbl[3] = {
+    contra_grenade_sprite_codes_00, contra_grenade_sprite_codes_01, contra_grenade_sprite_codes_02};
+
+/* enemy_launch_grenade (bank0:4195): throw a grenade (type 0x12) from (px, py),
+   X velocity by horizontal segment, ground Y velocity +0.5. */
+static void contra_rom_enemy_launch_grenade(ContraCore *core, uint8_t px, uint8_t py)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t seg = (uint8_t)(contra_rom_find_far_segment(px) % 7u);
+    int slot;
+
+    if (ram[CONTRA_RAM_ENEMY_ATTACK_FLAG] == 0u)
+    {
+        return;
+    }
+    slot = contra_rom_find_next_enemy_slot(core);
+    if (slot < 0)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_TYPE + slot] = 0x12u;
+    contra_rom_initialize_enemy(core, (uint8_t)slot);
+    ram[CONTRA_RAM_ENEMY_Y_POS + slot] = py;
+    ram[CONTRA_RAM_ENEMY_X_POS + slot] = px;
+    /* grenade_vel_code_tbl is identical to roller_vel_code_tbl */
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + slot] = contra_roller_vel_code_tbl[seg][0];
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + slot] = contra_roller_vel_code_tbl[seg][1];
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + slot] = 0x80u;
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + slot] = 0x00u;
+}
+
+/* grenade_routine_00 (bank0:2900): VAR_1 = throw-origin ground Y, VAR_4 = 0,
+   VAR_B (= ATTACK_DELAY) = 0xFD (the -3 upward throw). */
+static void contra_rom_grenade_routine_00(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = ram[CONTRA_RAM_ENEMY_Y_POS + x];
+    ram[CONTRA_RAM_ENEMY_VAR_4 + x] = 0x00u;
+    ram[CONTRA_RAM_ENEMY_VAR_B + x] = 0xFDu;
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+/* grenade_routine_01 (bank0:2932): tumble (sprite scaled by ground-Y depth,
+   animated every 8 frames), apply gravity to the height velocity, follow the
+   arc, and advance to the explosion once the height passes ground (VAR_3 >= 0). */
+static void contra_rom_grenade_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t ground = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
+    uint8_t size = 0u;
+    uint8_t len;
+    uint8_t frame;
+    unsigned acc;
+
+    if (ground >= contra_grenade_sprite_y_cutoff_tbl[1]) { size = 2u; }
+    else if (ground >= contra_grenade_sprite_y_cutoff_tbl[0]) { size = 1u; }
+    len = contra_grenade_sprite_codes_len_tbl[size];
+
+    if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x07u) == 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+    }
+    frame = ram[CONTRA_RAM_ENEMY_FRAME + x];
+    if (frame >= len)
+    {
+        frame = 0u;
+        ram[CONTRA_RAM_ENEMY_FRAME + x] = 0u;
+    }
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = contra_grenade_sprite_codes_tbl[size][frame];
+    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = contra_grenade_sprite_codes_tbl[size][frame + len];
+
+    acc = (unsigned)ram[CONTRA_RAM_ENEMY_VAR_4 + x] + 0x0Cu; /* gravity on the height velocity */
+    ram[CONTRA_RAM_ENEMY_VAR_4 + x] = (uint8_t)acc;
+    ram[CONTRA_RAM_ENEMY_VAR_B + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_B + x] + (acc >> 8u));
+
+    contra_rom_set_enemy_falling_arc_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return; /* removed off-screen */
+    }
+    if ((ram[CONTRA_RAM_ENEMY_VAR_3 + x] & 0x80u) == 0u)
+    {
+        contra_rom_advance_enemy_routine(core, x); /* landed -> explode */
+    }
+}
+
+/* grenade_routine_02 (bank0:3029): explode at the bottom, set the blast's
+   player-collision box (mortar_shot_routine_03), then start the explosion. */
+static void contra_rom_grenade_routine_02(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_Y_POS + x] = 0xACu;
+    ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = 0x0Du;
+    ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
+        (uint8_t)((ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0xBEu) | 0x80u);
+    contra_rom_begin_enemy_explosion(core, x);
+}
+
 /* indoor_soldier_routine_00/01 (bank0:3432): a running indoor soldier walks in
    from a side, animates, and fires on a cadence while inside the central firing
-   band -- a regular bullet (weapon 0) or a roller (weapon 2/3). The grenade
-   weapon (weapon 1) is deferred. */
+   band -- a regular bullet (weapon 0), a grenade (weapon 1), or a roller
+   (weapon 2/3). */
 static void contra_rom_indoor_soldier_routine_00(ContraCore *core, uint8_t x)
 {
     contra_rom_init_indoor_enemy_pos_and_vel(core, x, 0u);
@@ -9838,14 +9988,18 @@ static void contra_rom_indoor_soldier_routine_01(ContraCore *core, uint8_t x)
         {
             contra_rom_create_indoor_bullet(core, x); /* regular bullet */
         }
-        else if (weapon >= 2u)
+        else if (weapon == 1u)
+        {
+            contra_rom_enemy_launch_grenade(
+                core, ram[CONTRA_RAM_ENEMY_X_POS + x], ram[CONTRA_RAM_ENEMY_Y_POS + x]);
+        }
+        else
         {
             /* roller, spawned 8px below the soldier (bank0:3469) */
             contra_rom_create_roller(
                 core, ram[CONTRA_RAM_ENEMY_X_POS + x],
                 (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + 8u), 0x00u);
         }
-        /* grenade weapon (weapon 1) deferred */
     }
 }
 
@@ -10457,6 +10611,15 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x01u: contra_rom_indoor_roller_gen_routine_00(core, x); break;
                 case 0x02u: contra_rom_indoor_roller_gen_routine_01(core, x); break;
                 default: break; /* removed via clear once the rounds are done */
+            }
+            break;
+        case 0x12u: /* level-2 indoor grenade (level-1 0x12 = exploding bridge, not ported) */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_grenade_routine_00(core, x); break;
+                case 0x02u: contra_rom_grenade_routine_01(core, x); break;
+                case 0x03u: contra_rom_grenade_routine_02(core, x); break;
+                default: break; /* explosion via the 0xFE actor */
             }
             break;
         case 0x19u: /* indoor soldier generator */

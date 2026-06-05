@@ -210,6 +210,9 @@ enum ContraRamOffset
     CONTRA_RAM_ENEMY_ANIMATION_DELAY = 0x538u,
     CONTRA_RAM_ENEMY_VAR_A = 0x548u,
     CONTRA_RAM_ENEMY_ATTACK_DELAY = 0x558u,
+    /* alias of ENEMY_ATTACK_DELAY (same $0558): for weapon items and grenades it
+       is the high byte of the pseudo-3D arc height velocity (src/ram.asm:1587). */
+    CONTRA_RAM_ENEMY_VAR_B = 0x558u,
     CONTRA_RAM_ENEMY_FRAME = 0x568u,
     CONTRA_RAM_ENEMY_HP = 0x578u,
     CONTRA_RAM_ENEMY_SCORE_COLLISION = 0x588u,
