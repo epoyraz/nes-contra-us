@@ -12150,9 +12150,23 @@ static const uint8_t contra_weapon_box_destroyed_supertile[16] = {
     0x16u, 0x16u, 0x16u, 0x16u, 0x16u, 0x16u, 0x16u, 0x16u,
     0x19u, 0x1Au, 0x03u, 0x04u, 0x09u, 0x09u, 0x16u, 0x16u};
 
+/* play_explosion_sound (bank0:642): pop an explosion and repurpose this slot into
+   a weapon item carrying the source's weapon type (ATTRIBUTES & 0x07). Shared by
+   the pill box (weapon_box_routine_04) and the flying capsule
+   (flying_capsule_routine_02). Score/sound award is deferred. */
+static void contra_rom_play_explosion_sound(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_create_explosion_at(core, ram[CONTRA_RAM_ENEMY_X_POS + x], ram[CONTRA_RAM_ENEMY_Y_POS + x]);
+    ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x07u);
+    contra_rom_clear_sprite_clear_enemy_pt_3(core, x);
+    ram[CONTRA_RAM_ENEMY_ROUTINE + x] = 0x01u;
+    ram[CONTRA_RAM_ENEMY_TYPE + x] = 0x00u; /* now a weapon item */
+}
+
 /* weapon_box_routine_04 (bank0:627): the pill box was destroyed -- draw the
-   restored background super-tile, pop an explosion, and convert this slot into a
-   weapon item carrying the box's weapon type (ATTRIBUTES & 0x07). */
+   restored background super-tile, then drop a weapon item via play_explosion_sound. */
 static void contra_rom_weapon_box_routine_04(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -12171,11 +12185,14 @@ static void contra_rom_weapon_box_routine_04(ContraCore *core, uint8_t x)
     contra_render_level_1_nametable_update_supertile(
         core, (int)ram[CONTRA_RAM_ENEMY_X_POS + x], (int)ram[CONTRA_RAM_ENEMY_Y_POS + x],
         contra_weapon_box_destroyed_supertile[y & 0x0Fu]);
-    contra_rom_create_explosion_at(core, ram[CONTRA_RAM_ENEMY_X_POS + x], ram[CONTRA_RAM_ENEMY_Y_POS + x]);
-    ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x07u);
-    contra_rom_clear_sprite_clear_enemy_pt_3(core, x);
-    ram[CONTRA_RAM_ENEMY_ROUTINE + x] = 0x01u;
-    ram[CONTRA_RAM_ENEMY_TYPE + x] = 0x00u; /* now a weapon item */
+    contra_rom_play_explosion_sound(core, x);
+}
+
+/* flying_capsule_routine_02 (bank0:737): the weapon zeppelin was destroyed -- it
+   has no background tile, so it drops the weapon item directly. */
+static void contra_rom_flying_capsule_routine_02(ContraCore *core, uint8_t x)
+{
+    contra_rom_play_explosion_sound(core, x);
 }
 
 /* destroy_all_enemies (bank7:8096): set every live, damageable enemy to its
@@ -12667,7 +12684,8 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
             {
                 case 0x01u: contra_rom_flying_capsule_routine_00(core, x); break;
                 case 0x02u: contra_rom_flying_capsule_routine_01(core, x); break;
-                default: break; /* explosion routine not yet ported */
+                case 0x03u: contra_rom_flying_capsule_routine_02(core, x); break;
+                default: break; /* picked up / removed */
             }
             break;
         case 0x05u: /* soldier / running man */
@@ -12813,6 +12831,10 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
             else if (dead_type == 0x07u)
             {
                 dest_routine = 0x06u; /* red turret -> routine_05 (restore bg, explode) */
+            }
+            else if (dead_type == 0x03u)
+            {
+                dest_routine = 0x03u; /* flying capsule -> routine_02 (drop weapon item) */
             }
             if (dest_routine != 0u)
             {
