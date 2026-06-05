@@ -33,7 +33,6 @@ int main(void)
     const char *const dump_frame_text = getenv("CONTRA_NATIVE_LEVEL1_NAMETABLE_DUMP_FRAME");
     const char *const dump_path = getenv("CONTRA_NATIVE_LEVEL1_NAMETABLE_DUMP_PATH");
     const char *const supertile_dump_path = getenv("CONTRA_NATIVE_LEVEL1_SUPERTILE_DUMP_PATH");
-    const char *const enemy_dump_path = getenv("CONTRA_NATIVE_LEVEL1_ENEMY_DUMP_PATH");
     const char *const framebuffer_dump_path = getenv("CONTRA_NATIVE_LEVEL1_FRAMEBUFFER_DUMP_PATH");
     const char *const ram_dump_path = getenv("CONTRA_NATIVE_LEVEL1_RAM_DUMP_PATH");
     const char *const oam_dump_path = getenv("CONTRA_NATIVE_LEVEL1_OAM_DUMP_PATH");
@@ -67,48 +66,6 @@ int main(void)
             if (dump != NULL)
             {
                 fwrite(core.level_screen_supertiles, 1u, sizeof(core.level_screen_supertiles), dump);
-                fclose(dump);
-            }
-        }
-        if ((dump_frame != 0u) && (frame == dump_frame) && (enemy_dump_path != NULL))
-        {
-            FILE *const dump = fopen(enemy_dump_path, "w");
-            size_t enemy_index;
-
-            if (dump != NULL)
-            {
-                for (enemy_index = 0u; enemy_index < CONTRA_NATIVE_MAX_ENEMIES; ++enemy_index)
-                {
-                    const ContraNativeEnemy *const enemy = &core.enemies[enemy_index];
-
-                    if (enemy->active == 0u)
-                    {
-                        continue;
-                    }
-
-                    fprintf(
-                        dump,
-                        "%zu active=%u type=%02X attrs=%02X hp=%02X state=%02X timer=%02X cooldown=%02X "
-                        "flags=%02X screen_id=%02X sprite_code=%02X sprite_attr=%02X x=%d y=%d vx=%d vy=%d\n",
-                        enemy_index,
-                        (unsigned)enemy->active,
-                        (unsigned)enemy->type,
-                        (unsigned)enemy->attrs,
-                        (unsigned)enemy->hp,
-                        (unsigned)enemy->state,
-                        (unsigned)enemy->timer,
-                        (unsigned)enemy->cooldown,
-                        (unsigned)enemy->flags,
-                        (unsigned)enemy->screen_id,
-                        (unsigned)enemy->sprite_code,
-                        (unsigned)enemy->sprite_attr,
-                        (int)enemy->x,
-                        (int)enemy->y,
-                        (int)enemy->vx,
-                        (int)enemy->vy
-                    );
-                }
-
                 fclose(dump);
             }
         }

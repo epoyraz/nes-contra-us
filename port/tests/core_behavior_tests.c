@@ -163,11 +163,8 @@ static bool run_attract_until_level(ContraCore *core, uint8_t level, unsigned fr
     return false;
 }
 
-/* Enemy-slot accessors used by the level-2 helpers. With the faithful ROM enemy
-   system on, level-2 enemies live in real CPU RAM (16 slots); otherwise they live
-   in the invented core->enemies[] mirror. These read whichever is active so the
-   same level-2 tests pass under both builds. */
-#if CONTRA_USE_ROM_ENEMY_SYSTEM_L2
+/* Enemy-slot accessors used by the level-2 helpers. Level-2 enemies live in real
+   CPU RAM (16 slots), so these read the faithful ENEMY_* arrays directly. */
 static bool l2_enemy_active(const ContraCore *core, size_t i)
 {
     return (i < 16u) && (core->ram[CONTRA_RAM_ENEMY_ROUTINE + i] != 0u);
@@ -233,46 +230,6 @@ static unsigned count_active_projectiles_from_owner(const ContraCore *core, uint
     }
     return count;
 }
-#else
-static bool l2_enemy_active(const ContraCore *core, size_t i)
-{
-    return core->enemies[i].active != 0u;
-}
-static uint8_t l2_enemy_type(const ContraCore *core, size_t i)
-{
-    return core->enemies[i].type;
-}
-static uint8_t l2_enemy_hp(const ContraCore *core, size_t i)
-{
-    return core->enemies[i].hp;
-}
-static uint8_t l2_enemy_x(const ContraCore *core, size_t i)
-{
-    return (uint8_t)core->enemies[i].x;
-}
-static uint8_t l2_enemy_y(const ContraCore *core, size_t i)
-{
-    return (uint8_t)core->enemies[i].y;
-}
-static bool l2_enemy_core_destroyable(const ContraCore *core, size_t i)
-{
-    return core->enemies[i].state == 0x03u;
-}
-static bool l2_core_destroying(const ContraCore *core, size_t i)
-{
-    return core->enemies[i].state == 0x08u;
-}
-static bool l2_blowopen_started(const ContraCore *core, size_t i)
-{
-    return core->enemies[i].flags != 0u;
-}
-static void l2_inject_player_bullet(ContraCore *core, uint8_t x, uint8_t y)
-{
-    core->ram[CONTRA_RAM_PLAYER_BULLET_SLOT] = 0x01u;
-    core->ram[CONTRA_RAM_PLAYER_BULLET_X_POS] = x;
-    core->ram[CONTRA_RAM_PLAYER_BULLET_Y_POS] = y;
-}
-#endif
 
 static bool destroy_first_level2_wall_core(ContraCore *core);
 
@@ -297,7 +254,6 @@ static bool advance_level2_room_once(ContraCore *core)
     {
         return false;
     }
-    memset(core->enemy_projectiles, 0, sizeof(core->enemy_projectiles));
 
     for (frame = 0u; frame < 420u; ++frame)
     {
@@ -371,42 +327,7 @@ static unsigned count_active_enemy_type(const ContraCore *core, uint8_t enemy_ty
     return count;
 }
 
-#if !CONTRA_USE_ROM_ENEMY_SYSTEM_L2
-static unsigned count_active_projectiles_from_owner(const ContraCore *core, uint8_t owner)
-{
-    unsigned count = 0u;
-    size_t index;
 
-    for (index = 0u; index < CONTRA_NATIVE_MAX_ENEMY_PROJECTILES; ++index)
-    {
-        if ((core->enemy_projectiles[index].active != 0u) &&
-            (core->enemy_projectiles[index].owner == owner))
-        {
-            ++count;
-        }
-    }
-
-    return count;
-}
-#endif
-
-#if !CONTRA_USE_ROM_ENEMY_SYSTEM_L2
-static bool find_first_active_enemy_type(const ContraCore *core, uint8_t enemy_type, size_t *enemy_index)
-{
-    size_t index;
-
-    for (index = 0u; index < CONTRA_NATIVE_MAX_ENEMIES; ++index)
-    {
-        if (l2_enemy_active(core, index) && (l2_enemy_type(core, index) == enemy_type))
-        {
-            *enemy_index = index;
-            return true;
-        }
-    }
-
-    return false;
-}
-#endif
 
 static bool destroy_first_level2_wall_core(ContraCore *core)
 {
@@ -486,32 +407,6 @@ static bool reach_level2_boss_room(ContraCore *core)
 }
 
 /* Only the (retired-under-faithful) boss-room plating test uses this. */
-#if !CONTRA_USE_ROM_ENEMY_SYSTEM_L2
-static bool shoot_enemy_until_removed_or_changed(ContraCore *core, uint8_t enemy_type, unsigned max_hits)
-{
-    unsigned hit;
-    size_t enemy_index = 0u;
-    const unsigned initial_count = count_active_enemy_type(core, enemy_type);
-
-    for (hit = 0u; hit < max_hits; ++hit)
-    {
-        if (!find_first_active_enemy_type(core, enemy_type, &enemy_index))
-        {
-            return true;
-        }
-
-        l2_inject_player_bullet(core, l2_enemy_x(core, enemy_index), l2_enemy_y(core, enemy_index));
-        step_no_input(core);
-
-        if (count_active_enemy_type(core, enemy_type) < initial_count)
-        {
-            return true;
-        }
-    }
-
-    return count_active_enemy_type(core, enemy_type) < initial_count;
-}
-#endif
 
 static void clear_player_bullets(ContraCore *core)
 {
@@ -548,7 +443,6 @@ static unsigned count_player_bullets_with_slot(const ContraCore *core, uint8_t s
 static void prepare_level1_weapon_state(ContraCore *core)
 {
     clear_player_bullets(core);
-    memset(core->enemy_projectiles, 0, sizeof(core->enemy_projectiles));
     core->ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
     core->ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x04u;
     core->ram[CONTRA_RAM_CURRENT_LEVEL] = 0x00u;
@@ -568,45 +462,6 @@ static void prepare_level1_weapon_state(ContraCore *core)
     core->ram[CONTRA_RAM_PLAYER_AIM_DIR] = 0x02u;
     core->ram[CONTRA_RAM_PLAYER_AIM_PREV_FRAME] = 0x02u;
 }
-
-/* These helpers and the tests below seed/inspect the invented core->enemies[]
-   mirror directly, so they only build when the level-1 invented enemy system is
-   active. Under the faithful flag those enemies live in real CPU RAM and these
-   tests are retired (faithful behavior is covered by the demo + the real-RAM
-   level-2 tests and the playable build). */
-#if !CONTRA_USE_ROM_ENEMY_SYSTEM
-static void prepare_level1_enemy_matrix_state(ContraCore *core)
-{
-    prepare_level1_weapon_state(core);
-    memset(core->enemies, 0, sizeof(core->enemies));
-    memset(core->enemy_projectiles, 0, sizeof(core->enemy_projectiles));
-    core->ram[CONTRA_RAM_NEW_LIFE_INVINCIBILITY_TIMER] = 0x00u;
-    core->ram[CONTRA_RAM_INVINCIBILITY_TIMER] = 0x80u;
-    core->ram[CONTRA_RAM_SPRITE_X_POS] = 0x80u;
-    core->ram[CONTRA_RAM_SPRITE_Y_POS] = 0x80u;
-}
-
-static ContraNativeEnemy *seed_enemy(
-    ContraCore *core,
-    size_t index,
-    uint8_t type,
-    uint8_t state,
-    int16_t x,
-    int16_t y
-)
-{
-    ContraNativeEnemy *const enemy = &core->enemies[index];
-
-    memset(enemy, 0, sizeof(*enemy));
-    enemy->active = 0x01u;
-    enemy->type = type;
-    enemy->state = state;
-    enemy->hp = 0x01u;
-    enemy->x = x;
-    enemy->y = y;
-    return enemy;
-}
-#endif
 
 static bool test_title_start_reaches_level1_gameplay(void)
 {
@@ -647,446 +502,6 @@ static bool test_level1_scrolls_right_under_player_input(void)
     return true;
 }
 
-#if !CONTRA_USE_ROM_ENEMY_SYSTEM
-static bool test_level1_spawns_native_enemies_while_scrolling(void)
-{
-    ContraCore core;
-    unsigned frame;
-    unsigned active_supported_enemies = 0u;
-    bool enemy_data_loaded = false;
-    bool enemy_seen = false;
-    size_t index;
-
-    contra_core_init(&core);
-    CHECK(run_until_gameplay(&core, 900u));
-
-    for (frame = 0u; frame < 760u; ++frame)
-    {
-        step_with_input(&core, CONTRA_BUTTON_RIGHT);
-        enemy_data_loaded = enemy_data_loaded || (core.ram[CONTRA_RAM_ENEMY_SCREEN_READ_OFFSET] != 0u);
-
-        for (index = 0u; index < CONTRA_NATIVE_MAX_ENEMIES; ++index)
-        {
-            if (core.enemies[index].active != 0u)
-            {
-                enemy_seen = true;
-            }
-        }
-    }
-
-    for (index = 0u; index < CONTRA_NATIVE_MAX_ENEMIES; ++index)
-    {
-        if (core.enemies[index].active != 0u)
-        {
-            ++active_supported_enemies;
-        }
-    }
-
-    CHECK(core.ram[CONTRA_RAM_CURRENT_LEVEL] == 0x00u);
-    CHECK(core.ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] != 0u);
-    CHECK(enemy_data_loaded);
-    CHECK(enemy_seen || (active_supported_enemies != 0u));
-    return true;
-}
-
-static bool test_level1_generated_soldier_spawns_on_snapped_floor(void)
-{
-    ContraCore core;
-    size_t enemy_index;
-    bool soldier_found = false;
-    size_t soldier_index = 0u;
-
-    contra_core_init(&core);
-    CHECK(run_until_gameplay(&core, 900u));
-
-    memset(core.enemies, 0, sizeof(core.enemies));
-    memset(core.enemy_projectiles, 0, sizeof(core.enemy_projectiles));
-    core.ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] = 0x01u;
-    core.ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] = 0x00u;
-    core.ram[CONTRA_RAM_ENEMY_SCREEN_READ_OFFSET] = 0x00u;
-    core.ram[CONTRA_RAM_SOLDIER_GEN_SCREEN] = 0x01u;
-    core.ram[CONTRA_RAM_SCREEN_GEN_SOLDIERS] = 0x00u;
-    core.ram[CONTRA_RAM_SOLDIER_GENERATION_TIMER] = 0x01u;
-    core.ram[CONTRA_RAM_FRAME_COUNTER] = 0x01u;
-    core.ram[CONTRA_RAM_RANDOM_NUM] = 0x00u;
-    core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] = 0x00u;
-    core.ram[CONTRA_RAM_P2_GAME_OVER_STATUS] = 0x01u;
-    core.ram[CONTRA_RAM_PLAYER_STATE] = 0x01u;
-    core.ram[CONTRA_RAM_SPRITE_X_POS] = 0x80u;
-    core.ram[CONTRA_RAM_SPRITE_Y_POS] = 0xB4u;
-
-    step_no_input(&core);
-
-    for (enemy_index = 0u; enemy_index < CONTRA_NATIVE_MAX_ENEMIES; ++enemy_index)
-    {
-        if ((core.enemies[enemy_index].active != 0u) &&
-            (core.enemies[enemy_index].type == 0x05u) &&
-            (core.enemies[enemy_index].x == 0xFC))
-        {
-            soldier_found = true;
-            soldier_index = enemy_index;
-            break;
-        }
-    }
-
-    CHECK(soldier_found);
-    CHECK(((uint8_t)core.enemies[soldier_index].y & 0x0Fu) == 0x04u);
-    return true;
-}
-
-static bool test_level1_rifle_man_stays_seated_on_floor_after_y_drift(void)
-{
-    ContraCore core;
-    ContraNativeEnemy *enemy;
-
-    contra_core_init(&core);
-    CHECK(run_until_gameplay(&core, 900u));
-
-    memset(core.enemies, 0, sizeof(core.enemies));
-    memset(core.enemy_projectiles, 0, sizeof(core.enemy_projectiles));
-    core.ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] = 0x00u;
-    core.ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] = 0x10u;
-    core.ram[CONTRA_RAM_ENEMY_SCREEN_READ_OFFSET] = 0x00u;
-    core.ram[CONTRA_RAM_SOLDIER_GENERATION_TIMER] = 0xFFu;
-    core.ram[CONTRA_RAM_FRAME_SCROLL] = 0x00u;
-    core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] = 0x00u;
-    core.ram[CONTRA_RAM_P2_GAME_OVER_STATUS] = 0x01u;
-    core.ram[CONTRA_RAM_PLAYER_STATE] = 0x01u;
-    core.ram[CONTRA_RAM_SPRITE_X_POS] = 0x80u;
-    core.ram[CONTRA_RAM_SPRITE_Y_POS] = 0x64u;
-
-    enemy = seed_enemy(&core, 0u, 0x06u, 0x02u, 0x80, 0x69);
-    enemy->attrs = 0x00u;
-    enemy->sprite_code = 0x43u;
-
-    step_no_input(&core);
-
-    CHECK(core.enemies[0].active != 0u);
-    CHECK(core.enemies[0].type == 0x06u);
-    CHECK(((uint8_t)core.enemies[0].y & 0x0Fu) == 0x04u);
-    return true;
-}
-
-static bool test_level1_red_turret_bullet_uses_rom_muzzle_y_offset(void)
-{
-    ContraCore core;
-    ContraNativeEnemy *enemy;
-    size_t projectile_index;
-    bool projectile_found = false;
-    int16_t projectile_y = 0;
-
-    contra_core_init(&core);
-    prepare_level1_enemy_matrix_state(&core);
-    core.ram[CONTRA_RAM_ENEMY_ATTACK_FLAG] = 0x01u;
-    core.ram[CONTRA_RAM_SPRITE_X_POS] = 0x40u;
-    core.ram[CONTRA_RAM_SPRITE_Y_POS] = 0x7Cu;
-
-    enemy = seed_enemy(&core, 0u, 0x07u, 0x02u, 0x7C, 0x7C);
-    enemy->attrs = 0x00u;
-    enemy->cooldown = 0x00u;
-    enemy->flags = 0x03u;
-
-    step_no_input(&core);
-
-    for (projectile_index = 0u; projectile_index < CONTRA_NATIVE_MAX_ENEMY_PROJECTILES; ++projectile_index)
-    {
-        if ((core.enemy_projectiles[projectile_index].active != 0u) &&
-            (core.enemy_projectiles[projectile_index].owner == 0x07u))
-        {
-            projectile_found = true;
-            projectile_y = core.enemy_projectiles[projectile_index].y;
-            break;
-        }
-    }
-
-    CHECK(projectile_found);
-    CHECK(projectile_y == 0x7C);
-    return true;
-}
-
-static bool test_level1_boss_bomb_turret_uses_rom_wall_frame_and_muzzle(void)
-{
-    ContraCore core;
-    ContraNativeEnemy *enemy;
-    size_t projectile_index;
-    bool projectile_found = false;
-
-    contra_core_init(&core);
-    prepare_level1_enemy_matrix_state(&core);
-    core.ram[CONTRA_RAM_ENEMY_ATTACK_FLAG] = 0x01u;
-    core.ram[CONTRA_RAM_RANDOM_NUM] = 0x00u;
-    core.ram[CONTRA_RAM_FRAME_SCROLL] = 0x00u;
-
-    enemy = seed_enemy(&core, 0u, 0x10u, 0x02u, 0xC0, 0x80);
-    enemy->attrs = 0x00u;
-    enemy->cooldown = 0x00u;
-    enemy->flags = 0x00u;
-    enemy->hp = 0x08u;
-    enemy->sprite_code = 0x26u;
-
-    step_no_input(&core);
-
-    CHECK(core.enemies[0].active != 0u);
-    CHECK(core.enemies[0].sprite_code == 0x2Au);
-
-    for (projectile_index = 0u; projectile_index < CONTRA_NATIVE_MAX_ENEMY_PROJECTILES; ++projectile_index)
-    {
-        const ContraNativeProjectile *const projectile = &core.enemy_projectiles[projectile_index];
-
-        if ((projectile->active != 0u) &&
-            (projectile->owner == 0x10u))
-        {
-            projectile_found = true;
-            CHECK(projectile->sprite_code == 0x21u);
-            CHECK(projectile->sprite_attr == 0x02u);
-            CHECK(projectile->x == (core.enemies[0].x - 10));
-            CHECK(projectile->y == (core.enemies[0].y - 1));
-            break;
-        }
-    }
-
-    CHECK(projectile_found);
-    return true;
-}
-
-static bool test_level1_bullet_destroyed_enemy_becomes_explosion(void)
-{
-    ContraCore core;
-
-    contra_core_init(&core);
-    core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
-    core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x04u;
-    core.ram[CONTRA_RAM_CURRENT_LEVEL] = 0x00u;
-    core.ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] = 0x00u;
-    core.ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] = 0x00u;
-    core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] = 0x00u;
-    core.ram[CONTRA_RAM_P2_GAME_OVER_STATUS] = 0x01u;
-    core.ram[CONTRA_RAM_PLAYER_STATE] = 0x01u;
-    core.ram[CONTRA_RAM_SPRITE_X_POS] = 0x50u;
-    core.ram[CONTRA_RAM_SPRITE_Y_POS] = 0xA0u;
-    core.ram[CONTRA_RAM_PLAYER_BULLET_SLOT] = 0x01u;
-    core.ram[CONTRA_RAM_PLAYER_BULLET_X_POS] = 0x70u;
-    core.ram[CONTRA_RAM_PLAYER_BULLET_Y_POS] = 0x80u;
-    core.enemies[0].active = 0x01u;
-    core.enemies[0].type = 0x04u;
-    core.enemies[0].hp = 0x01u;
-    core.enemies[0].state = 0x02u;
-    core.enemies[0].x = 0x70;
-    core.enemies[0].y = 0x80;
-
-    step_no_input(&core);
-
-    CHECK(core.ram[CONTRA_RAM_PLAYER_BULLET_SLOT] == 0x00u);
-    CHECK(core.enemies[0].active != 0u);
-    CHECK(core.enemies[0].type == 0xFEu);
-    return true;
-}
-
-#endif /* !CONTRA_USE_ROM_ENEMY_SYSTEM (retired invented level-1 enemy tests) */
-static bool test_level1_weapon_item_pickup_changes_weapon_and_bullet(void)
-{
-    ContraCore core;
-    size_t bullet_index;
-    bool flame_bullet_seen = false;
-
-    contra_core_init(&core);
-    core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
-    core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x04u;
-    core.ram[CONTRA_RAM_CURRENT_LEVEL] = 0x00u;
-    core.ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] = 0x00u;
-    core.ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] = 0x00u;
-    core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] = 0x00u;
-    core.ram[CONTRA_RAM_P2_GAME_OVER_STATUS] = 0x01u;
-    core.ram[CONTRA_RAM_PLAYER_STATE] = 0x01u;
-    core.ram[CONTRA_RAM_SPRITE_X_POS] = 0x70u;
-    core.ram[CONTRA_RAM_SPRITE_Y_POS] = 0x90u;
-    core.ram[CONTRA_RAM_P1_CURRENT_WEAPON] = 0x00u;
-    core.ram[CONTRA_RAM_PLAYER_WEAPON_STRENGTH] = 0x00u;
-    core.enemies[0].active = 0x01u;
-    core.enemies[0].type = 0x00u;
-    core.enemies[0].attrs = 0x02u;
-    core.enemies[0].hp = 0x01u;
-    core.enemies[0].x = 0x70;
-    core.enemies[0].y = 0x90;
-
-    step_no_input(&core);
-
-    CHECK(core.enemies[0].active == 0x00u);
-    CHECK((core.ram[CONTRA_RAM_P1_CURRENT_WEAPON] & 0x0Fu) == 0x02u);
-
-    step_no_input(&core);
-    CHECK(core.ram[CONTRA_RAM_PLAYER_WEAPON_STRENGTH] == 0x01u);
-
-    step_with_input(&core, CONTRA_BUTTON_B);
-
-    for (bullet_index = 0u; bullet_index < 16u; ++bullet_index)
-    {
-        if ((core.ram[CONTRA_RAM_PLAYER_BULLET_SLOT + bullet_index] == 0x03u) &&
-            (core.ram[CONTRA_RAM_PLAYER_BULLET_OWNER + bullet_index] == 0x00u) &&
-            (core.ram[CONTRA_RAM_PLAYER_BULLET_SPRITE_CODE + bullet_index] == 0x22u))
-        {
-            flame_bullet_seen = true;
-            break;
-        }
-    }
-
-    CHECK(flame_bullet_seen);
-    return true;
-}
-
-#if !CONTRA_USE_ROM_ENEMY_SYSTEM
-static bool test_level1_bridge_destruction_changes_render_state(void)
-{
-    ContraCore core;
-    unsigned frame;
-    uint32_t initial_overlay_hash;
-    uint32_t active_overlay_hash;
-    bool bridge_active = false;
-
-    contra_core_init(&core);
-    core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
-    core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x04u;
-    core.ram[CONTRA_RAM_CURRENT_LEVEL] = 0x00u;
-    core.ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] = 0x00u;
-    core.ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] = 0x00u;
-    core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] = 0x00u;
-    core.ram[CONTRA_RAM_P2_GAME_OVER_STATUS] = 0x01u;
-    core.ram[CONTRA_RAM_PLAYER_STATE] = 0x01u;
-    core.ram[CONTRA_RAM_PLAYER_BG_FLAG_EDGE_DETECT] = 0x01u;
-    core.ram[CONTRA_RAM_SPRITE_X_POS] = 0x70u;
-    core.ram[CONTRA_RAM_SPRITE_Y_POS] = 0x90u;
-    core.enemies[0].active = 0x01u;
-    core.enemies[0].type = 0x12u;
-    core.enemies[0].x = 0x70;
-    core.enemies[0].y = 0x90;
-    core.enemies[0].state = 0x00u;
-    initial_overlay_hash =
-        ((uint32_t)core.enemies[0].screen_id << 24u) |
-        ((uint32_t)core.enemies[0].sprite_code << 16u) |
-        ((uint32_t)core.enemies[0].sprite_attr << 8u) |
-        (uint32_t)core.enemies[0].hp;
-
-    for (frame = 0u; frame < 96u; ++frame)
-    {
-        step_no_input(&core);
-        if (core.enemies[0].state == 0x02u)
-        {
-            bridge_active = true;
-            break;
-        }
-    }
-
-    CHECK(bridge_active);
-    CHECK(core.enemies[0].active != 0x00u);
-    CHECK(core.enemies[0].type == 0x12u);
-    CHECK(core.enemies[0].flags == 0x00u);
-    CHECK(core.enemies[0].cooldown == 0x04u);
-    CHECK(core.enemies[0].screen_id == 0x1Au);
-    CHECK(core.enemies[0].sprite_code == 0x00u);
-    CHECK(core.enemies[0].sprite_attr == 0x00u);
-    CHECK(core.enemies[0].hp == 0x00u);
-    active_overlay_hash =
-        ((uint32_t)core.enemies[0].screen_id << 24u) |
-        ((uint32_t)core.enemies[0].sprite_code << 16u) |
-        ((uint32_t)core.enemies[0].sprite_attr << 8u) |
-        (uint32_t)core.enemies[0].hp;
-    CHECK(active_overlay_hash != initial_overlay_hash);
-
-    core.ram[CONTRA_RAM_PLAYER_STATE] = 0x01u;
-    core.ram[CONTRA_RAM_PLAYER_BG_FLAG_EDGE_DETECT] = 0x00u;
-    core.ram[CONTRA_RAM_EDGE_FALL_CODE] = 0x00u;
-    core.ram[CONTRA_RAM_PLAYER_JUMP_STATUS] = 0x00u;
-    core.ram[CONTRA_RAM_SPRITE_X_POS] = 0x70u;
-    core.ram[CONTRA_RAM_SPRITE_Y_POS] = 0x90u;
-    step_no_input(&core);
-    CHECK(core.ram[CONTRA_RAM_EDGE_FALL_CODE] != 0x00u);
-    CHECK(core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] == 0x00u);
-    return true;
-}
-
-static bool test_level1_organic_bridge_load_changes_collision(void)
-{
-    ContraCore core;
-    unsigned frame;
-    size_t bridge_index = 0u;
-    bool bridge_loaded = false;
-    bool bridge_active = false;
-    uint32_t initial_overlay_hash;
-    uint32_t active_overlay_hash;
-
-    contra_core_init(&core);
-    CHECK(run_until_gameplay(&core, 900u));
-
-    for (frame = 0u; frame < 6000u; ++frame)
-    {
-        size_t enemy_index;
-
-        core.ram[CONTRA_RAM_NEW_LIFE_INVINCIBILITY_TIMER] = 0x80u;
-        step_with_input(&core, CONTRA_BUTTON_RIGHT);
-
-        for (enemy_index = 0u; enemy_index < CONTRA_NATIVE_MAX_ENEMIES; ++enemy_index)
-        {
-            if ((core.enemies[enemy_index].active != 0u) &&
-                (core.enemies[enemy_index].type == 0x12u))
-            {
-                bridge_index = enemy_index;
-                bridge_loaded = true;
-                break;
-            }
-        }
-
-        if (bridge_loaded)
-        {
-            break;
-        }
-    }
-
-    CHECK(bridge_loaded);
-    initial_overlay_hash =
-        ((uint32_t)core.enemies[bridge_index].screen_id << 24u) |
-        ((uint32_t)core.enemies[bridge_index].sprite_code << 16u) |
-        ((uint32_t)core.enemies[bridge_index].sprite_attr << 8u) |
-        (uint32_t)core.enemies[bridge_index].hp;
-
-    core.ram[CONTRA_RAM_PLAYER_STATE] = 0x01u;
-    core.ram[CONTRA_RAM_PLAYER_BG_FLAG_EDGE_DETECT] = 0x01u;
-    core.ram[CONTRA_RAM_PLAYER_JUMP_STATUS] = 0x00u;
-    core.ram[CONTRA_RAM_EDGE_FALL_CODE] = 0x00u;
-    core.ram[CONTRA_RAM_SPRITE_X_POS] = (uint8_t)core.enemies[bridge_index].x;
-    core.ram[CONTRA_RAM_SPRITE_Y_POS] = (uint8_t)core.enemies[bridge_index].y;
-
-    for (frame = 0u; frame < 96u; ++frame)
-    {
-        step_no_input(&core);
-        if (core.enemies[bridge_index].state == 0x02u)
-        {
-            bridge_active = true;
-            break;
-        }
-    }
-
-    CHECK(bridge_active);
-    active_overlay_hash =
-        ((uint32_t)core.enemies[bridge_index].screen_id << 24u) |
-        ((uint32_t)core.enemies[bridge_index].sprite_code << 16u) |
-        ((uint32_t)core.enemies[bridge_index].sprite_attr << 8u) |
-        (uint32_t)core.enemies[bridge_index].hp;
-    CHECK(active_overlay_hash != initial_overlay_hash);
-
-    core.ram[CONTRA_RAM_PLAYER_STATE] = 0x01u;
-    core.ram[CONTRA_RAM_PLAYER_BG_FLAG_EDGE_DETECT] = 0x00u;
-    core.ram[CONTRA_RAM_EDGE_FALL_CODE] = 0x00u;
-    core.ram[CONTRA_RAM_PLAYER_JUMP_STATUS] = 0x00u;
-    core.ram[CONTRA_RAM_SPRITE_X_POS] = (uint8_t)(core.enemies[bridge_index].x + 0x20);
-    core.ram[CONTRA_RAM_SPRITE_Y_POS] = (uint8_t)core.enemies[bridge_index].y;
-    step_no_input(&core);
-
-    CHECK(core.ram[CONTRA_RAM_EDGE_FALL_CODE] != 0x00u);
-    CHECK(core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] == 0x00u);
-    return true;
-}
-
-#endif /* !CONTRA_USE_ROM_ENEMY_SYSTEM (retired invented bridge tests) */
 static bool test_attract_level1_bridge_demo_keeps_p2_on_rom_route(void)
 {
     ContraCore core;
@@ -1742,56 +1157,6 @@ static bool test_level2_roller_generator_spawns_roller_row(void)
     return true;
 }
 
-static bool test_level2_projectiles_move_and_hit_player(void)
-{
-    ContraCore core;
-    int16_t initial_x;
-
-    force_level2_gameplay(&core);
-    CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x04u);
-
-    core.enemy_projectiles[0].active = 0x01u;
-    core.enemy_projectiles[0].damage = 0x01u;
-    core.enemy_projectiles[0].sprite_code = 0x1Eu;
-    core.enemy_projectiles[0].sprite_attr = 0x03u;
-    core.enemy_projectiles[0].owner = 0x15u;
-    core.enemy_projectiles[0].timer = 0x20u;
-    core.enemy_projectiles[0].x = 0x20;
-    core.enemy_projectiles[0].y = 0x40;
-    core.enemy_projectiles[0].vx = 2;
-    core.enemy_projectiles[0].vy = 0;
-    initial_x = core.enemy_projectiles[0].x;
-
-    step_no_input(&core);
-    CHECK(core.enemy_projectiles[0].active != 0u);
-    CHECK(core.enemy_projectiles[0].x == (int16_t)(initial_x + 2));
-
-    memset(core.enemy_projectiles, 0, sizeof(core.enemy_projectiles));
-    core.ram[CONTRA_RAM_PLAYER_STATE] = 0x01u;
-    core.ram[CONTRA_RAM_PLAYER_HIDDEN] = 0x00u;
-    core.ram[CONTRA_RAM_PLAYER_JUMP_STATUS] = 0x00u;
-    core.ram[CONTRA_RAM_NEW_LIFE_INVINCIBILITY_TIMER] = 0x00u;
-    core.ram[CONTRA_RAM_INVINCIBILITY_TIMER] = 0x00u;
-    core.ram[CONTRA_RAM_SPRITE_X_POS] = 0x80u;
-    core.ram[CONTRA_RAM_SPRITE_Y_POS] = 0x78u;
-    core.enemy_projectiles[0].active = 0x01u;
-    core.enemy_projectiles[0].damage = 0x01u;
-    core.enemy_projectiles[0].sprite_code = 0x1Eu;
-    core.enemy_projectiles[0].sprite_attr = 0x03u;
-    core.enemy_projectiles[0].owner = 0x15u;
-    core.enemy_projectiles[0].timer = 0x20u;
-    core.enemy_projectiles[0].x = (int16_t)core.ram[CONTRA_RAM_SPRITE_X_POS];
-    core.enemy_projectiles[0].y = (int16_t)core.ram[CONTRA_RAM_SPRITE_Y_POS];
-    core.enemy_projectiles[0].vx = 0;
-    core.enemy_projectiles[0].vy = 0;
-
-    step_no_input(&core);
-    CHECK(core.enemy_projectiles[0].active == 0u);
-    CHECK(core.ram[CONTRA_RAM_PLAYER_STATE] == 0x02u);
-    CHECK(core.ram[CONTRA_RAM_PLAYER_DEATH_FLAG] == 0x01u);
-    return true;
-}
-
 static bool test_level2_room_advance_changes_render_state(void)
 {
     ContraCore core;
@@ -1881,16 +1246,6 @@ static bool test_game_over_delay_expiry_loads_screen_without_glitch(void)
     core.ram[CONTRA_RAM_NUM_CONTINUES] = 0x01u;
     core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] = 0x01u;
     core.ram[CONTRA_RAM_P2_GAME_OVER_STATUS] = 0x01u;
-    core.enemies[0].active = 0x01u;
-    core.enemies[0].type = 0x10u;
-    core.enemies[0].sprite_code = 0x29u;
-    core.enemies[0].x = 0x80;
-    core.enemies[0].y = 0x80;
-    core.enemy_projectiles[0].active = 0x01u;
-    core.enemy_projectiles[0].owner = 0x10u;
-    core.enemy_projectiles[0].sprite_code = 0x21u;
-    core.enemy_projectiles[0].x = 0x80;
-    core.enemy_projectiles[0].y = 0x80;
 
     step_no_input(&core);
 
@@ -1905,38 +1260,6 @@ static bool test_game_over_delay_expiry_loads_screen_without_glitch(void)
     return true;
 }
 
-#if !CONTRA_USE_ROM_ENEMY_SYSTEM_L2
-static bool test_attract_level2_demo_does_not_consume_multiple_lives_before_rom_terminal(void)
-{
-    ContraCore core;
-    unsigned frame;
-    const unsigned original_terminal_frame = 4632u;
-    bool terminal_reached = false;
-
-    contra_core_init(&core);
-    for (frame = 0u; frame < (original_terminal_frame + 300u); ++frame)
-    {
-        step_no_input(&core);
-        if ((frame > 3000u) && (core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] != 0x02u))
-        {
-            terminal_reached = true;
-            break;
-        }
-    }
-
-    CHECK(terminal_reached);
-    CHECK(frame <= (original_terminal_frame + 300u));
-    CHECK(core.ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u);
-    CHECK(core.ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0x01u);
-    CHECK(core.ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] == 0x01u);
-    CHECK(core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] == 0x00u);
-    CHECK(core.ram[CONTRA_RAM_P1_NUM_LIVES] >= 0x61u);
-    CHECK(core.ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] == 0x00u);
-    CHECK(core.ram[CONTRA_RAM_WALL_CORE_REMAINING] == 0x01u);
-    return true;
-}
-
-#endif /* attract level-2 demo-timing test (faithful demo progresses differently) */
 static bool test_level2_repeated_room_advances_reach_boss_state(void)
 {
     ContraCore core;
@@ -1982,46 +1305,6 @@ static bool test_level2_boss_room_loads_rom_enemy_data(void)
     return true;
 }
 
-#if !CONTRA_USE_ROM_ENEMY_SYSTEM_L2
-static bool test_level2_boss_room_plating_and_eye_can_be_destroyed(void)
-{
-    ContraCore core;
-    unsigned frame;
-
-    CHECK(reach_level2_boss_room(&core));
-    CHECK(count_active_enemy_type(&core, 0x0Au) == 4u);
-    CHECK(count_active_enemy_type(&core, 0x10u) == 1u);
-    CHECK(core.ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] == 0x00u);
-
-    while (count_active_enemy_type(&core, 0x0Au) != 0u)
-    {
-        /* platings start invulnerable (HP 0xF0) and deploy over time; the faithful
-           deploy is slower than the invented one, so allow more frames to land hits */
-        CHECK(shoot_enemy_until_removed_or_changed(&core, 0x0Au, 96u));
-    }
-
-    CHECK(core.ram[CONTRA_RAM_WALL_PLATING_DESTROYED_COUNT] == 0x04u);
-    CHECK(count_active_enemy_type(&core, 0x08u) == 2u);
-    CHECK(count_active_enemy_type(&core, 0x10u) == 1u);
-
-    CHECK(shoot_enemy_until_removed_or_changed(&core, 0x10u, 48u));
-    CHECK(count_active_enemy_type(&core, 0x10u) == 0u);
-    CHECK(core.ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] != 0x00u);
-
-    for (frame = 0u; frame < 16u; ++frame)
-    {
-        step_no_input(&core);
-        if (core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x08u)
-        {
-            return true;
-        }
-    }
-
-    CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x08u);
-    return true;
-}
-
-#endif /* boss-room plating-destroy test (bullet-injection hitbox artifact under faithful) */
 static bool test_level2_boss_room_wall_cannons_fire_projectiles(void)
 {
     ContraCore core;
@@ -2051,23 +1334,6 @@ static bool test_level2_boss_room_wall_cannons_fire_projectiles(void)
 
     CHECK(fired_projectile);
     CHECK(core.ram[CONTRA_RAM_PLAYER_STATE] == 0x01u);
-
-    memset(core.enemy_projectiles, 0, sizeof(core.enemy_projectiles));
-    core.ram[CONTRA_RAM_INVINCIBILITY_TIMER] = 0x00u;
-    core.enemy_projectiles[0].active = 0x01u;
-    core.enemy_projectiles[0].damage = 0x01u;
-    core.enemy_projectiles[0].sprite_code = 0x1Eu;
-    core.enemy_projectiles[0].sprite_attr = 0x03u;
-    core.enemy_projectiles[0].owner = 0x08u;
-    core.enemy_projectiles[0].timer = 0x20u;
-    core.enemy_projectiles[0].x = (int16_t)core.ram[CONTRA_RAM_SPRITE_X_POS];
-    core.enemy_projectiles[0].y = (int16_t)core.ram[CONTRA_RAM_SPRITE_Y_POS];
-    core.enemy_projectiles[0].vx = 0;
-    core.enemy_projectiles[0].vy = 0;
-
-    step_no_input(&core);
-    CHECK(core.ram[CONTRA_RAM_PLAYER_STATE] == 0x02u);
-    CHECK(core.enemy_projectiles[0].active == 0u);
     return true;
 }
 
@@ -2203,138 +1469,6 @@ static bool test_broad_weapon_gameover_and_alt_graphics_matrix(void)
     return true;
 }
 
-#if !CONTRA_USE_ROM_ENEMY_SYSTEM && !CONTRA_USE_ROM_ENEMY_SYSTEM_L2
-static bool test_broad_enemy_pause_and_player_state_matrix(void)
-{
-    ContraCore core;
-    ContraNativeEnemy *enemy;
-    unsigned projectile_count;
-
-    contra_core_init(&core);
-    CHECK(run_until_gameplay(&core, 900u));
-
-    prepare_level1_enemy_matrix_state(&core);
-    enemy = seed_enemy(&core, 0u, 0x00u, 0x00u, 0xE8, 0x60);
-    enemy->attrs = 0x06u;
-    enemy->vx = 1;
-    enemy->vy = 1;
-    enemy->x_frac = 0x80u;
-    enemy = seed_enemy(&core, 1u, 0x02u, 0x00u, 0x40, 0x70);
-    enemy->timer = 0x00u;
-    enemy = seed_enemy(&core, 2u, 0x02u, 0x01u, 0x48, 0x70);
-    enemy->flags = 0x02u;
-    enemy = seed_enemy(&core, 3u, 0x03u, 0x00u, 0x130, 0x70);
-    enemy->origin_x = 0x80u;
-    enemy->origin_y = 0x70u;
-    enemy = seed_enemy(&core, 4u, 0x04u, 0x01u, 0x58, 0x70);
-    enemy->flags = 0x02u;
-    enemy = seed_enemy(&core, 5u, 0x04u, 0x02u, 0x70, 0x70);
-    enemy->cooldown = 0x00u;
-    seed_enemy(&core, 6u, 0x04u, 0x02u, 0x10, 0x70);
-    enemy = seed_enemy(&core, 7u, 0x05u, 0x02u, 0x20, 0x20);
-    enemy->attrs = 0x02u;
-    enemy->vx = 1;
-    seed_enemy(&core, 8u, 0x06u, 0x02u, 0x08, 0x70);
-    enemy = seed_enemy(&core, 9u, 0x07u, 0x01u, 0x50, 0x70);
-    enemy->flags = 0x03u;
-    enemy = seed_enemy(&core, 10u, 0x07u, 0x02u, 0x20, 0x70);
-    enemy->cooldown = 0x00u;
-    enemy = seed_enemy(&core, 11u, 0x07u, 0x03u, 0x50, 0x70);
-    enemy->flags = 0x00u;
-    enemy->timer = 0x00u;
-    seed_enemy(&core, 12u, 0x10u, 0x02u, 0x10, 0x70);
-    seed_enemy(&core, 13u, 0x12u, 0x00u, -120, 0x90);
-    enemy = seed_enemy(&core, 14u, 0xFEu, 0x02u, 0x70, 0x70);
-    enemy->flags = 0x00u;
-    enemy->timer = 0x00u;
-    seed_enemy(&core, 15u, 0x55u, 0x00u, 0x70, 0x70);
-
-    step_no_input(&core);
-    CHECK(core.enemies[1].state == 0x01u);
-    CHECK(core.enemies[2].state == 0x02u);
-    CHECK(core.enemies[4].state == 0x02u);
-    CHECK(core.enemies[6].active == 0x00u);
-    CHECK(core.enemies[8].active == 0x00u);
-    CHECK(core.enemies[10].state == 0x03u);
-    CHECK(core.enemies[11].active == 0x00u);
-    CHECK(core.enemies[12].active == 0x00u);
-    CHECK(core.enemies[13].active == 0x00u);
-    CHECK(core.enemies[14].active == 0x00u);
-    CHECK(core.enemies[15].active == 0x00u);
-
-    prepare_level1_enemy_matrix_state(&core);
-    enemy = seed_enemy(&core, 0u, 0x03u, 0x00u, 0x70, 0x70);
-    enemy->hp = 0x01u;
-    core.ram[CONTRA_RAM_PLAYER_BULLET_SLOT] = 0x01u;
-    core.ram[CONTRA_RAM_PLAYER_BULLET_X_POS] = 0x70u;
-    core.ram[CONTRA_RAM_PLAYER_BULLET_Y_POS] = 0x70u;
-    step_no_input(&core);
-    CHECK(core.enemies[0].type == 0x00u);
-    CHECK(core.ram[CONTRA_RAM_PLAYER_BULLET_SLOT] == 0x00u);
-    core.enemies[0].x = (int16_t)core.ram[CONTRA_RAM_SPRITE_X_POS];
-    core.enemies[0].y = (int16_t)core.ram[CONTRA_RAM_SPRITE_Y_POS];
-    core.enemies[0].attrs = 0x05u;
-    step_no_input(&core);
-    CHECK(core.ram[CONTRA_RAM_INVINCIBILITY_TIMER] >= 0x7Fu);
-
-    force_level2_gameplay(&core);
-    memset(core.enemies, 0, sizeof(core.enemies));
-    memset(core.enemy_projectiles, 0, sizeof(core.enemy_projectiles));
-    core.ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] = 0x80u;
-    core.ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] = 0x05u;
-    enemy = seed_enemy(&core, 0u, 0x08u, 0x01u, 0x70, 0x60);
-    enemy->timer = 0x00u;
-    seed_enemy(&core, 1u, 0x13u, 0x00u, 0x80, 0x80);
-    enemy = seed_enemy(&core, 2u, 0x14u, 0x08u, 0x80, 0x80);
-    enemy->cooldown = 0x02u;
-    enemy = seed_enemy(&core, 3u, 0x14u, 0x09u, 0x88, 0x80);
-    enemy->timer = 0x00u;
-    projectile_count = count_active_projectiles_from_owner(&core, 0x08u);
-    step_no_input(&core);
-    CHECK(count_active_projectiles_from_owner(&core, 0x08u) > projectile_count);
-    CHECK(core.enemies[3].active == 0x00u);
-
-    contra_core_init(&core);
-    CHECK(run_until_gameplay(&core, 900u));
-    core.ram[CONTRA_RAM_PPU_READY] = 0x00u;
-    step_with_input(&core, CONTRA_BUTTON_START);
-    CHECK(core.ram[CONTRA_RAM_PAUSE_STATE] == 0x01u);
-    step_no_input(&core);
-    CHECK(core.ram[CONTRA_RAM_PAUSE_STATE] == 0x01u);
-    step_with_input(&core, CONTRA_BUTTON_START);
-    CHECK(core.ram[CONTRA_RAM_PAUSE_STATE] == 0x00u);
-
-    contra_core_init(&core);
-    core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x01u;
-    core.ram[CONTRA_RAM_INTRO_THEME_DELAY] = 0x01u;
-    step_with_input(&core, CONTRA_BUTTON_SELECT);
-    CHECK(core.ram[CONTRA_RAM_PLAYER_MODE] == 0x01u);
-    step_no_input(&core);
-    step_with_input(&core, CONTRA_BUTTON_SELECT);
-    CHECK(core.ram[CONTRA_RAM_PLAYER_MODE] == 0x00u);
-    step_with_input(&core, CONTRA_BUTTON_START);
-    CHECK(core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] == 0x03u);
-
-    contra_core_init(&core);
-    core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x02u;
-    core.ram[CONTRA_RAM_DEMO_MODE] = 0x01u;
-    core.ram[CONTRA_RAM_INTRO_THEME_DELAY] = 0x01u;
-    step_with_input(&core, CONTRA_BUTTON_START);
-    CHECK(core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] == 0x01u);
-
-    contra_core_init(&core);
-    core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
-    core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x0Au;
-    core.ram[CONTRA_RAM_CURRENT_LEVEL] = 0x00u;
-    core.ram[CONTRA_RAM_GAME_OVER_DELAY_TIMER] = 0x01u;
-    core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] = 0x01u;
-    core.ram[CONTRA_RAM_P2_GAME_OVER_STATUS] = 0x01u;
-    step_no_input(&core);
-    CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x07u);
-    return true;
-}
-
-#endif /* invented enemy-state matrix test (retired under faithful enemies) */
 static bool test_broad_player_ui_and_end_level_matrix(void)
 {
     ContraCore core;
@@ -2501,19 +1635,6 @@ int main(void)
     const TestCase tests[] = {
         {"title_start_reaches_level1_gameplay", test_title_start_reaches_level1_gameplay},
         {"level1_scrolls_right_under_player_input", test_level1_scrolls_right_under_player_input},
-#if !CONTRA_USE_ROM_ENEMY_SYSTEM
-        {"level1_spawns_native_enemies_while_scrolling", test_level1_spawns_native_enemies_while_scrolling},
-        {"level1_generated_soldier_spawns_on_snapped_floor", test_level1_generated_soldier_spawns_on_snapped_floor},
-        {"level1_rifle_man_stays_seated_on_floor_after_y_drift", test_level1_rifle_man_stays_seated_on_floor_after_y_drift},
-        {"level1_red_turret_bullet_uses_rom_muzzle_y_offset", test_level1_red_turret_bullet_uses_rom_muzzle_y_offset},
-        {"level1_boss_bomb_turret_uses_rom_wall_frame_and_muzzle", test_level1_boss_bomb_turret_uses_rom_wall_frame_and_muzzle},
-        {"level1_bullet_destroyed_enemy_becomes_explosion", test_level1_bullet_destroyed_enemy_becomes_explosion},
-#endif
-        {"level1_weapon_item_pickup_changes_weapon_and_bullet", test_level1_weapon_item_pickup_changes_weapon_and_bullet},
-#if !CONTRA_USE_ROM_ENEMY_SYSTEM
-        {"level1_bridge_destruction_reaches_overlay_state", test_level1_bridge_destruction_changes_render_state},
-        {"level1_organic_bridge_load_changes_collision", test_level1_organic_bridge_load_changes_collision},
-#endif
         {"attract_level1_bridge_demo_keeps_p2_on_rom_route", test_attract_level1_bridge_demo_keeps_p2_on_rom_route},
         {"level1_forced_boss_clear_hands_off_to_level2", test_level1_forced_boss_clear_hands_off_to_level2},
         {"attract_reaches_level2_gameplay", test_attract_reaches_level2_gameplay},
@@ -2532,23 +1653,13 @@ int main(void)
         {"level2_soldier_generator_uses_scripted_attack_rounds", test_level2_soldier_generator_uses_scripted_attack_rounds},
         {"level2_generated_soldiers_fire_projectiles", test_level2_generated_soldiers_fire_projectiles},
         {"level2_roller_generator_spawns_roller_row", test_level2_roller_generator_spawns_roller_row},
-        {"level2_projectiles_move_and_hit_player", test_level2_projectiles_move_and_hit_player},
         {"level2_room_advance_changes_render_state", test_level2_room_advance_changes_render_state},
         {"attract_level2_loads_wall_core_without_early_clear", test_attract_level2_loads_wall_core_without_early_clear},
         {"game_over_delay_expiry_loads_screen_without_glitch", test_game_over_delay_expiry_loads_screen_without_glitch},
-#if !CONTRA_USE_ROM_ENEMY_SYSTEM_L2
-        {"attract_level2_demo_does_not_consume_multiple_lives_before_rom_terminal", test_attract_level2_demo_does_not_consume_multiple_lives_before_rom_terminal},
-#endif
         {"level2_repeated_room_advances_reach_boss_state", test_level2_repeated_room_advances_reach_boss_state},
         {"level2_boss_room_loads_rom_enemy_data", test_level2_boss_room_loads_rom_enemy_data},
-#if !CONTRA_USE_ROM_ENEMY_SYSTEM_L2
-        {"level2_boss_room_plating_and_eye_can_be_destroyed", test_level2_boss_room_plating_and_eye_can_be_destroyed},
-#endif
         {"level2_boss_room_wall_cannons_fire_projectiles", test_level2_boss_room_wall_cannons_fire_projectiles},
         {"broad_weapon_gameover_and_alt_graphics_matrix", test_broad_weapon_gameover_and_alt_graphics_matrix},
-#if !CONTRA_USE_ROM_ENEMY_SYSTEM && !CONTRA_USE_ROM_ENEMY_SYSTEM_L2
-        {"broad_enemy_pause_and_player_state_matrix", test_broad_enemy_pause_and_player_state_matrix},
-#endif
         {"broad_player_ui_and_end_level_matrix", test_broad_player_ui_and_end_level_matrix}
     };
     const size_t test_count = sizeof(tests) / sizeof(tests[0]);

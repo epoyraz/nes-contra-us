@@ -5,17 +5,6 @@
 
 #include "contra/ram.h"
 
-/* Enemy-system selection, shared by the core and the tests so both translation
-   units agree. Default 1: the faithful real-RAM enemy port is the active path.
-   Override on the compiler command line with -DCONTRA_USE_ROM_ENEMY_SYSTEM=0 and
-   -DCONTRA_USE_ROM_ENEMY_SYSTEM_L2=0 to build the legacy invented enemy layer. */
-#ifndef CONTRA_USE_ROM_ENEMY_SYSTEM
-#define CONTRA_USE_ROM_ENEMY_SYSTEM 1
-#endif
-#ifndef CONTRA_USE_ROM_ENEMY_SYSTEM_L2
-#define CONTRA_USE_ROM_ENEMY_SYSTEM_L2 1
-#endif
-
 typedef struct ContraInputSnapshot
 {
     uint8_t player[2];
@@ -23,49 +12,11 @@ typedef struct ContraInputSnapshot
 
 enum
 {
+    /* Sizes the level-2 wall structure render caches (l2_structure_tile /
+       l2_supertile) — one slot per enemy object slot. */
     CONTRA_NATIVE_MAX_ENEMIES = 24u,
-    CONTRA_NATIVE_MAX_ENEMY_PROJECTILES = 8u,
     CONTRA_CPU_SPRITE_RENDER_SLOTS = 26u
 };
-
-typedef struct ContraNativeEnemy
-{
-    uint8_t active;
-    uint8_t type;
-    uint8_t attrs;
-    uint8_t hp;
-    uint8_t state;
-    uint8_t timer;
-    uint8_t cooldown;
-    uint8_t flags;
-    uint8_t screen_id;
-    uint8_t sprite_code;
-    uint8_t sprite_attr;
-    int16_t x;
-    int16_t y;
-    int8_t vx;
-    int8_t vy;
-    uint8_t origin_x;
-    uint8_t origin_y;
-    uint8_t x_frac;
-    uint8_t y_frac;
-    uint8_t x_accum;
-    uint8_t y_accum;
-} ContraNativeEnemy;
-
-typedef struct ContraNativeProjectile
-{
-    uint8_t active;
-    uint8_t damage;
-    uint8_t sprite_code;
-    uint8_t sprite_attr;
-    uint8_t owner;
-    uint8_t timer;
-    int16_t x;
-    int16_t y;
-    int8_t vx;
-    int8_t vy;
-} ContraNativeProjectile;
 
 typedef struct ContraCore
 {
@@ -95,8 +46,6 @@ typedef struct ContraCore
     uint8_t pending_palette_write;
     uint8_t pending_palette_count;
     uint8_t pending_palette[CONTRA_PPU_PALETTE_SIZE];
-    ContraNativeEnemy enemies[CONTRA_NATIVE_MAX_ENEMIES];
-    ContraNativeProjectile enemy_projectiles[CONTRA_NATIVE_MAX_ENEMY_PROJECTILES];
     ContraInputSnapshot pending_input;
     uint8_t startup_wait_frames;
     uint8_t level_graphics_wait_frames;
