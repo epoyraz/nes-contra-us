@@ -9714,10 +9714,89 @@ static void contra_rom_create_indoor_bullet(ContraCore *core, uint8_t x)
     ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + slot] = 0x01u;
 }
 
+/* roller (0x11) Y->sprite-size cutoffs (bank0:2895) and per-segment X velocity
+   (roller_vel_code_tbl, bank0:4185). */
+static const uint8_t contra_roller_sprite_y_cutoff_tbl[3] = {0x7Cu, 0x8Cu, 0x9Cu};
+static const uint8_t contra_roller_vel_code_tbl[7][2] = {
+    {0x55u, 0x00u}, {0x38u, 0x00u}, {0x1Cu, 0x00u}, {0x00u, 0x00u},
+    {0xE4u, 0xFFu}, {0xC8u, 0xFFu}, {0xABu, 0xFFu}};
+
+/* create_roller (bank0:4150): spawn a roller (type 0x11) at (px, py) rolling
+   down toward the player, X velocity from its horizontal segment, Y velocity
+   +0.5. Gated by ENEMY_ATTACK_FLAG. */
+static void contra_rom_create_roller(ContraCore *core, uint8_t px, uint8_t py, uint8_t attrs)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t seg = contra_rom_find_far_segment(px);
+    int slot;
+
+    if (ram[CONTRA_RAM_ENEMY_ATTACK_FLAG] == 0u)
+    {
+        return;
+    }
+    slot = contra_rom_find_next_enemy_slot(core);
+    if (slot < 0)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_TYPE + slot] = 0x11u;
+    contra_rom_initialize_enemy(core, (uint8_t)slot);
+    ram[CONTRA_RAM_ENEMY_Y_POS + slot] = py;
+    ram[CONTRA_RAM_ENEMY_X_POS + slot] = px;
+    ram[CONTRA_RAM_ENEMY_ATTRIBUTES + slot] = attrs;
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + slot] = contra_roller_vel_code_tbl[seg][0];
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + slot] = contra_roller_vel_code_tbl[seg][1];
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + slot] = 0x80u;
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + slot] = 0x00u;
+}
+
+/* roller_routine_00/01 (bank0:2860): start at Y=0x72, then roll down the
+   corridor -- the sprite grows (0x99..0x9c) with depth, collision turns on once
+   it's close (Y in [0xAC,0xBC)), and it's removed once it rolls past (Y>=0xBC).
+   (Level-2 0x11 is the roller; level-1 0x11 is the boss door -- not yet ported,
+   so this dispatch case is roller-only for now.) */
+static void contra_rom_roller_routine_00(ContraCore *core, uint8_t x)
+{
+    core->ram[CONTRA_RAM_ENEMY_Y_POS + x] = 0x72u;
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+static void contra_rom_roller_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t ypos = ram[CONTRA_RAM_ENEMY_Y_POS + x];
+    uint8_t size = 0u;
+    uint8_t ny;
+
+    if (ypos >= contra_roller_sprite_y_cutoff_tbl[2]) { size = 3u; }
+    else if (ypos >= contra_roller_sprite_y_cutoff_tbl[1]) { size = 2u; }
+    else if (ypos >= contra_roller_sprite_y_cutoff_tbl[0]) { size = 1u; }
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = (uint8_t)(0x99u + size);
+    if (size >= 2u)
+    {
+        ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = 0x2Eu;
+    }
+    contra_rom_update_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return; /* rolled off the side and was removed */
+    }
+    ny = ram[CONTRA_RAM_ENEMY_Y_POS + x];
+    if (ny >= 0xBCu)
+    {
+        contra_rom_clear_enemy(core, x); /* rolled past the player */
+    }
+    else if (ny >= 0xACu)
+    {
+        ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x7Eu); /* enable player collision */
+    }
+}
+
 /* indoor_soldier_routine_00/01 (bank0:3432): a running indoor soldier walks in
-   from a side, animates, and (with the regular-bullet weapon) fires on a cadence
-   while inside the central firing band. Grenade/roller weapon variants of the
-   soldier are deferred. */
+   from a side, animates, and fires on a cadence while inside the central firing
+   band -- a regular bullet (weapon 0) or a roller (weapon 2/3). The grenade
+   weapon (weapon 1) is deferred. */
 static void contra_rom_indoor_soldier_routine_00(ContraCore *core, uint8_t x)
 {
     contra_rom_init_indoor_enemy_pos_and_vel(core, x, 0u);
@@ -9745,11 +9824,22 @@ static void contra_rom_indoor_soldier_routine_01(ContraCore *core, uint8_t x)
     {
         return; /* outside the firing band */
     }
-    if (((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] >> 1u) & 0x03u) == 0u)
     {
-        contra_rom_create_indoor_bullet(core, x); /* regular-bullet weapon */
+        const uint8_t weapon = (uint8_t)((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] >> 1u) & 0x03u);
+
+        if (weapon == 0u)
+        {
+            contra_rom_create_indoor_bullet(core, x); /* regular bullet */
+        }
+        else if (weapon >= 2u)
+        {
+            /* roller, spawned 8px below the soldier (bank0:3469) */
+            contra_rom_create_roller(
+                core, ram[CONTRA_RAM_ENEMY_X_POS + x],
+                (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + 8u), 0x00u);
+        }
+        /* grenade weapon (weapon 1) deferred */
     }
-    /* grenade (weapon 1) / roller (weapon 2,3) deferred */
 }
 
 /* jumping_soldier_y_vel_tbl (bank0:3648): signed per-frame Y deltas over one jump
@@ -10257,6 +10347,14 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x01u: contra_rom_four_soldiers_routine_00(core, x); break;
                 case 0x02u: contra_rom_four_soldiers_routine_01(core, x); break;
                 case 0x03u: contra_rom_four_soldiers_routine_02(core, x); break;
+                default: break; /* hit/explosion via the 0xFE actor */
+            }
+            break;
+        case 0x11u: /* level-2 indoor roller (level-1 0x11 = boss door, not ported) */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_roller_routine_00(core, x); break;
+                case 0x02u: contra_rom_roller_routine_01(core, x); break;
                 default: break; /* hit/explosion via the 0xFE actor */
             }
             break;
