@@ -8363,6 +8363,10 @@ static void contra_rom_load_screen_enemy_data(ContraCore *core)
 /* clear_enemy (bank7.asm:9070): zero a slot's state, freeing it. */
 static void contra_rom_clear_enemy(ContraCore *core, uint8_t x)
 {
+    if (core->ram[CONTRA_RAM_ENEMY_TYPE + x] == 0x17u)
+    {
+        core->ram[CONTRA_RAM_GRENADE_LAUNCHER_FLAG] = 0u; /* launcher gone -> resume generation */
+    }
     core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] = 0u;
     core->ram[CONTRA_RAM_ENEMY_HP + x] = 0u;
     core->ram[CONTRA_RAM_ENEMY_TYPE + x] = 0u;
@@ -9154,6 +9158,10 @@ static void contra_rom_begin_enemy_explosion(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
 
+    if (ram[CONTRA_RAM_ENEMY_TYPE + x] == 0x17u)
+    {
+        ram[CONTRA_RAM_GRENADE_LAUNCHER_FLAG] = 0u; /* grenade_launcher_routine_06 */
+    }
     ram[CONTRA_RAM_ENEMY_TYPE + x] = 0xFEu;
     ram[CONTRA_RAM_ENEMY_ROUTINE + x] = 0x01u;
     ram[CONTRA_RAM_ENEMY_FRAME + x] = 0x00u;
@@ -9950,6 +9958,149 @@ static void contra_rom_grenade_routine_02(ContraCore *core, uint8_t x)
     contra_rom_begin_enemy_explosion(core, x);
 }
 
+/* ===== level-2 grenade launcher (0x17, "seeking guy"), bank0:3680 ==========
+   Walks the corridor tracking the closest player; at the player's horizontal
+   segment (or a corridor edge) it stops in a firing pose and lobs a burst of
+   grenades, then resumes seeking. Holds GRENADE_LAUNCHER_FLAG while alive so the
+   generator pauses (cleared when it dies, in begin_enemy_explosion/clear_enemy). */
+static const uint8_t contra_indoor_close_segment_tbl[7] = {
+    0xFFu, 0xBCu, 0xA4u, 0x8Cu, 0x74u, 0x5Cu, 0x44u};
+
+/* find_close_segment (bank0:4043): 6 (far left) .. 0 (far right) for a player X. */
+static uint8_t contra_rom_find_close_segment(uint8_t player_x)
+{
+    int y;
+
+    for (y = 6; y >= 0; --y)
+    {
+        if (player_x < contra_indoor_close_segment_tbl[y])
+        {
+            return (uint8_t)y;
+        }
+    }
+    return 0u;
+}
+
+/* set_enemy_var_2_to_closest_x_player (bank0:3787): closest normal-state player
+   index -> ENEMY_VAR_2; returns it. */
+static uint8_t contra_rom_set_var2_closest_player(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t ex = ram[CONTRA_RAM_ENEMY_X_POS + x];
+    const uint8_t p0 = ram[CONTRA_RAM_SPRITE_X_POS + 0u];
+    const uint8_t p1 = ram[CONTRA_RAM_SPRITE_X_POS + 1u];
+    const uint8_t d0 = (p0 >= ex) ? (uint8_t)(p0 - ex) : (uint8_t)(ex - p0);
+    const uint8_t d1 = (p1 >= ex) ? (uint8_t)(p1 - ex) : (uint8_t)(ex - p1);
+    uint8_t idx = ((p1 != 0u) && ((p0 == 0u) || (d1 < d0))) ? 1u : 0u;
+
+    if (ram[CONTRA_RAM_PLAYER_STATE + idx] != 0x01u)
+    {
+        idx ^= 0x01u;
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = idx;
+    return idx;
+}
+
+/* grenade_launcher_apply_vel_aim (bank0:3732): walk; at a corridor edge or when
+   the walk timer elapses, line up the player's segment and drop into the firing
+   pose, queueing grenades only when in the player's segment. */
+static void contra_rom_grenade_launcher_apply_vel_aim(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    bool realign;
+
+    contra_rom_init_sprite_from_frame(core, x);
+    if ((ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] & 0x80u) != 0u)
+    {
+        realign = (ram[CONTRA_RAM_ENEMY_X_POS + x] < 0x60u); /* left edge */
+    }
+    else
+    {
+        realign = (ram[CONTRA_RAM_ENEMY_X_POS + x] >= 0xA0u); /* right edge */
+    }
+    if (!realign)
+    {
+        if (contra_rom_apply_indoor_velocity(core, x))
+        {
+            return; /* removed off-screen */
+        }
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+        if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+        {
+            return; /* keep walking */
+        }
+    }
+    {
+        const uint8_t enemy_seg = contra_rom_find_far_segment(ram[CONTRA_RAM_ENEMY_X_POS + x]);
+        const uint8_t pidx = ram[CONTRA_RAM_ENEMY_VAR_2 + x];
+        const uint8_t player_seg = contra_rom_find_close_segment(ram[CONTRA_RAM_SPRITE_X_POS + pidx]);
+        const bool same_seg = (player_seg == enemy_seg);
+
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = same_seg ? 0x38u : 0x18u;
+        ram[CONTRA_RAM_ENEMY_VAR_3 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_3 + x] + 1u);
+        ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x04u;
+        ram[CONTRA_RAM_ENEMY_VAR_1 + x] =
+            same_seg ? (uint8_t)((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] >> 1u) & 0x03u) : 0u;
+    }
+}
+
+static void contra_rom_grenade_launcher_routine_00(ContraCore *core, uint8_t x)
+{
+    core->ram[CONTRA_RAM_GRENADE_LAUNCHER_FLAG] = 0x01u;
+    contra_rom_set_var2_closest_player(core, x);
+    contra_rom_init_indoor_enemy_pos_and_vel(core, x, 3u); /* grenade-kind velocity */
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x20u);
+}
+
+static void contra_rom_grenade_launcher_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    if (ram[CONTRA_RAM_ENEMY_VAR_3 + x] == 0u)
+    {
+        contra_rom_grenade_launcher_apply_vel_aim(core, x);
+        return;
+    }
+    /* firing pose */
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x96u;
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        /* lob queued grenades on a cadence while posed */
+        if (ram[CONTRA_RAM_ENEMY_VAR_1 + x] == 0u)
+        {
+            return;
+        }
+        ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] - 1u);
+        if (ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] != 0u)
+        {
+            return;
+        }
+        ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x14u;
+        ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] - 1u);
+        contra_rom_enemy_launch_grenade(
+            core, ram[CONTRA_RAM_ENEMY_X_POS + x], ram[CONTRA_RAM_ENEMY_Y_POS + x]);
+        return;
+    }
+    /* pose over: resume seeking, turning toward the player */
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x08u;
+    ram[CONTRA_RAM_ENEMY_VAR_3 + x] = 0x00u;
+    {
+        const uint8_t enemy_seg = contra_rom_find_far_segment(ram[CONTRA_RAM_ENEMY_X_POS + x]);
+        const uint8_t pidx = contra_rom_set_var2_closest_player(core, x);
+        const uint8_t player_seg = contra_rom_find_close_segment(ram[CONTRA_RAM_SPRITE_X_POS + pidx]);
+        const uint8_t want = (player_seg < enemy_seg) ? 0x00u : 0x80u;
+
+        if (((want ^ ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x]) & 0x80u) != 0u)
+        {
+            contra_rom_reverse_enemy_x_direction(core, x);
+        }
+    }
+}
+
 /* indoor_soldier_routine_00/01 (bank0:3432): a running indoor soldier walks in
    from a side, animates, and fires on a cadence while inside the central firing
    band -- a regular bullet (weapon 0), a grenade (weapon 1), or a roller
@@ -10209,7 +10360,8 @@ static void contra_rom_create_indoor_soldier(ContraCore *core, uint8_t stype, ui
     {
         case 0x00u: type = 0x15u; break; /* running indoor soldier */
         case 0x01u: type = 0x16u; break; /* jumping indoor soldier */
-        default: return;                 /* grenade launcher deferred */
+        case 0x03u: type = 0x17u; break; /* grenade launcher (seeking guy) */
+        default: return;
     }
     slot = contra_rom_find_next_enemy_slot(core);
     if (slot < 0)
@@ -10620,6 +10772,14 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x02u: contra_rom_grenade_routine_01(core, x); break;
                 case 0x03u: contra_rom_grenade_routine_02(core, x); break;
                 default: break; /* explosion via the 0xFE actor */
+            }
+            break;
+        case 0x17u: /* indoor grenade launcher (seeking guy) */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_grenade_launcher_routine_00(core, x); break;
+                case 0x02u: contra_rom_grenade_launcher_routine_01(core, x); break;
+                default: break; /* hit/explosion via the 0xFE actor (flag cleared there) */
             }
             break;
         case 0x19u: /* indoor soldier generator */
