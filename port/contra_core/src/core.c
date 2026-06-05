@@ -11554,6 +11554,463 @@ static void contra_rom_rotating_gun_routine_06(ContraCore *core, uint8_t x)
     contra_rom_begin_enemy_explosion(core, x);
 }
 
+/* --- weapon item (enemy type 0x00), bank0.asm:144-356 --- */
+
+/* set_weapon_item_y_vel_enemy_frame (bank7:7802): apply the Y velocity to
+   ENEMY_Y_POS and advance ENEMY_FRAME by frame_incr + the position carry,
+   pre-decrementing the increment when the item moves up so a normal up-step
+   doesn't trip the off-screen check. Returns true when ENEMY_FRAME wrapped to 1
+   (the item ran off the top/bottom and should be removed). */
+static bool contra_rom_set_weapon_item_y_vel_enemy_frame(
+    ContraCore *core, uint8_t x, uint8_t y_fast, uint8_t frame_incr)
+{
+    uint8_t *const ram = core->ram;
+    unsigned acc;
+    unsigned ypos;
+    unsigned frame;
+
+    if ((y_fast & 0x80u) != 0u)
+    {
+        frame_incr = (uint8_t)(frame_incr - 1u); /* moving up: dey */
+    }
+    acc = (unsigned)ram[CONTRA_RAM_ENEMY_Y_VEL_ACCUM + x] + ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x];
+    ram[CONTRA_RAM_ENEMY_Y_VEL_ACCUM + x] = (uint8_t)acc;
+    ypos = (unsigned)ram[CONTRA_RAM_ENEMY_Y_POS + x] + y_fast + (acc >> 8u);
+    ram[CONTRA_RAM_ENEMY_Y_POS + x] = (uint8_t)ypos;
+    frame = (unsigned)ram[CONTRA_RAM_ENEMY_FRAME + x] + frame_incr + (ypos >> 8u);
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)frame;
+    return ((uint8_t)frame == 0x01u);
+}
+
+/* set_outdoor_weapon_item_vel (bank7:7770): apply the item's velocity each frame
+   in outdoor levels (horizontal = scroll-adjusted X then Y; vertical = scrolled Y
+   then X) and remove it once it leaves the screen. */
+static void contra_rom_set_outdoor_weapon_item_vel(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    if (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u)
+    {
+        const uint8_t yv =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] + ram[CONTRA_RAM_FRAME_SCROLL]);
+
+        if (contra_rom_set_weapon_item_y_vel_enemy_frame(core, x, yv, 0x00u))
+        {
+            contra_rom_clear_enemy(core, x);
+            return;
+        }
+        contra_rom_update_enemy_x_pos(core, x);
+        if (ram[CONTRA_RAM_ENEMY_X_POS + x] < 0x08u)
+        {
+            contra_rom_clear_enemy(core, x);
+        }
+        return;
+    }
+    /* horizontal: update_enemy_x_pos_with_scroll */
+    contra_rom_update_enemy_x_pos(core, x);
+    ram[CONTRA_RAM_ENEMY_X_POS + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] - ram[CONTRA_RAM_FRAME_SCROLL]);
+    if (ram[CONTRA_RAM_ENEMY_X_POS + x] < 0x08u)
+    {
+        contra_rom_clear_enemy(core, x);
+        return;
+    }
+    if (contra_rom_set_weapon_item_y_vel_enemy_frame(
+            core, x, ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x], 0x00u))
+    {
+        contra_rom_clear_enemy(core, x);
+    }
+}
+
+/* weapon_item_check_bg_collision (bank0:293): bg collision code at ENEMY_X+dx,
+   testing at Y=0x10 (or the item Y when it's the live frame and Y>=0x10). Returns
+   0 when the level has no solid bg-collision (LEVEL_SOLID_BG_COLLISION_CHECK==0).*/
+static uint8_t contra_rom_weapon_item_check_bg_collision(ContraCore *core, uint8_t x, uint8_t dx)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t test_x = (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] + dx);
+    uint8_t test_y = 0x10u;
+
+    if (ram[CONTRA_RAM_LEVEL_SOLID_BG_COLLISION_CHECK] == 0u)
+    {
+        return 0u;
+    }
+    if ((ram[CONTRA_RAM_ENEMY_FRAME + x] == 0u) && (ram[CONTRA_RAM_ENEMY_Y_POS + x] >= 0x10u))
+    {
+        test_y = ram[CONTRA_RAM_ENEMY_Y_POS + x];
+    }
+    return contra_get_outdoor_horizontal_bg_collision(core, test_x, test_y);
+}
+
+/* check_weapon_item_collision (bank0:270): true when the item is falling (not
+   ascending / not the explosion frame) and there's bg collision 8px below it. */
+static bool contra_rom_check_weapon_item_collision(const ContraCore *core, uint8_t x)
+{
+    const uint8_t *const ram = core->ram;
+
+    if (((ram[CONTRA_RAM_ENEMY_FRAME + x] | ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x]) & 0x80u) != 0u)
+    {
+        return false; /* ascending or explosion frame -- no landing check */
+    }
+    return contra_rom_add_y_to_y_pos_get_bg_collision(core, x, 0x08u) != 0u;
+}
+
+/* add_a_with_vert_scroll_to_enemy_y_pos (bank7:8495): snap the item Y to a 16px
+   grid (accounting for VERTICAL_SCROLL) and add a. */
+static void contra_rom_add_a_with_vert_scroll_to_enemy_y_pos(ContraCore *core, uint8_t x, uint8_t a)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t scroll = (uint8_t)((ram[CONTRA_RAM_VERTICAL_SCROLL] & 0x0Fu) | 0xF0u);
+    uint8_t y = (uint8_t)((uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + scroll) & 0xF0u);
+
+    y = (uint8_t)(y - scroll);
+    ram[CONTRA_RAM_ENEMY_Y_POS + x] = (uint8_t)(y + a);
+}
+
+/* set_enemy_velocity_to_0 (bank7:7854): zero both X and Y fast/fract velocity. */
+static void contra_rom_set_enemy_velocity_to_0(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] = 0u;
+}
+
+/* add_10_to_enemy_y_fract_vel (bank7:8429): gravity -- +0x10 to the Y fractional
+   velocity, carrying into the fast byte. */
+static void contra_rom_add_10_to_enemy_y_fract_vel(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const unsigned f = (unsigned)ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] + 0x10u;
+
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = (uint8_t)f;
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] + (f >> 8u));
+}
+
+/* weapon_item_indoor_vel_tbl (bank7:9004): {fract,fast} X velocity by far segment
+   0 (far left, drift right) .. 6 (far right, drift left). */
+static const uint8_t contra_weapon_item_indoor_vel_tbl[14] = {
+    0xAAu, 0x00u, 0x71u, 0x00u, 0x38u, 0x00u, 0x00u, 0x00u,
+    0xC8u, 0xFFu, 0x8Fu, 0xFFu, 0x56u, 0xFFu};
+
+/* set_weapon_item_indoor_velocity (bank7:8986): X velocity from the item's far
+   segment, fixed downward Y velocity (fast 1). */
+static void contra_rom_set_weapon_item_indoor_velocity(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t seg = contra_rom_find_far_segment(ram[CONTRA_RAM_ENEMY_X_POS + x]);
+
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x] = contra_weapon_item_indoor_vel_tbl[(seg * 2u) & 0x0Fu];
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] = contra_weapon_item_indoor_vel_tbl[((seg * 2u) + 1u) & 0x0Fu];
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = 0x00u;
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] = 0x01u;
+}
+
+/* weapon_item_sprite_code_tbl (bank0:366) is already defined above (shared with
+   the invented sprite path): {R,M,F,S,L,B,Falcon} = 33,34,31,2F,32,30,4E. */
+
+/* set_weapon_item_sprite (bank0:334): show the weapon-type sprite (invisible on
+   non-live frames); the falcon flashes its palette via FRAME_COUNTER. */
+static void contra_rom_set_weapon_item_sprite(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t wtype;
+
+    if (ram[CONTRA_RAM_ENEMY_FRAME + x] != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x00u; /* not the visible frame */
+        return;
+    }
+    wtype = (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x07u);
+    if (wtype == 0x06u)
+    {
+        ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] =
+            (uint8_t)(((ram[CONTRA_RAM_FRAME_COUNTER] >> 3u) & 0x03u) | 0x04u);
+    }
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = contra_weapon_item_sprite_code_tbl[(wtype < 7u) ? wtype : 0u];
+}
+
+/* weapon_item_init_vel_tbl (bank0:195): {y_fract,y_fast,x_fract,x_fast} for the
+   outdoor horizontal / vertical-left / vertical-right launch arcs. */
+static const uint8_t contra_weapon_item_init_vel_tbl[12] = {
+    0x00u, 0xFDu, 0x80u, 0x00u, 0x00u, 0xFDu, 0x40u, 0x00u, 0x00u, 0xFDu, 0xC0u, 0xFFu};
+
+/* weapon_item_routine_00 (bank0:144): set the collision/sprite attrs, then the
+   launch velocity (outdoor table) or the indoor arc setup. */
+static void contra_rom_weapon_item_routine_00(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t y;
+
+    ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = 0x80u;     /* bullets pass through */
+    ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = 0x22u; /* score 2, collision box 2 */
+    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = 0x05u;
+    if (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_VAR_1 + x] = ram[CONTRA_RAM_ENEMY_Y_POS + x]; /* arc origin Y */
+        contra_rom_set_weapon_item_indoor_velocity(core, x);
+        ram[CONTRA_RAM_ENEMY_VAR_4 + x] = 0x80u;
+        ram[CONTRA_RAM_ENEMY_VAR_B + x] = 0xFDu;
+        contra_rom_advance_enemy_routine(core, x);
+        return;
+    }
+    y = 0u;
+    if (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u)
+    {
+        y = (ram[CONTRA_RAM_ENEMY_X_POS + x] >= 0x80u) ? 8u : 4u;
+    }
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = contra_weapon_item_init_vel_tbl[y + 0u];
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] = contra_weapon_item_init_vel_tbl[y + 1u];
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x] = contra_weapon_item_init_vel_tbl[y + 2u];
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] = contra_weapon_item_init_vel_tbl[y + 3u];
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+/* weapon_item_routine_01 (bank0:203): fall. Indoor follows the pseudo-3D arc and
+   lands at Y=0xA4; outdoor applies velocity + gravity, bounces off walls, and
+   lands when it hits the ground. */
+static void contra_rom_weapon_item_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_set_weapon_item_sprite(core, x);
+    if (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u)
+    {
+        const unsigned v4 = (unsigned)ram[CONTRA_RAM_ENEMY_VAR_4 + x] + 0x12u;
+
+        ram[CONTRA_RAM_ENEMY_VAR_4 + x] = (uint8_t)v4;
+        ram[CONTRA_RAM_ENEMY_VAR_B + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_B + x] + (v4 >> 8u));
+        contra_rom_set_enemy_falling_arc_pos(core, x);
+        if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+        {
+            return; /* arc carried it off-screen */
+        }
+        if ((ram[CONTRA_RAM_ENEMY_VAR_3 + x] & 0x80u) != 0u)
+        {
+            return; /* still falling */
+        }
+        ram[CONTRA_RAM_ENEMY_Y_POS + x] = 0xA4u; /* land on the indoor floor */
+        contra_rom_advance_enemy_routine(core, x);
+        return;
+    }
+    /* outdoor */
+    contra_rom_set_outdoor_weapon_item_vel(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return; /* removed off-screen */
+    }
+    if ((ram[CONTRA_RAM_ENEMY_Y_POS + x] >= 0x20u) && contra_rom_check_weapon_item_collision(core, x))
+    {
+        contra_rom_add_a_with_vert_scroll_to_enemy_y_pos(core, x, 0x0Au); /* land */
+        contra_rom_set_enemy_velocity_to_0(core, x);
+        contra_rom_advance_enemy_routine(core, x); /* -> routine_02 */
+        return;
+    }
+    {
+        const uint8_t ex = ram[CONTRA_RAM_ENEMY_X_POS + x];
+        const bool moving_left = (ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] & 0x80u) != 0u;
+        bool reverse;
+
+        if (!moving_left)
+        {
+            reverse = (ex >= 0xE8u) ||
+                ((contra_rom_weapon_item_check_bg_collision(core, x, 0x0Au) & 0x80u) != 0u);
+        }
+        else
+        {
+            reverse = (ex < 0x18u) ||
+                ((contra_rom_weapon_item_check_bg_collision(core, x, 0xF6u) & 0x80u) != 0u);
+        }
+        if (reverse)
+        {
+            contra_rom_reverse_enemy_x_direction(core, x);
+        }
+        contra_rom_add_10_to_enemy_y_fract_vel(core, x); /* gravity */
+    }
+}
+
+/* weapon_item_routine_02 (bank0:315): rest on the ground -- keep the sprite, and
+   drop back to routine_01 if the ground disappears (or remove on indoor scroll).*/
+static void contra_rom_weapon_item_routine_02(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_set_weapon_item_sprite(core, x);
+    if (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u)
+    {
+        if (ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] != 0u)
+        {
+            contra_rom_clear_enemy(core, x); /* indoor room scrolled */
+        }
+        return;
+    }
+    contra_rom_set_outdoor_weapon_item_vel(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    if (contra_rom_check_weapon_item_collision(core, x))
+    {
+        return; /* still resting on the ground */
+    }
+    contra_rom_set_enemy_routine_to_a(core, x, 0x02u); /* ground gone -> routine_01 */
+}
+
+/* create_explosion_a / create_explosion_sequence (bank7:8278): spawn an explosion
+   actor at (px,py) in a free slot. The ROM uses a type-0x02 enemy running its
+   appended init_explosion routine; the native port models every explosion as the
+   shared 0xFE actor (contra_rom_enemy_routine_explosion), so set that up here. */
+static void contra_rom_create_explosion_at(ContraCore *core, uint8_t px, uint8_t py)
+{
+    const int slot = contra_rom_find_next_enemy_slot(core);
+    uint8_t s;
+
+    if (slot < 0)
+    {
+        return;
+    }
+    s = (uint8_t)slot;
+    core->ram[CONTRA_RAM_ENEMY_TYPE + s] = 0xFEu;
+    core->ram[CONTRA_RAM_ENEMY_ROUTINE + s] = 0x01u;
+    core->ram[CONTRA_RAM_ENEMY_FRAME + s] = 0x00u;
+    core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + s] = 0x0Au;
+    core->ram[CONTRA_RAM_ENEMY_STATE_WIDTH + s] = 0x80u;
+    core->ram[CONTRA_RAM_ENEMY_SPRITES + s] = 0x38u;
+    core->ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + s] = 0x00u;
+    core->ram[CONTRA_RAM_ENEMY_Y_POS + s] = py;
+    core->ram[CONTRA_RAM_ENEMY_X_POS + s] = px;
+}
+
+/* clear_sprite_clear_enemy_pt_3 (bank7:9060 -> clear_enemy_pt_3/pt_4): zero the
+   sprite and per-slot working state but KEEP ENEMY_ATTRIBUTES, X/Y_POS, ROUTINE,
+   TYPE -- used to repurpose the pill-box slot into a weapon item. */
+static void contra_rom_clear_sprite_clear_enemy_pt_3(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_VAR_A + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0u; /* = VAR_B */
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_VAR_3 + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_VAR_4 + x] = 0u;
+}
+
+/* weapon_box_destroyed_supertile (bank0:663): post-destruction background tile per
+   level (low bit of attrs picks the variant). */
+static const uint8_t contra_weapon_box_destroyed_supertile[16] = {
+    0x16u, 0x16u, 0x16u, 0x16u, 0x16u, 0x16u, 0x16u, 0x16u,
+    0x19u, 0x1Au, 0x03u, 0x04u, 0x09u, 0x09u, 0x16u, 0x16u};
+
+/* weapon_box_routine_04 (bank0:627): the pill box was destroyed -- draw the
+   restored background super-tile, pop an explosion, and convert this slot into a
+   weapon item carrying the box's weapon type (ATTRIBUTES & 0x07). */
+static void contra_rom_weapon_box_routine_04(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t y;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    y = (uint8_t)(ram[CONTRA_RAM_CURRENT_LEVEL] * 2u);
+    if ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x08u) != 0u)
+    {
+        y = (uint8_t)(y + 1u);
+    }
+    contra_render_level_1_nametable_update_supertile(
+        core, (int)ram[CONTRA_RAM_ENEMY_X_POS + x], (int)ram[CONTRA_RAM_ENEMY_Y_POS + x],
+        contra_weapon_box_destroyed_supertile[y & 0x0Fu]);
+    contra_rom_create_explosion_at(core, ram[CONTRA_RAM_ENEMY_X_POS + x], ram[CONTRA_RAM_ENEMY_Y_POS + x]);
+    ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x07u);
+    contra_rom_clear_sprite_clear_enemy_pt_3(core, x);
+    ram[CONTRA_RAM_ENEMY_ROUTINE + x] = 0x01u;
+    ram[CONTRA_RAM_ENEMY_TYPE + x] = 0x00u; /* now a weapon item */
+}
+
+/* destroy_all_enemies (bank7:8096): set every live, damageable enemy to its
+   destroyed routine -- here the shared 0xFE explosion actor -- skipping the pill
+   box (0x02), flying capsule (0x03), and no-damage (HP 0xF0) enemies. */
+static void contra_rom_destroy_all_enemies(ContraCore *core)
+{
+    int s;
+
+    for (s = 0x0F; s >= 0; --s)
+    {
+        const uint8_t ss = (uint8_t)s;
+        const uint8_t type = core->ram[CONTRA_RAM_ENEMY_TYPE + ss];
+
+        if ((core->ram[CONTRA_RAM_ENEMY_ROUTINE + ss] == 0u) ||
+            (core->ram[CONTRA_RAM_ENEMY_SPRITES + ss] == 0u) ||
+            (type == 0x02u) || (type == 0x03u) ||
+            (core->ram[CONTRA_RAM_ENEMY_HP + ss] == 0xF0u))
+        {
+            continue;
+        }
+        core->ram[CONTRA_RAM_ENEMY_ATTRIBUTES + ss] =
+            (uint8_t)(core->ram[CONTRA_RAM_ENEMY_ATTRIBUTES + ss] | 0x80u);
+        contra_rom_begin_enemy_explosion(core, ss);
+    }
+}
+
+/* pick_up_weapon_item (bank7:6860): the player touched a weapon item -- apply the
+   weapon change for ATTRIBUTES & 0x07 (R adds rapid fire; M/F/S/L replace and drop
+   rapid fire unless it's the same weapon; B grants the barrier timer; falcon wipes
+   the screen), then remove the item. (Score/sound award is deferred, like the rest
+   of the faithful path.) */
+static void contra_rom_pick_up_weapon_item(ContraCore *core, uint8_t slot, uint8_t player)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t attrs = (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTRIBUTES + slot] & 0x07u);
+    uint8_t item_type;
+    uint8_t keep_mask;
+
+    if (attrs == 0u)
+    {
+        item_type = 0x10u; /* R: set rapid fire, keep the current weapon */
+        keep_mask = 0xFFu;
+    }
+    else if (attrs < 0x05u)
+    {
+        item_type = attrs; /* M/F/S/L */
+        keep_mask = (((attrs ^ ram[CONTRA_RAM_P1_CURRENT_WEAPON + player]) & 0x0Fu) == 0u)
+            ? 0xF0u  /* same weapon: keep rapid fire */
+            : 0xE0u; /* different weapon: drop rapid fire */
+    }
+    else if (attrs == 0x05u)
+    {
+        ram[CONTRA_RAM_INVINCIBILITY_TIMER + player] =
+            (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x06u) ? 0x90u : 0x80u; /* barrier */
+        contra_rom_clear_enemy(core, slot);
+        return;
+    }
+    else
+    {
+        contra_rom_destroy_all_enemies(core); /* falcon */
+        ram[CONTRA_RAM_FALCON_FLASH_TIMER] = 0x20u;
+        contra_rom_clear_enemy(core, slot);
+        return;
+    }
+    ram[CONTRA_RAM_P1_CURRENT_WEAPON + player] =
+        (uint8_t)((ram[CONTRA_RAM_P1_CURRENT_WEAPON + player] & keep_mask) | item_type);
+    contra_rom_clear_enemy(core, slot);
+}
+
 /* dispatch one enemy slot to its type routine by (ENEMY_TYPE, ENEMY_ROUTINE).
    Only ported types act; others hold until their routine is ported. */
 static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
@@ -11765,7 +12222,17 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x02u: contra_rom_weapon_box_routine_01(core, x); break;
                 case 0x03u: contra_rom_weapon_box_routine_02(core, x); break;
                 case 0x04u: contra_rom_weapon_box_routine_03(core, x); break;
-                default: break; /* explosion/remove routines not yet ported */
+                case 0x05u: contra_rom_weapon_box_routine_04(core, x); break;
+                default: break; /* explosion via the 0xFE actor */
+            }
+            break;
+        case 0x00u: /* weapon item (power-up drop) */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_weapon_item_routine_00(core, x); break;
+                case 0x02u: contra_rom_weapon_item_routine_01(core, x); break;
+                case 0x03u: contra_rom_weapon_item_routine_02(core, x); break;
+                default: break; /* picked up / removed */
             }
             break;
         case 0x06u: /* sniper */
@@ -11875,6 +12342,10 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
             {
                 dest_routine = 0x07u; /* rotating gun -> routine_06 (restore rock, explode) */
             }
+            else if (dead_type == 0x02u)
+            {
+                dest_routine = 0x05u; /* pill box -> routine_04 (restore bg, drop weapon item) */
+            }
             if (dest_routine != 0u)
             {
                 contra_rom_set_enemy_routine_to_a(core, slot, dest_routine);
@@ -11949,6 +12420,13 @@ static void contra_rom_check_players_collision(ContraCore *core, uint8_t slot)
             continue; /* outside the box */
         }
         /* overlap */
+        if (ram[CONTRA_RAM_ENEMY_TYPE + slot] == 0x00u)
+        {
+            /* weapon item: pick it up (the ROM checks this before invincibility,
+               so even a barrier player collects it). */
+            contra_rom_pick_up_weapon_item(core, slot, (uint8_t)p);
+            return; /* item removed -- done with this enemy */
+        }
         if (ram[CONTRA_RAM_NEW_LIFE_INVINCIBILITY_TIMER + p] != 0u)
         {
             continue; /* invincible just after respawn -- walk through */
