@@ -9128,6 +9128,93 @@ static void contra_rom_begin_enemy_explosion(ContraCore *core, uint8_t x)
     ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = 0x00u;
 }
 
+/* --- level-2 wall turret (enemy type 0x13), bank0.asm --- */
+static const uint8_t contra_wall_turret_initial_delay_tbl[4] = {0x50u, 0x80u, 0xB0u, 0xF0u};
+
+/* fire a type-3 bullet horizontally at the nearest player (the ROM's
+   aim_and_create_enemy_bullet diagonal solve is deferred, as for the sniper). */
+static void contra_rom_enemy_fire_horizontal_at_player(ContraCore *core, uint8_t x, uint8_t btype, uint8_t speed)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t ex = ram[CONTRA_RAM_ENEMY_X_POS + x];
+    const uint8_t p0 = ram[CONTRA_RAM_SPRITE_X_POS + 0u];
+    const uint8_t p1 = ram[CONTRA_RAM_SPRITE_X_POS + 1u];
+    const uint8_t d0 = (p0 >= ex) ? (uint8_t)(p0 - ex) : (uint8_t)(ex - p0);
+    const uint8_t d1 = (p1 >= ex) ? (uint8_t)(p1 - ex) : (uint8_t)(ex - p1);
+    const uint8_t player_x = ((p1 != 0u) && ((p0 == 0u) || (d1 < d0))) ? p1 : p0;
+    const bool firing_left = (player_x < ex);
+
+    (void)contra_rom_create_enemy_bullet(
+        core, btype, 0u, firing_left ? 0x02u : 0x00u, speed,
+        (uint8_t)(ex + (firing_left ? 0xF3u : 0x0Du)), ram[CONTRA_RAM_ENEMY_Y_POS + x]);
+}
+
+/* wall_turret_routine_00..04 (bank0): deploy, open, fire at the player, be
+   destroyable. The nametable tile-animation render (update_enemy_nametable_tiles
+   from level_2_4_tile_animation) is a level-2 render path not ported yet, so the
+   visual is stubbed; the logic, collision, and firing are faithful. */
+static void contra_rom_wall_turret_routine_00(ContraCore *core, uint8_t x)
+{
+    const uint8_t idx = (uint8_t)(core->ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x03u);
+
+    core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = contra_wall_turret_initial_delay_tbl[idx];
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+static void contra_rom_wall_turret_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 1u; /* "closed" tile drawn (render stubbed) */
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u;
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+static void contra_rom_wall_turret_routine_02(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x08u;
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+    if (ram[CONTRA_RAM_ENEMY_FRAME + x] < 0x03u)
+    {
+        return; /* still opening */
+    }
+    ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x7Fu); /* enable bullet collision */
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x80u;
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+static void contra_rom_wall_turret_routine_03(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x50u;
+    if (ram[CONTRA_RAM_ENEMY_ATTACK_FLAG] != 0u)
+    {
+        contra_rom_enemy_fire_horizontal_at_player(core, x, 0x03u, 0x04u);
+    }
+}
+
 /* --- level-2 wall core (enemy type 0x14), bank0.asm:3143 --- */
 static const uint8_t contra_wall_core_hp_tbl[4] = {0x08u, 0x05u, 0x10u, 0x05u};
 static const uint8_t contra_wall_core_init_dmg_tile_anim_tbl[4] = {0x00u, 0x03u, 0x00u, 0x03u};
@@ -9331,6 +9418,16 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x01u: contra_rom_boss_bomb_turret_routine_00(core, x); break;
                 case 0x02u: contra_rom_boss_bomb_turret_routine_01(core, x); break;
                 default: break; /* explosion handled via the kill path */
+            }
+            break;
+        case 0x13u: /* level-2 wall turret */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_wall_turret_routine_00(core, x); break;
+                case 0x02u: contra_rom_wall_turret_routine_01(core, x); break;
+                case 0x03u: contra_rom_wall_turret_routine_02(core, x); break;
+                case 0x04u: contra_rom_wall_turret_routine_03(core, x); break;
+                default: break; /* destroyed/explosion via the kill path */
             }
             break;
         case 0x14u: /* level-2 wall core */
