@@ -9721,13 +9721,13 @@ static const uint8_t contra_roller_vel_code_tbl[7][2] = {
     {0x55u, 0x00u}, {0x38u, 0x00u}, {0x1Cu, 0x00u}, {0x00u, 0x00u},
     {0xE4u, 0xFFu}, {0xC8u, 0xFFu}, {0xABu, 0xFFu}};
 
-/* create_roller (bank0:4150): spawn a roller (type 0x11) at (px, py) rolling
-   down toward the player, X velocity from its horizontal segment, Y velocity
-   +0.5. Gated by ENEMY_ATTACK_FLAG. */
-static void contra_rom_create_roller(ContraCore *core, uint8_t px, uint8_t py, uint8_t attrs)
+/* create_roller_with_segment_a (bank0:4158): spawn a roller (type 0x11) at
+   (px, py) rolling down toward the player, X velocity from horizontal segment
+   seg, Y velocity +0.5. Gated by ENEMY_ATTACK_FLAG. */
+static void contra_rom_create_roller_with_segment(
+    ContraCore *core, uint8_t px, uint8_t py, uint8_t seg, uint8_t attrs)
 {
     uint8_t *const ram = core->ram;
-    const uint8_t seg = contra_rom_find_far_segment(px);
     int slot;
 
     if (ram[CONTRA_RAM_ENEMY_ATTACK_FLAG] == 0u)
@@ -9739,6 +9739,7 @@ static void contra_rom_create_roller(ContraCore *core, uint8_t px, uint8_t py, u
     {
         return;
     }
+    seg = (uint8_t)(seg % 7u);
     ram[CONTRA_RAM_ENEMY_TYPE + slot] = 0x11u;
     contra_rom_initialize_enemy(core, (uint8_t)slot);
     ram[CONTRA_RAM_ENEMY_Y_POS + slot] = py;
@@ -9748,6 +9749,12 @@ static void contra_rom_create_roller(ContraCore *core, uint8_t px, uint8_t py, u
     ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + slot] = contra_roller_vel_code_tbl[seg][1];
     ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + slot] = 0x80u;
     ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + slot] = 0x00u;
+}
+
+/* create_roller (bank0:4150): roller aimed by its own X position's segment. */
+static void contra_rom_create_roller(ContraCore *core, uint8_t px, uint8_t py, uint8_t attrs)
+{
+    contra_rom_create_roller_with_segment(core, px, py, contra_rom_find_far_segment(px), attrs);
 }
 
 /* roller_routine_00/01 (bank0:2860): start at Y=0x72, then roll down the
@@ -10130,6 +10137,92 @@ static void contra_rom_indoor_soldier_gen_routine_01(ContraCore *core, uint8_t x
     contra_rom_create_indoor_soldier(core, stype, attrs);
 }
 
+/* roller generator (0x1A), bank0:3905. roller_initial_x_pos_tbl (bank0:3975) maps
+   a pattern's x-index to a spawn X; the patterns (roller_gen_init_00/01,
+   bank0:3993/4025) are {x-index<<4 | attrs, delay} entries, 0xFF = wrap. A delay
+   of 0 spawns the next roller the same frame (a burst across the corridor). */
+static const uint8_t contra_roller_initial_x_pos_tbl[7] = {
+    0x98u, 0x90u, 0x88u, 0x80u, 0x78u, 0x70u, 0x68u};
+static const uint8_t contra_roller_gen_init_00[] = {
+    0x00u, 0x00u, 0x10u, 0x00u, 0x20u, 0x00u, 0x30u, 0x00u, 0x40u, 0x00u, 0x50u, 0x00u, 0x60u, 0xF0u,
+    0x01u, 0x00u, 0x11u, 0x00u, 0x21u, 0x00u, 0x31u, 0x00u, 0x41u, 0x00u, 0x51u, 0x00u, 0x61u, 0xF0u,
+    0x30u, 0x10u, 0x20u, 0x00u, 0x40u, 0x10u, 0x10u, 0x00u, 0x50u, 0x10u, 0x00u, 0x00u, 0x60u, 0xF0u,
+    0x00u, 0x00u, 0x60u, 0x10u, 0x10u, 0x00u, 0x50u, 0x10u, 0x20u, 0x00u, 0x40u, 0x10u, 0x30u, 0xF0u,
+    0xFFu};
+static const uint8_t contra_roller_gen_init_01[] = {
+    0x00u, 0x00u, 0x20u, 0x00u, 0x40u, 0x00u, 0x60u, 0xF0u,
+    0x10u, 0x00u, 0x30u, 0x00u, 0x50u, 0xF0u, 0xFFu};
+static const uint8_t *const contra_roller_gen_init_tbl[2] = {
+    contra_roller_gen_init_00, contra_roller_gen_init_01};
+static const size_t contra_roller_gen_init_len[2] = {
+    sizeof(contra_roller_gen_init_00), sizeof(contra_roller_gen_init_01)};
+
+static void contra_rom_indoor_roller_gen_routine_00(ContraCore *core, uint8_t x)
+{
+    core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x60u;
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+static void contra_rom_indoor_roller_gen_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t *pattern;
+    size_t pattern_len;
+    uint8_t pidx;
+    uint8_t off;
+    unsigned guard;
+
+    if (ram[CONTRA_RAM_INDOOR_ENEMY_ATTACK_COUNT] >= 0x07u)
+    {
+        contra_rom_clear_enemy(core, x); /* rollers stop after 7 rounds */
+        return;
+    }
+    if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x01u) == 0u)
+    {
+        return; /* odd frames only */
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    pidx = (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x07u);
+    if (pidx >= 2u)
+    {
+        pidx = 0u; /* only two patterns exist */
+    }
+    pattern = contra_roller_gen_init_tbl[pidx];
+    pattern_len = contra_roller_gen_init_len[pidx];
+
+    off = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
+    for (guard = 0u; guard < 32u; ++guard) /* burst until a non-zero delay */
+    {
+        uint8_t posattr;
+        uint8_t roller_attr;
+        uint8_t xidx;
+        uint8_t delay;
+
+        if ((off + 1u >= pattern_len) || (pattern[off] == 0xFFu))
+        {
+            off = 0u; /* wrap to the start of the pattern */
+        }
+        posattr = pattern[off];
+        roller_attr = (uint8_t)(posattr & 0x0Fu);
+        xidx = (uint8_t)((posattr >> 4u) % 7u);
+        delay = pattern[off + 1u];
+        off = (uint8_t)(off + 2u);
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = delay;
+        ram[CONTRA_RAM_ENEMY_VAR_1 + x] = off;
+        contra_rom_create_roller_with_segment(
+            core, contra_roller_initial_x_pos_tbl[xidx], 0x70u, xidx, roller_attr);
+        if (delay != 0u)
+        {
+            break; /* wait before the next roller */
+        }
+    }
+}
+
 /* --- boss bomb turret (enemy type 0x10), bank0.asm --- */
 /* super-tile per (recoil state VAR_1: 0 idle / 2 firing) and background variant
    (attr bit0: wall vs jungle), interleaved. */
@@ -10356,6 +10449,14 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x01u: contra_rom_roller_routine_00(core, x); break;
                 case 0x02u: contra_rom_roller_routine_01(core, x); break;
                 default: break; /* hit/explosion via the 0xFE actor */
+            }
+            break;
+        case 0x1Au: /* indoor roller generator */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_indoor_roller_gen_routine_00(core, x); break;
+                case 0x02u: contra_rom_indoor_roller_gen_routine_01(core, x); break;
+                default: break; /* removed via clear once the rounds are done */
             }
             break;
         case 0x19u: /* indoor soldier generator */
