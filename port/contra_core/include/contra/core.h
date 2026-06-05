@@ -119,6 +119,15 @@ typedef struct ContraCore
        at FIXED back-wall positions (not the enemy slot), so they live here rather
        than in l2_supertile; reset on room load. */
     uint8_t l2_blowopen_quadrants;
+    /* Faithful level-1 exploding bridge: world positions of the background
+       super-tiles whose collision the bridge has cleared (clear_supertile_bg_
+       collision) so the player falls through. The native background composes from
+       the level supertile data and has no per-tile collision array like the ROM's
+       BG_COLLISION_DATA, so cleared cells are recorded here and consulted by the
+       outdoor collision lookup. Reset on level load. */
+    uint16_t l1_bridge_gap_world_x[16];
+    uint8_t l1_bridge_gap_screen_y[16];
+    uint8_t l1_bridge_gap_count;
 } ContraCore;
 
 void contra_core_init(ContraCore *core);

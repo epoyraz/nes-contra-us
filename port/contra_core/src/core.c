@@ -3112,6 +3112,32 @@ static bool contra_level_1_bridge_has_destroyed_collision_gap(
     return false;
 }
 
+/* Faithful exploding-bridge collision gap: true when (screen_x, screen_y) falls
+   in a background super-tile the real-RAM bridge has cleared. The gap is anchored
+   in world space (screen<<8 + scroll + x is scroll-invariant), so it persists as
+   the level scrolls and after the bridge enemy is removed. When the faithful
+   system is off this list stays empty, so the check is a no-op. */
+static bool contra_rom_bridge_has_gap(const ContraCore *core, uint8_t screen_x, uint8_t screen_y)
+{
+    const uint16_t world_x =
+        (uint16_t)(((uint16_t)core->ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] << 8u) +
+                   core->ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] + screen_x);
+    uint8_t i;
+
+    for (i = 0u; i < core->l1_bridge_gap_count; ++i)
+    {
+        const uint16_t gx = core->l1_bridge_gap_world_x[i];
+        const int gy = (int)core->l1_bridge_gap_screen_y[i];
+
+        if ((world_x >= gx) && (world_x < (uint16_t)(gx + 32u)) &&
+            ((int)screen_y >= gy) && ((int)screen_y < (gy + 32)))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 static uint8_t contra_get_outdoor_horizontal_bg_collision(
     const ContraCore *core,
     uint8_t screen_x,
@@ -3130,7 +3156,8 @@ static uint8_t contra_get_outdoor_horizontal_bg_collision(
         return 0u;
     }
 
-    if (contra_level_1_bridge_has_destroyed_collision_gap(core, screen_x, screen_y))
+    if (contra_level_1_bridge_has_destroyed_collision_gap(core, screen_x, screen_y) ||
+        contra_rom_bridge_has_gap(core, screen_x, screen_y))
     {
         return 0u;
     }
@@ -8245,6 +8272,11 @@ static void contra_rom_initialize_enemy(ContraCore *core, uint8_t x)
     core->l2_supertile[x] = 0xFFu;   /* no boss-room super-tile drawn yet */
     contra_rom_clear_enemy_pt_2(core, x);
 
+    if ((type == 0x12u) && (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x00u))
+    {
+        core->l1_bridge_gap_count = 0u; /* a fresh bridge -> drop stale collision gaps */
+    }
+
     /* enemy_prop_ptr_tbl (bank7:9152): shared types (< 0x10) use the common
        table; level-specific types (>= 0x10) use the per-level table. */
     if ((type >= 0x10u) && (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u))
@@ -12011,6 +12043,218 @@ static void contra_rom_pick_up_weapon_item(ContraCore *core, uint8_t slot, uint8
     contra_rom_clear_enemy(core, slot);
 }
 
+/* --- exploding bridge (enemy type 0x12, level 1), bank0.asm:2265-2403 --- */
+
+/* exploding_bridge_destroyed_supertile_tbl (bank0:2362), with the +1 overflow
+   into the cloud-y table (0x1D) that the ROM relies on for the last section. */
+static const uint8_t contra_exploding_bridge_destroyed_supertile_tbl[8] = {
+    0x00u, 0x1Au, 0x1Bu, 0x1Cu, 0x19u, 0x1Cu, 0x19u, 0x1Du};
+static const uint8_t contra_exploding_bridge_cloud_y_offset[4] = {0x1Du, 0x00u, 0xF0u, 0x00u};
+static const uint8_t contra_exploding_bridge_cloud_x_offset[5] = {0x10u, 0xF0u, 0x00u, 0x10u, 0x00u};
+
+/* clear_supertile_bg_collision (bank7:8143) on the native model: draw the
+   destroyed bridge super-tile and record its world position so the outdoor
+   collision lookup reports "empty" there (the player falls through). draw_x_base
+   is the enemy X (or X-0x20 for the trailing tile); the L1 render helper applies
+   the -0x0c super-tile offset, so the recorded screen X matches the drawn tile. */
+static void contra_rom_bridge_destroy_supertile(
+    ContraCore *core, uint8_t x, uint8_t draw_x_base, uint8_t tile)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t cell_screen_x = (uint8_t)(draw_x_base - 12u);
+    const uint8_t cell_screen_y = (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] - 12u);
+    const uint16_t world_x =
+        (uint16_t)(((uint16_t)ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] << 8u) +
+                   ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] + cell_screen_x);
+    uint8_t i;
+
+    contra_render_level_1_nametable_update_supertile(
+        core, (int)draw_x_base, (int)ram[CONTRA_RAM_ENEMY_Y_POS + x], tile);
+
+    for (i = 0u; i < core->l1_bridge_gap_count; ++i)
+    {
+        if ((core->l1_bridge_gap_world_x[i] == world_x) &&
+            (core->l1_bridge_gap_screen_y[i] == cell_screen_y))
+        {
+            return; /* already recorded */
+        }
+    }
+    if (core->l1_bridge_gap_count < 16u)
+    {
+        core->l1_bridge_gap_world_x[core->l1_bridge_gap_count] = world_x;
+        core->l1_bridge_gap_screen_y[core->l1_bridge_gap_count] = cell_screen_y;
+        core->l1_bridge_gap_count = (uint8_t)(core->l1_bridge_gap_count + 1u);
+    }
+}
+
+/* exploding_bridge_routine_00 (bank0:2273): wait until a player is within 0x18
+   pixels, then start the explosion sequence. */
+static void contra_rom_exploding_bridge_routine_00(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t ex = ram[CONTRA_RAM_ENEMY_X_POS + x];
+    uint8_t d0 = (ram[CONTRA_RAM_SPRITE_X_POS + 0u] >= ex)
+        ? (uint8_t)(ram[CONTRA_RAM_SPRITE_X_POS + 0u] - ex)
+        : (uint8_t)(ex - ram[CONTRA_RAM_SPRITE_X_POS + 0u]);
+    uint8_t d1 = (ram[CONTRA_RAM_SPRITE_X_POS + 1u] >= ex)
+        ? (uint8_t)(ram[CONTRA_RAM_SPRITE_X_POS + 1u] - ex)
+        : (uint8_t)(ex - ram[CONTRA_RAM_SPRITE_X_POS + 1u]);
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    if (ram[CONTRA_RAM_PLAYER_STATE + 0u] != 0x01u)
+    {
+        d0 = 0xFEu;
+    }
+    if (ram[CONTRA_RAM_PLAYER_STATE + 1u] != 0x01u)
+    {
+        d1 = 0xFFu;
+    }
+    if (((d1 < d0) ? d1 : d0) >= 0x18u)
+    {
+        return; /* no player close enough yet */
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u;
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = 0x00u;
+    contra_rom_advance_enemy_routine(core, x); /* -> routine_01 */
+}
+
+/* exploding_bridge_routine_01 (bank0:2289): per beat, draw a destroyed super-tile
+   (clearing its bg collision) for the first two cloud steps, then pop an explosion
+   cloud; after four clouds advance to routine_04 (next section). */
+static void contra_rom_exploding_bridge_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t var2;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    var2 = ram[CONTRA_RAM_ENEMY_VAR_2 + x];
+    if (var2 < 0x02u)
+    {
+        const uint8_t section = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
+        const uint8_t tile =
+            contra_exploding_bridge_destroyed_supertile_tbl[(uint8_t)((section * 2u) + var2) & 0x07u];
+
+        if (tile != 0u)
+        {
+            /* VAR_2 even -> the trailing (previous) super-tile at X-0x20 */
+            const uint8_t draw_x = ((var2 & 0x01u) == 0u)
+                ? (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] - 0x20u)
+                : ram[CONTRA_RAM_ENEMY_X_POS + x];
+
+            contra_rom_bridge_destroy_supertile(core, x, draw_x, tile);
+        }
+    }
+    var2 = (uint8_t)(var2 + 1u);
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = var2;
+    if (var2 >= 0x04u)
+    {
+        contra_rom_advance_enemy_routine(core, x); /* -> routine_04 */
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x04u;
+    contra_rom_create_explosion_at(
+        core,
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] + contra_exploding_bridge_cloud_x_offset[var2 & 0x07u]),
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + contra_exploding_bridge_cloud_y_offset[var2 & 0x03u]));
+}
+
+/* exploding_bridge_routine_04 (bank0:2385): advance to the next bridge section
+   (X += 0x20) and loop back to routine_01, or remove the bridge after section 4. */
+static void contra_rom_exploding_bridge_routine_04(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    unsigned nx;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] + 1u);
+    if (ram[CONTRA_RAM_ENEMY_VAR_1 + x] >= 0x04u)
+    {
+        contra_rom_clear_enemy(core, x); /* all sections gone */
+        return;
+    }
+    nx = (unsigned)ram[CONTRA_RAM_ENEMY_X_POS + x] + 0x20u;
+    if (nx > 0xFFu)
+    {
+        contra_rom_clear_enemy(core, x);
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_X_POS + x] = (uint8_t)nx;
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x01u;     /* drop the previous cloud sprite */
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u;
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = 0x00u;
+    contra_rom_set_enemy_routine_to_a(core, x, 0x02u); /* -> routine_01 */
+}
+
+/* enemy_routine_init_explosion (bank7:7544): mark the slot as exploding, recolor
+   to the explosion palette, hide the sprite, and advance. The bridge runs these
+   shared explosion routines as routine *steps* (between sections) rather than
+   swapping the slot to the 0xFE actor, then continues to its routine_04. */
+static void contra_rom_enemy_routine_init_explosion_step(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] | 0x81u);
+    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] =
+        (uint8_t)((ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] & 0xFCu) | 0x06u);
+    if (ram[CONTRA_RAM_ENEMY_SPRITES + x] == 0u)
+    {
+        contra_rom_clear_enemy(core, x); /* nothing on screen -> remove */
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = 0xFFu;
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x01u; /* hide while the cloud animates */
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x01u);
+}
+
+/* enemy_routine_explosion (bank7:7616): step the explosion sprite sequence (3
+   frames for type 0, 4 for type 1), then advance to the slot's next routine. */
+static void contra_rom_enemy_routine_explosion_step(ContraCore *core, uint8_t x)
+{
+    static const uint8_t explosion_type_00[3] = {0x38u, 0x39u, 0x3Au};
+    uint8_t *const ram = core->ram;
+    const uint8_t max_frames = ((ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x08u) != 0u) ? 4u : 3u;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+    if (ram[CONTRA_RAM_ENEMY_FRAME + x] >= max_frames)
+    {
+        contra_rom_advance_enemy_routine(core, x); /* -> the slot's next routine */
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x0Au;
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] =
+        explosion_type_00[(ram[CONTRA_RAM_ENEMY_FRAME + x] < 3u) ? ram[CONTRA_RAM_ENEMY_FRAME + x] : 0u];
+}
+
 /* dispatch one enemy slot to its type routine by (ENEMY_TYPE, ENEMY_ROUTINE).
    Only ported types act; others hold until their routine is ported. */
 static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
@@ -12118,13 +12362,28 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 default: break; /* removed via clear once the rounds are done */
             }
             break;
-        case 0x12u: /* level-2 indoor grenade (level-1 0x12 = exploding bridge, not ported) */
-            switch (routine)
+        case 0x12u:
+            if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x00u)
             {
-                case 0x01u: contra_rom_grenade_routine_00(core, x); break;
-                case 0x02u: contra_rom_grenade_routine_01(core, x); break;
-                case 0x03u: contra_rom_grenade_routine_02(core, x); break;
-                default: break; /* explosion via the 0xFE actor */
+                switch (routine) /* level-1 exploding bridge */
+                {
+                    case 0x01u: contra_rom_exploding_bridge_routine_00(core, x); break;
+                    case 0x02u: contra_rom_exploding_bridge_routine_01(core, x); break;
+                    case 0x03u: contra_rom_enemy_routine_init_explosion_step(core, x); break;
+                    case 0x04u: contra_rom_enemy_routine_explosion_step(core, x); break;
+                    case 0x05u: contra_rom_exploding_bridge_routine_04(core, x); break;
+                    default: break;
+                }
+            }
+            else
+            {
+                switch (routine) /* level-2 indoor grenade */
+                {
+                    case 0x01u: contra_rom_grenade_routine_00(core, x); break;
+                    case 0x02u: contra_rom_grenade_routine_01(core, x); break;
+                    case 0x03u: contra_rom_grenade_routine_02(core, x); break;
+                    default: break; /* explosion via the 0xFE actor */
+                }
             }
             break;
         case 0x17u: /* indoor grenade launcher (seeking guy) */
