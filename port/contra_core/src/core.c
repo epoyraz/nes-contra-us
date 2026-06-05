@@ -8221,6 +8221,7 @@ static void contra_rom_initialize_enemy(ContraCore *core, uint8_t x)
 
     ram[CONTRA_RAM_ENEMY_ROUTINE + x] = 0x01u;
     ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x01u;
+    core->l2_structure_tile[x] = 0u; /* no wall-structure tile drawn yet */
     contra_rom_clear_enemy_pt_2(core, x);
 
     if (type < (sizeof(contra_enemy_prop_00) / sizeof(contra_enemy_prop_00[0])))
@@ -8333,6 +8334,7 @@ static void contra_rom_clear_enemy(ContraCore *core, uint8_t x)
     core->ram[CONTRA_RAM_ENEMY_HP + x] = 0u;
     core->ram[CONTRA_RAM_ENEMY_TYPE + x] = 0u;
     core->ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0u;
+    core->l2_structure_tile[x] = 0u;
     contra_rom_clear_enemy_pt_2(core, x);
 }
 
@@ -9149,10 +9151,13 @@ static void contra_rom_enemy_fire_horizontal_at_player(ContraCore *core, uint8_t
         (uint8_t)(ex + (firing_left ? 0xF3u : 0x0Du)), ram[CONTRA_RAM_ENEMY_Y_POS + x]);
 }
 
-/* wall_turret_routine_00..04 (bank0): deploy, open, fire at the player, be
-   destroyable. The nametable tile-animation render (update_enemy_nametable_tiles
-   from level_2_4_tile_animation) is a level-2 render path not ported yet, so the
-   visual is stubbed; the logic, collision, and firing are faithful. */
+/* wall_turret_routine_00..04 (bank0:3049-3127): deploy, open, fire at the
+   player, be destroyable. The nametable tile-animation (update_enemy_nametable_
+   tiles from level_2_4_tile_animation) is recorded in l2_structure_tile[x] at the
+   ROM draw points and re-drawn each render frame by contra_render_level_2_wall_
+   structures; the logic, collision, and firing are faithful. */
+static const uint8_t contra_wall_turret_opening_tile_tbl[3] = {0x85u, 0x88u, 0x89u};
+
 static void contra_rom_wall_turret_routine_00(ContraCore *core, uint8_t x)
 {
     const uint8_t idx = (uint8_t)(core->ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x03u);
@@ -9165,7 +9170,11 @@ static void contra_rom_wall_turret_routine_01(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
 
-    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 1u; /* "closed" tile drawn (render stubbed) */
+    if (ram[CONTRA_RAM_ENEMY_VAR_1 + x] == 0u)
+    {
+        core->l2_structure_tile[x] = 0x84u; /* draw 'wall turret - closed' */
+        ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 1u;
+    }
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
         (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
     if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
@@ -9179,6 +9188,7 @@ static void contra_rom_wall_turret_routine_01(ContraCore *core, uint8_t x)
 static void contra_rom_wall_turret_routine_02(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
+    uint8_t frame;
 
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
         (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
@@ -9187,7 +9197,10 @@ static void contra_rom_wall_turret_routine_02(ContraCore *core, uint8_t x)
         return;
     }
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x08u;
-    ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+    frame = ram[CONTRA_RAM_ENEMY_FRAME + x];
+    /* draw the opening frame for the pre-increment FRAME (bank0:3081-3086) */
+    core->l2_structure_tile[x] = contra_wall_turret_opening_tile_tbl[(frame < 3u) ? frame : 2u];
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(frame + 1u);
     if (ram[CONTRA_RAM_ENEMY_FRAME + x] < 0x03u)
     {
         return; /* still opening */
@@ -9245,6 +9258,107 @@ static void contra_rom_wall_core_routine_00(ContraCore *core, uint8_t x)
     delay_idx = plated ? 0u : (uint8_t)(attr & 0x03u);
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = contra_core_opening_delay[delay_idx];
     contra_rom_advance_enemy_routine(core, x);
+}
+
+/* offsets into level_2_4_tile_animation for the core opening frames
+   (bank0.asm:3261): opening 1 / opening 2 / open. */
+static const uint8_t contra_wall_core_opening_tile_tbl[3] = {0x85u, 0x86u, 0x87u};
+
+/* wall_core_routine_01 (bank0:3200): draw the closed/plated tile once, then after
+   the opening delay enable collision (plated cores) or advance into the opening
+   animation (unplated). A plated core advances the routine twice, skipping the
+   open animation -- it stays plated until the plating is shot off. */
+static void contra_rom_wall_core_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t attr = ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x];
+
+    if (((attr & 0x08u) == 0u) && (ram[CONTRA_RAM_ENEMY_VAR_1 + x] == 0u))
+    {
+        /* normal core: draw plating (0x80) or closed (0x84); big cores skip this */
+        core->l2_structure_tile[x] = ((attr & 0x04u) != 0u) ? 0x80u : 0x84u;
+        ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 1u;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    if ((attr & 0x04u) != 0u)
+    {
+        /* plated: enable bullet collision and advance past the open animation */
+        ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x7Fu);
+        contra_rom_advance_enemy_routine(core, x);
+    }
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x01u;
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x01u);
+}
+
+/* wall_core_routine_02 (bank0:3235): play the core opening animation (3 frames,
+   8-frame steps), then enable collision and advance to the firing routine. A big
+   core has no opening delay and advances immediately. */
+static void contra_rom_wall_core_routine_02(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t frame;
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    if ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x08u) != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x7Fu);
+        contra_rom_advance_enemy_routine(core, x);
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x08u;
+    frame = ram[CONTRA_RAM_ENEMY_FRAME + x];
+    core->l2_structure_tile[x] = contra_wall_core_opening_tile_tbl[(frame < 3u) ? frame : 2u];
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(frame + 1u);
+    if (ram[CONTRA_RAM_ENEMY_FRAME + x] < 0x03u)
+    {
+        return; /* still opening */
+    }
+    ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x7Fu);
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+/* wall_core_routine_03 (bank0:3265): once enough soldier attack rounds have
+   happened and the core is open (unplated) and high enough, fire at the player on
+   a cadence. The ROM aims diagonally (aim_and_create_enemy_bullet); the exact
+   diagonal solve is RNG/aim-table bound, so fire horizontally at the nearest
+   player as an approximation (bullet type 0x03, speed code 0x05). */
+static void contra_rom_wall_core_routine_03(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    if (ram[CONTRA_RAM_INDOOR_ENEMY_ATTACK_COUNT] < 0x07u)
+    {
+        return;
+    }
+    if (ram[CONTRA_RAM_ENEMY_VAR_2 + x] != 0u)
+    {
+        return; /* still plated */
+    }
+    if (ram[CONTRA_RAM_ENEMY_Y_POS + x] >= 0x70u)
+    {
+        return; /* core too low to attack */
+    }
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x28u;
+    contra_rom_enemy_fire_horizontal_at_player(core, x, 0x03u, 0x05u);
 }
 
 /* --- boss bomb turret (enemy type 0x10), bank0.asm --- */
@@ -9434,7 +9548,10 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
             switch (routine)
             {
                 case 0x01u: contra_rom_wall_core_routine_00(core, x); break;
-                default: break; /* open/fire/destroy/room-advance routines pending */
+                case 0x02u: contra_rom_wall_core_routine_01(core, x); break;
+                case 0x03u: contra_rom_wall_core_routine_02(core, x); break;
+                case 0x04u: contra_rom_wall_core_routine_03(core, x); break;
+                default: break; /* destroy/explosion/room-advance routines pending */
             }
             break;
         case 0x07u: /* red turret */
@@ -10838,6 +10955,117 @@ static void contra_render_level_2_wall_core_updates(ContraCore *core, const Cont
     }
 }
 
+/* level_2_4_tile_animation (bank 3, CPU $86E1): 11 five-byte entries
+   {row_flag, tile0, tile1, tile2, tile3}. For level 2/4 the row flag is always 0,
+   meaning a 2x2 pattern-tile block (16x16 px): tile0,tile1 on the top row,
+   tile2,tile3 below. (data bank3.asm:185; drawn by update_enemy_nametable_tiles
+   bank7.asm:8631 / update_nametable_tiles bank7.asm:1643.) */
+#define CONTRA_LEVEL_2_4_TILE_ANIMATION_ADDR 0x86E1u
+
+/* Palette slot the level background uses at framebuffer pixel (px, py), decoded
+   from level_screen_supertiles exactly like contra_render_level_background. The
+   wall turret/core always pass a tile-animation offset with bit 7 set
+   ("leave existing palette"), so their tiles inherit this background palette. */
+static uint8_t contra_level_screen_palette_slot_at(const ContraCore *core, int px, int py)
+{
+    const uint8_t *const ram = core->ram;
+    const size_t visible_super_rows = (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u) ? 8u : 7u;
+    const int visible_tile_rows = (int)(visible_super_rows * 4u);
+    const int origin_y = ((int)CONTRA_FRAMEBUFFER_HEIGHT > (visible_tile_rows * 8))
+        ? ((int)CONTRA_FRAMEBUFFER_HEIGHT - (visible_tile_rows * 8))
+        : 0;
+    int tile_col = px >> 3;
+    int tile_row = (py - origin_y) >> 3;
+    const uint16_t palette_ptr = (uint16_t)(
+        (uint16_t)ram[CONTRA_RAM_LEVEL_SUPERTILE_PALETTE_DATA] |
+        ((uint16_t)ram[CONTRA_RAM_LEVEL_SUPERTILE_PALETTE_DATA + 1u] << 8u));
+    size_t supertile_offset;
+    uint8_t supertile_index;
+    uint8_t supertile_palette;
+    uint8_t palette_shift;
+
+    if (tile_col < 0) { tile_col = 0; }
+    if (tile_col > 31) { tile_col = 31; }
+    if (tile_row < 0) { tile_row = 0; }
+    if (tile_row >= visible_tile_rows) { tile_row = visible_tile_rows - 1; }
+
+    supertile_offset = ((size_t)(tile_row >> 2) * 8u) + (size_t)(tile_col >> 2);
+    supertile_index = core->level_screen_supertiles[supertile_offset & (CONTRA_LEVEL_SCREEN_SUPERTILES_SIZE - 1u)];
+    supertile_palette = contra_rom_read_u8(3u, (uint16_t)(palette_ptr + supertile_index));
+    palette_shift = (uint8_t)(((tile_row & 0x02) << 1) | (tile_col & 0x02));
+    return (uint8_t)((supertile_palette >> palette_shift) & 0x03u);
+}
+
+/* Draw the 2x2 level_2_4_tile_animation block for offset anim_offset (0x80..0x8a)
+   at the enemy position, as a framebuffer overlay. Mirrors the placement of
+   update_enemy_nametable_tiles (top-left = enemy pos - 4, rounded to the 8px tile
+   grid in world space so it lines up with the back wall). */
+static void contra_render_level_2_tile_animation(
+    ContraCore *core,
+    int enemy_x,
+    int enemy_y,
+    uint8_t anim_offset
+)
+{
+    const uint8_t index = (uint8_t)(anim_offset & 0x7Fu);
+    const uint16_t entry = (uint16_t)(CONTRA_LEVEL_2_4_TILE_ANIMATION_ADDR + ((uint16_t)index * 5u));
+    const int scroll_offset = (int)core->ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET];
+    const int aligned_x = (((enemy_x - 4) + scroll_offset) & ~7) - scroll_offset;
+    const int aligned_y = (enemy_y - 4) & ~7;
+    unsigned tile_y;
+
+    if (!contra_load_rom_image())
+    {
+        return;
+    }
+
+    for (tile_y = 0u; tile_y < 2u; ++tile_y)
+    {
+        unsigned tile_x;
+
+        for (tile_x = 0u; tile_x < 2u; ++tile_x)
+        {
+            const uint8_t pattern_index = contra_rom_read_u8(
+                3u, (uint16_t)(entry + 1u + (tile_y * 2u) + tile_x));
+            const int px = aligned_x + (int)(tile_x * 8u);
+            const int py = aligned_y + (int)(tile_y * 8u);
+
+            contra_draw_background_tile(
+                core, px, py, pattern_index,
+                contra_level_screen_palette_slot_at(core, px, py));
+        }
+    }
+}
+
+/* Faithful level-2 wall turret/core (types 0x13/0x14) live on real RAM. Their
+   background appears only via this overlay re-draw each render frame, from the
+   per-slot tile cache the routines populate at their draw points. */
+static void contra_render_level_2_wall_structures(ContraCore *core)
+{
+    int slot;
+
+    for (slot = 0; slot < 16; ++slot)
+    {
+        const uint8_t sx = (uint8_t)slot;
+        const uint8_t type = core->ram[CONTRA_RAM_ENEMY_TYPE + sx];
+        const uint8_t tile = core->l2_structure_tile[sx];
+
+        if ((core->ram[CONTRA_RAM_ENEMY_ROUTINE + sx] == 0u) || (tile == 0u))
+        {
+            continue;
+        }
+        if ((type != 0x13u) && (type != 0x14u))
+        {
+            continue;
+        }
+        contra_render_level_2_tile_animation(
+            core,
+            (int)core->ram[CONTRA_RAM_ENEMY_X_POS + sx],
+            (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + sx],
+            tile);
+    }
+}
+
 static void contra_render_native_enemies(ContraCore *core)
 {
     uint8_t sprite_order = 0x80u;
@@ -10855,6 +11083,15 @@ static void contra_render_native_enemies(ContraCore *core)
         /* Faithful enemies render their own super-tiles during their routines
            (set_weapon_box_supertile etc.) and their OAM sprites via the OAM
            build; nothing to do per-frame here. */
+        return;
+    }
+
+    if (CONTRA_USE_ROM_ENEMY_SYSTEM_L2 && level_2_active)
+    {
+        /* Faithful indoor enemies live on real RAM: re-draw the wall turret/core
+           backgrounds from the per-slot tile cache; soldiers/bullets render via
+           the OAM build. Skip the invented core->enemies[] path entirely. */
+        contra_render_level_2_wall_structures(core);
         return;
     }
 
@@ -11002,7 +11239,8 @@ static void contra_sync_native_sprite_objects_to_cpu_buffer(ContraCore *core)
     int sprite_slot;
     size_t enemy_index;
 
-    if (CONTRA_USE_ROM_ENEMY_SYSTEM && (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0u))
+    if ((CONTRA_USE_ROM_ENEMY_SYSTEM && (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0u)) ||
+        (CONTRA_USE_ROM_ENEMY_SYSTEM_L2 && (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u)))
     {
         /* The faithful enemy system maintains the enemy sprite-object slots
            (ENEMY_SPRITES / ENEMY_Y_POS / ENEMY_X_POS = sprite slots 10..25)

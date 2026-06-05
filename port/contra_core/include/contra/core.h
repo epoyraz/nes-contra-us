@@ -100,6 +100,15 @@ typedef struct ContraCore
     uint8_t pending_horizontal_attr_tile_offset;
     uint8_t pending_horizontal_attr_supertile_offset;
     uint8_t pending_horizontal_attr_high;
+    /* Render cache for the faithful level-2 (indoor base) wall turret/core: the
+       level_2_4_tile_animation offset currently shown on the background for each
+       enemy slot. The original game leaves this on the nametable; the native
+       background composes from level_screen_supertiles (super-tile granularity)
+       and can't hold sub-super-tile pattern writes, so the wall structures are
+       re-drawn as a framebuffer overlay each frame from this cache. 0 = nothing
+       drawn yet. Set at the routines' update_enemy_nametable_tiles points,
+       cleared on enemy init/clear. */
+    uint8_t l2_structure_tile[CONTRA_NATIVE_MAX_ENEMIES];
 } ContraCore;
 
 void contra_core_init(ContraCore *core);
