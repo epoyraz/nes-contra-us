@@ -62,34 +62,34 @@ typedef struct TraceContext
 } TraceContext;
 
 static const Checkpoint expected_level1_right_run[] = {
-    {"level1-title", 180u, 0x01u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x2Cu, 0xA2u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x3F497D23u, 0xD9F4E514u, 0x84853990u, 0x20E0D2C5u, 0xB78899A1u},
-    {"level1-gameplay-start", 900u, 0x02u, 0x04u, 0x00u, 0x00u, 0x01u, 0x40u, 0x01u, 0x3Cu, 0x64u, 0x62u, 0x00u, 0x00u, 0x00u, 0x00u, 0x6E1F7489u, 0xCCCA4E0Bu, 0xB537F879u, 0x7790B0F2u, 0x013A815Du},
-    {"level1-scroll-mid", 1200u, 0x02u, 0x04u, 0x00u, 0x00u, 0x02u, 0x29u, 0x01u, 0x24u, 0x64u, 0x62u, 0x00u, 0x00u, 0x00u, 0x00u, 0x38171380u, 0x989ED3E6u, 0xB537F879u, 0x98C4DFE1u, 0xA594FA09u},
-    {"level1-enemy-window", 1500u, 0x02u, 0x04u, 0x00u, 0x00u, 0x03u, 0x20u, 0x01u, 0x49u, 0xD4u, 0x62u, 0x00u, 0x00u, 0x00u, 0x00u, 0x45B46E23u, 0x29FF2B00u, 0xB537F879u, 0xDB03FFC0u, 0x5100BBD9u}
+    {"level1-title", 180u, 0x01u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x2Cu, 0xA2u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x8796A4EAu, 0xD9F4E514u, 0x84853990u, 0x20E0D2C5u, 0xDA4EE732u},
+    {"level1-gameplay-start", 900u, 0x02u, 0x04u, 0x00u, 0x00u, 0x01u, 0x40u, 0x01u, 0x3Cu, 0x64u, 0x62u, 0x00u, 0x00u, 0x00u, 0x00u, 0x46B0E1A4u, 0xCCCA4E0Bu, 0xF5D5CF3Fu, 0x20E0D2C5u, 0xE9055DD1u},
+    {"level1-scroll-mid", 1200u, 0x02u, 0x04u, 0x00u, 0x00u, 0x02u, 0x29u, 0x01u, 0x24u, 0x64u, 0x62u, 0x00u, 0x00u, 0x00u, 0x00u, 0x6F1E2C6Bu, 0x989ED3E6u, 0xB537F879u, 0x20E0D2C5u, 0xD7315D6Bu},
+    {"level1-enemy-window", 1500u, 0x02u, 0x04u, 0x00u, 0x00u, 0x03u, 0x32u, 0x01u, 0x37u, 0xD4u, 0x62u, 0x00u, 0x00u, 0x00u, 0x00u, 0x8CB1E89Du, 0xC10D99A1u, 0xB537F879u, 0x20E0D2C5u, 0xCE1997C4u}
 };
 
 static const Checkpoint expected_attract_level1_demo[] = {
-    {"level1-title", 180u, 0x01u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0xF3C87D2Eu, 0xD9F4E514u, 0x7A1A1897u, 0x20E0D2C5u, 0x3D3F5BF9u},
-    {"level1-gameplay-start", 900u, 0x02u, 0x04u, 0x00u, 0x00u, 0x00u, 0x2Du, 0x01u, 0x63u, 0x64u, 0x62u, 0x00u, 0x00u, 0x00u, 0x00u, 0x2E862FA1u, 0x632B9A15u, 0xB537F879u, 0x9E49A4EDu, 0xF87C9F89u},
-    {"level1-scroll-mid", 1200u, 0x02u, 0x04u, 0x00u, 0x00u, 0x01u, 0x37u, 0x01u, 0x45u, 0x64u, 0x62u, 0x00u, 0x00u, 0x00u, 0x00u, 0xCF82270Cu, 0xF67A3E75u, 0xB537F879u, 0x3BF73401u, 0xC7190139u},
-    {"level1-enemy-window", 1500u, 0x02u, 0x04u, 0x00u, 0x00u, 0x02u, 0x20u, 0x01u, 0x24u, 0x64u, 0x62u, 0x00u, 0x00u, 0x00u, 0x00u, 0xC3FFCF76u, 0x45B3429Au, 0xB537F879u, 0x724DBDECu, 0xF4061BBDu}
+    {"level1-title", 180u, 0x01u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x52EAD0C1u, 0xD9F4E514u, 0x7A1A1897u, 0x20E0D2C5u, 0x8577ECE4u},
+    {"level1-gameplay-start", 900u, 0x02u, 0x04u, 0x00u, 0x00u, 0x00u, 0x2Du, 0x01u, 0x63u, 0x64u, 0x62u, 0x00u, 0x00u, 0x00u, 0x00u, 0xADC01DDBu, 0x632B9A15u, 0xB537F879u, 0x20E0D2C5u, 0xA3A192E3u},
+    {"level1-scroll-mid", 1200u, 0x02u, 0x04u, 0x00u, 0x00u, 0x01u, 0x37u, 0x01u, 0x45u, 0x64u, 0x62u, 0x00u, 0x00u, 0x00u, 0x00u, 0xFEFDCF6Au, 0xF67A3E75u, 0xB537F879u, 0x20E0D2C5u, 0x4DFDF2E8u},
+    {"level1-enemy-window", 1500u, 0x02u, 0x04u, 0x00u, 0x00u, 0x02u, 0x20u, 0x01u, 0x24u, 0x64u, 0x62u, 0x00u, 0x00u, 0x00u, 0x00u, 0x91D84DC0u, 0x45B3429Au, 0xF5D5CF3Fu, 0x20E0D2C5u, 0xEA6D7359u}
 };
 
+/* Only the checkpoints the faithful attract demo actually reaches before it
+   returns to the title (see run_attract_demo_trace); the room-clear sequence the
+   invented core's demo used to hit isn't reproduced here and is covered instead by
+   the forced run_level2_room_chain_trace. */
 static const Checkpoint expected_attract_level2_demo[] = {
-    {"level2-attract-first-room", 3006u, 0x02u, 0x04u, 0x01u, 0x01u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x62u, 0x00u, 0x00u, 0x00u, 0x00u, 0x102C22D6u, 0xD2063DC5u, 0xC852DE1Bu, 0x20E0D2C5u, 0xF41F4389u},
-    {"level2-wall-core-loaded", 3007u, 0x02u, 0x04u, 0x01u, 0x01u, 0x00u, 0x00u, 0x01u, 0x70u, 0x60u, 0x62u, 0x00u, 0x00u, 0x00u, 0x01u, 0xF2D28A0Eu, 0xD2063DC5u, 0xC852DE1Bu, 0x8458F413u, 0xF41F4389u},
-    {"level2-wall-core-destroyed", 3255u, 0x02u, 0x04u, 0x01u, 0x01u, 0x00u, 0x00u, 0x01u, 0x44u, 0xA8u, 0x62u, 0x00u, 0x00u, 0x00u, 0x00u, 0x1A59D7D8u, 0xD2063DC5u, 0xC852DE1Bu, 0x80A3F5B3u, 0xCC794AE5u},
-    {"level2-room-cleared", 3278u, 0x02u, 0x04u, 0x01u, 0x01u, 0x00u, 0x00u, 0x01u, 0x58u, 0xA8u, 0x62u, 0x00u, 0x00u, 0x01u, 0x00u, 0xC1B87E43u, 0xC03557CDu, 0xC852DE1Bu, 0xD030A1D3u, 0xA672C76Du},
-    {"level2-after-room-1", 3655u, 0x02u, 0x04u, 0x01u, 0x01u, 0x01u, 0x00u, 0x01u, 0x72u, 0x9Cu, 0x62u, 0x00u, 0x00u, 0x00u, 0x01u, 0x20F582EFu, 0xC03557CDu, 0xC852DE1Bu, 0x914E30CAu, 0x2FABFB51u},
-    {"level2-demo-finished", 4623u, 0x00u, 0x04u, 0x01u, 0x01u, 0x01u, 0x00u, 0x01u, 0x70u, 0xA8u, 0x61u, 0x00u, 0x00u, 0x00u, 0x01u, 0x9A1954AAu, 0xC03557CDu, 0xC852DE1Bu, 0xC5001482u, 0x8B553C0Du}
+    {"level2-attract-first-room", 3006u, 0x02u, 0x04u, 0x01u, 0x01u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x62u, 0x00u, 0x00u, 0x00u, 0x00u, 0x028DE9C2u, 0xD2063DC5u, 0xC852DE1Bu, 0x20E0D2C5u, 0xA3A72CA9u},
+    {"level2-wall-core-loaded", 3007u, 0x02u, 0x04u, 0x01u, 0x01u, 0x00u, 0x00u, 0x01u, 0x70u, 0x60u, 0x62u, 0x00u, 0x00u, 0x00u, 0x01u, 0xBAA94974u, 0xD2063DC5u, 0xF5E7D5CBu, 0x20E0D2C5u, 0x5A66DED6u}
 };
 
 static const Checkpoint expected_level2_room_chain[] = {
-    {"level2-first-room", 236u, 0x05u, 0x04u, 0x01u, 0x01u, 0x00u, 0x00u, 0x01u, 0x70u, 0x60u, 0x02u, 0x00u, 0x00u, 0x00u, 0x01u, 0x63AC3933u, 0xD2063DC5u, 0xC852DE1Bu, 0x8458F413u, 0xF41F4389u},
-    {"level2-after-room-1", 403u, 0x05u, 0x04u, 0x01u, 0x01u, 0x01u, 0x00u, 0x01u, 0x94u, 0x78u, 0x02u, 0x00u, 0x00u, 0x00u, 0x01u, 0xD3333B48u, 0xD2063DC5u, 0xC852DE1Bu, 0x914E30CAu, 0x8DAA2ADDu},
-    {"level2-after-room-4", 811u, 0x05u, 0x04u, 0x01u, 0x01u, 0x04u, 0x00u, 0x01u, 0xA0u, 0x78u, 0x02u, 0x00u, 0x00u, 0x00u, 0x01u, 0x75A26579u, 0xD2063DC5u, 0xC852DE1Bu, 0x58853260u, 0xFE7C05E9u},
-    {"level2-boss-state", 947u, 0x05u, 0x04u, 0x01u, 0x80u, 0x05u, 0x00u, 0x01u, 0xA0u, 0x78u, 0x02u, 0x00u, 0x00u, 0x00u, 0x01u, 0x1AC1EC59u, 0xD2063DC5u, 0x63DFFDCCu, 0x8EE6E9E0u, 0x9DA1F055u},
-    {"level2-boss-defeated", 992u, 0x05u, 0x08u, 0x01u, 0x80u, 0x05u, 0x00u, 0x01u, 0x97u, 0xC9u, 0x02u, 0x00u, 0x00u, 0x01u, 0x01u, 0xC20285D5u, 0xD2063DC5u, 0x63DFFDCCu, 0x58272D65u, 0x9DD192EDu}
+    {"level2-first-room", 236u, 0x05u, 0x04u, 0x01u, 0x01u, 0x00u, 0x00u, 0x01u, 0x70u, 0x60u, 0x02u, 0x00u, 0x00u, 0x00u, 0x01u, 0xC79F8DDDu, 0xD2063DC5u, 0xC852DE1Bu, 0x20E0D2C5u, 0x71CD3029u},
+    {"level2-after-room-1", 403u, 0x05u, 0x04u, 0x01u, 0x01u, 0x01u, 0x00u, 0x01u, 0x94u, 0x78u, 0x02u, 0x00u, 0x00u, 0x00u, 0x01u, 0xDDADFD73u, 0xD2063DC5u, 0xF5E7D5CBu, 0x20E0D2C5u, 0xA9DDE8DAu},
+    {"level2-after-room-4", 811u, 0x05u, 0x04u, 0x01u, 0x01u, 0x04u, 0x00u, 0x01u, 0xA0u, 0x78u, 0x02u, 0x00u, 0x00u, 0x00u, 0x01u, 0xD5726EEAu, 0xD2063DC5u, 0xC852DE1Bu, 0x20E0D2C5u, 0x6C586B2Eu},
+    {"level2-boss-state", 947u, 0x05u, 0x04u, 0x01u, 0x80u, 0x05u, 0x00u, 0x01u, 0xA0u, 0x78u, 0x02u, 0x00u, 0x00u, 0x00u, 0x01u, 0x9DBA0168u, 0xD2063DC5u, 0x63DFFDCCu, 0x20E0D2C5u, 0xB43F11C6u},
+    {"level2-boss-defeated", 1204u, 0x05u, 0x08u, 0x01u, 0x80u, 0x05u, 0x00u, 0x01u, 0x97u, 0xC9u, 0x02u, 0x00u, 0x00u, 0x00u, 0x01u, 0xF11E7189u, 0xCC198FF3u, 0xDBC85DFCu, 0x20E0D2C5u, 0xBC047B9Cu}
 };
 
 static uint32_t fnv1a_bytes(const void *data, size_t length)
@@ -372,6 +372,13 @@ static bool run_attract_demo_trace(TraceContext *trace)
         }
     }
 
+    /* The level-2 attract demo plays a fixed input recording. Under the faithful
+       enemy timing it reaches the first indoor room and loads the wall core, but
+       the recording does not destroy it -- the demo returns to the title before
+       clearing the room. Whether the real ROM's demo clears L2 room 1 is unknown
+       without Mesen ground-truth, so we only assert the two checkpoints the demo
+       actually reaches; boss clear and room advancement are covered
+       deterministically by run_level2_room_chain_trace. */
     for (; frame <= 12000u; ++frame)
     {
         step_no_input(&core);
@@ -395,26 +402,6 @@ static bool run_attract_demo_trace(TraceContext *trace)
                         (core.ram[CONTRA_RAM_PLAYER_STATE] == 0x01u);
                     break;
 
-                case 2u:
-                    should_capture =
-                        (core.ram[CONTRA_RAM_WALL_CORE_REMAINING] == 0x00u) &&
-                        (core.ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] == 0x00u) &&
-                        (core.ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] == 0x00u) &&
-                        (core.ram[CONTRA_RAM_PLAYER_STATE] == 0x01u);
-                    break;
-
-                case 3u:
-                    should_capture =
-                        (core.ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] == 0x01u) &&
-                        (core.ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] == 0x00u);
-                    break;
-
-                case 4u:
-                    should_capture =
-                        (core.ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] == 0x01u) &&
-                        (core.ram[CONTRA_RAM_WALL_CORE_REMAINING] == 0x01u);
-                    break;
-
                 default:
                     break;
             }
@@ -435,20 +422,6 @@ static bool run_attract_demo_trace(TraceContext *trace)
                 return passed && (checkpoint_index == (sizeof(expected_attract_level1_demo) / sizeof(expected_attract_level1_demo[0])));
             }
         }
-
-        if ((level2_checkpoint_index == ((sizeof(expected_attract_level2_demo) / sizeof(expected_attract_level2_demo[0])) - 1u)) &&
-            (core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] != 0x02u))
-        {
-            const Checkpoint *const expected = &expected_attract_level2_demo[level2_checkpoint_index];
-            CheckpointCapture capture;
-
-            capture_checkpoint(&core, expected->name, frame, &capture);
-            passed = verify_checkpoint(expected, &capture) && passed;
-            emit_checkpoint_jsonl(trace, "attract_level2_demo", &capture);
-            ++level2_checkpoint_index;
-            return passed && (checkpoint_index == (sizeof(expected_attract_level1_demo) / sizeof(expected_attract_level1_demo[0])));
-        }
-
     }
 
     {
@@ -491,31 +464,16 @@ static bool advance_level2_room_once(ContraCore *core, unsigned *elapsed_frames)
     return false;
 }
 
-static unsigned count_active_enemy_type(const ContraCore *core, uint8_t enemy_type)
-{
-    unsigned count = 0u;
-    size_t index;
-
-    for (index = 0u; index < CONTRA_NATIVE_MAX_ENEMIES; ++index)
-    {
-        if ((core->enemies[index].active != 0u) &&
-            (core->enemies[index].type == enemy_type))
-        {
-            ++count;
-        }
-    }
-
-    return count;
-}
-
+/* The faithful enemy system lives on real RAM (16 slots): a slot is live when its
+   ENEMY_ROUTINE is non-zero, and its type is ENEMY_TYPE. */
 static bool find_first_active_enemy_type(const ContraCore *core, uint8_t enemy_type, size_t *enemy_index)
 {
     size_t index;
 
-    for (index = 0u; index < CONTRA_NATIVE_MAX_ENEMIES; ++index)
+    for (index = 0u; index < 16u; ++index)
     {
-        if ((core->enemies[index].active != 0u) &&
-            (core->enemies[index].type == enemy_type))
+        if ((core->ram[CONTRA_RAM_ENEMY_ROUTINE + index] != 0u) &&
+            (core->ram[CONTRA_RAM_ENEMY_TYPE + index] == enemy_type))
         {
             *enemy_index = index;
             return true;
@@ -531,59 +489,46 @@ static void keep_player_invincible(ContraCore *core)
     core->ram[CONTRA_RAM_INVINCIBILITY_TIMER] = 0x80u;
 }
 
-static bool shoot_enemy_until_removed_or_changed_counted(
-    ContraCore *core,
-    uint8_t enemy_type,
-    unsigned max_hits,
-    unsigned *elapsed_frames
-)
-{
-    unsigned hit;
-    size_t enemy_index = 0u;
-    const unsigned initial_count = count_active_enemy_type(core, enemy_type);
-
-    for (hit = 0u; hit < max_hits; ++hit)
-    {
-        if (!find_first_active_enemy_type(core, enemy_type, &enemy_index))
-        {
-            return true;
-        }
-
-        keep_player_invincible(core);
-        core->ram[CONTRA_RAM_PLAYER_BULLET_SLOT] = 0x01u;
-        core->ram[CONTRA_RAM_PLAYER_BULLET_X_POS] = (uint8_t)core->enemies[enemy_index].x;
-        core->ram[CONTRA_RAM_PLAYER_BULLET_Y_POS] = (uint8_t)core->enemies[enemy_index].y;
-        step_no_input_counted(core, elapsed_frames);
-
-        if (count_active_enemy_type(core, enemy_type) < initial_count)
-        {
-            return true;
-        }
-    }
-
-    return count_active_enemy_type(core, enemy_type) < initial_count;
-}
-
+/* Defeat the faithful level-2 boss: the back wall mounts four armor platings
+   (type 0x0A, HP 10 each) and two invulnerable cannons (0x08) shielding the boss
+   eye (0x10, ENEMY_STATE_WIDTH bit 7 set so bullets pass). Pump bullets into the
+   first live plating until every plating is gone, then into the now-exposed eye;
+   boss_eye_routine_03 sets BOSS_DEFEATED_FLAG and the level routine advances to
+   0x08. (The invented boss used a per-hit count heuristic with an 8-shot cap,
+   which can't break a 10-HP plating -- this drives the real RAM directly.) */
 static bool destroy_level2_boss_counted(ContraCore *core, unsigned *elapsed_frames)
 {
     unsigned frame;
 
-    while (count_active_enemy_type(core, 0x0Au) != 0u)
+    for (frame = 0u; frame < 2000u; ++frame)
     {
-        if (!shoot_enemy_until_removed_or_changed_counted(core, 0x0Au, 8u, elapsed_frames))
+        size_t idx = 0u;
+
+        if (!find_first_active_enemy_type(core, 0x0Au, &idx) &&
+            !find_first_active_enemy_type(core, 0x10u, &idx))
         {
-            printf("FAIL level 2 boss wall plating did not break\n");
-            return false;
+            break; /* nothing left to shoot */
+        }
+        keep_player_invincible(core);
+        /* faithful player bullet: gated on SPRITE_CODE != 0 and ROUTINE == 1 */
+        core->ram[CONTRA_RAM_PLAYER_BULLET_SPRITE_CODE] = 0x01u;
+        core->ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE] = 0x01u;
+        core->ram[CONTRA_RAM_PLAYER_BULLET_X_POS] = core->ram[CONTRA_RAM_ENEMY_X_POS + idx];
+        core->ram[CONTRA_RAM_PLAYER_BULLET_Y_POS] = core->ram[CONTRA_RAM_ENEMY_Y_POS + idx];
+        step_no_input_counted(core, elapsed_frames);
+        if (core->ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] != 0u)
+        {
+            break;
         }
     }
 
-    if (!shoot_enemy_until_removed_or_changed_counted(core, 0x10u, 48u, elapsed_frames))
+    if (core->ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] == 0u)
     {
-        printf("FAIL level 2 boss eye did not break\n");
+        printf("FAIL level 2 boss was not defeated\n");
         return false;
     }
 
-    for (frame = 0u; frame < 16u; ++frame)
+    for (frame = 0u; frame < 64u; ++frame)
     {
         keep_player_invincible(core);
         step_no_input_counted(core, elapsed_frames);
