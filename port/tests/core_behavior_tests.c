@@ -194,6 +194,45 @@ static bool l2_enemy_core_destroyable(const ContraCore *core, size_t i)
 {
     return (core->ram[CONTRA_RAM_ENEMY_STATE_WIDTH + i] & 0x80u) == 0u;
 }
+/* The destroyed core runs its destruction chain (routine 5+, the analogue of the
+   invented "destroyed" state 0x08), and the back-wall blow-open is tracked in
+   l2_blowopen_quadrants (the analogue of the invented per-enemy flags). */
+static bool l2_core_destroying(const ContraCore *core, size_t i)
+{
+    return core->ram[CONTRA_RAM_ENEMY_ROUTINE + i] >= 0x05u;
+}
+static bool l2_blowopen_started(const ContraCore *core, size_t i)
+{
+    (void)i;
+    return core->l2_blowopen_quadrants != 0u;
+}
+/* Inject a live player bullet at (x,y): the faithful bullet-vs-enemy collision
+   gates on PLAYER_BULLET_SPRITE_CODE != 0 and PLAYER_BULLET_ROUTINE == 1. */
+static void l2_inject_player_bullet(ContraCore *core, uint8_t x, uint8_t y)
+{
+    core->ram[CONTRA_RAM_PLAYER_BULLET_SPRITE_CODE] = 0x01u;
+    core->ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE] = 0x01u;
+    core->ram[CONTRA_RAM_PLAYER_BULLET_X_POS] = x;
+    core->ram[CONTRA_RAM_PLAYER_BULLET_Y_POS] = y;
+}
+/* Faithful enemy bullets are real-RAM enemy slots of type 0x01 (owner is not
+   tracked there), so count those rather than the invented projectile mirror. */
+static unsigned count_active_projectiles_from_owner(const ContraCore *core, uint8_t owner)
+{
+    unsigned count = 0u;
+    size_t i;
+
+    (void)owner;
+    for (i = 0u; i < 16u; ++i)
+    {
+        if ((core->ram[CONTRA_RAM_ENEMY_ROUTINE + i] != 0u) &&
+            (core->ram[CONTRA_RAM_ENEMY_TYPE + i] == 0x01u))
+        {
+            ++count;
+        }
+    }
+    return count;
+}
 #else
 static bool l2_enemy_active(const ContraCore *core, size_t i)
 {
@@ -218,6 +257,20 @@ static uint8_t l2_enemy_y(const ContraCore *core, size_t i)
 static bool l2_enemy_core_destroyable(const ContraCore *core, size_t i)
 {
     return core->enemies[i].state == 0x03u;
+}
+static bool l2_core_destroying(const ContraCore *core, size_t i)
+{
+    return core->enemies[i].state == 0x08u;
+}
+static bool l2_blowopen_started(const ContraCore *core, size_t i)
+{
+    return core->enemies[i].flags != 0u;
+}
+static void l2_inject_player_bullet(ContraCore *core, uint8_t x, uint8_t y)
+{
+    core->ram[CONTRA_RAM_PLAYER_BULLET_SLOT] = 0x01u;
+    core->ram[CONTRA_RAM_PLAYER_BULLET_X_POS] = x;
+    core->ram[CONTRA_RAM_PLAYER_BULLET_Y_POS] = y;
 }
 #endif
 
@@ -318,6 +371,7 @@ static unsigned count_active_enemy_type(const ContraCore *core, uint8_t enemy_ty
     return count;
 }
 
+#if !CONTRA_USE_ROM_ENEMY_SYSTEM_L2
 static unsigned count_active_projectiles_from_owner(const ContraCore *core, uint8_t owner)
 {
     unsigned count = 0u;
@@ -334,6 +388,7 @@ static unsigned count_active_projectiles_from_owner(const ContraCore *core, uint
 
     return count;
 }
+#endif
 
 static bool find_first_active_enemy_type(const ContraCore *core, uint8_t enemy_type, size_t *enemy_index)
 {
@@ -378,9 +433,7 @@ static bool destroy_first_level2_wall_core(ContraCore *core)
          (l2_enemy_hp(core, wall_core_index) != 0u);
          ++frame)
     {
-        core->ram[CONTRA_RAM_PLAYER_BULLET_SLOT] = 0x01u;
-        core->ram[CONTRA_RAM_PLAYER_BULLET_X_POS] = l2_enemy_x(core, wall_core_index);
-        core->ram[CONTRA_RAM_PLAYER_BULLET_Y_POS] = l2_enemy_y(core, wall_core_index);
+        l2_inject_player_bullet(core, l2_enemy_x(core, wall_core_index), l2_enemy_y(core, wall_core_index));
         step_no_input(core);
     }
 
@@ -443,9 +496,7 @@ static bool shoot_enemy_until_removed_or_changed(ContraCore *core, uint8_t enemy
             return true;
         }
 
-        core->ram[CONTRA_RAM_PLAYER_BULLET_SLOT] = 0x01u;
-        core->ram[CONTRA_RAM_PLAYER_BULLET_X_POS] = l2_enemy_x(core, enemy_index);
-        core->ram[CONTRA_RAM_PLAYER_BULLET_Y_POS] = l2_enemy_y(core, enemy_index);
+        l2_inject_player_bullet(core, l2_enemy_x(core, enemy_index), l2_enemy_y(core, enemy_index));
         step_no_input(core);
 
         if (count_active_enemy_type(core, enemy_type) < initial_count)
@@ -1468,7 +1519,17 @@ static bool test_level2_wall_core_destroy_allows_room_advance(void)
 
     force_level2_gameplay(&core);
     CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x04u);
-    step_no_input(&core);
+    /* The faithful wall core takes its HP in routine_00 (one frame after spawn),
+       where the invented system set it on spawn; step until it has initialized. */
+    for (frame = 0u; frame < 8u; ++frame)
+    {
+        step_no_input(&core);
+        if (find_first_active_wall_core(&core, &wall_core_index) &&
+            (l2_enemy_hp(&core, wall_core_index) == 0x08u))
+        {
+            break;
+        }
+    }
     CHECK(find_first_active_wall_core(&core, &wall_core_index));
     CHECK(core.ram[CONTRA_RAM_WALL_CORE_REMAINING] == 0x01u);
     CHECK(l2_enemy_hp(&core, wall_core_index) == 0x08u);
@@ -1510,34 +1571,32 @@ static bool test_level2_wall_core_destroy_updates_back_wall_quadrants(void)
     {
         step_no_input(&core);
         if (find_first_active_wall_core(&core, &wall_core_index) &&
-            (core.enemies[wall_core_index].state == 0x03u))
+            l2_enemy_core_destroyable(&core, wall_core_index))
         {
             break;
         }
     }
 
     CHECK(frame < 320u);
-    CHECK(core.enemies[wall_core_index].hp == 0x08u);
-    while (core.enemies[wall_core_index].hp != 0u)
+    CHECK(l2_enemy_hp(&core, wall_core_index) == 0x08u);
+    while (l2_enemy_hp(&core, wall_core_index) != 0u)
     {
-        core.ram[CONTRA_RAM_PLAYER_BULLET_SLOT] = 0x01u;
-        core.ram[CONTRA_RAM_PLAYER_BULLET_X_POS] = (uint8_t)core.enemies[wall_core_index].x;
-        core.ram[CONTRA_RAM_PLAYER_BULLET_Y_POS] = (uint8_t)core.enemies[wall_core_index].y;
+        l2_inject_player_bullet(&core, l2_enemy_x(&core, wall_core_index), l2_enemy_y(&core, wall_core_index));
         step_no_input(&core);
     }
 
-    CHECK(core.enemies[wall_core_index].active != 0u);
-    CHECK(core.enemies[wall_core_index].type == 0x14u);
-    CHECK(core.enemies[wall_core_index].state == 0x08u);
+    CHECK(l2_enemy_active(&core, wall_core_index));
+    CHECK(l2_enemy_type(&core, wall_core_index) == 0x14u);
+    CHECK(l2_core_destroying(&core, wall_core_index));
     CHECK(core.ram[CONTRA_RAM_WALL_CORE_REMAINING] == 0x00u);
     CHECK(core.ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] == 0x00u);
-    CHECK(core.enemies[wall_core_index].flags == 0x00u);
+    CHECK(!l2_blowopen_started(&core, wall_core_index));
     initial_framebuffer_hash = hash_bytes(core.framebuffer, sizeof(core.framebuffer));
 
     for (frame = 0u; frame < 24u; ++frame)
     {
         step_no_input(&core);
-        if (core.enemies[wall_core_index].flags != 0x00u)
+        if (l2_blowopen_started(&core, wall_core_index))
         {
             saw_quadrant_update = true;
             break;
