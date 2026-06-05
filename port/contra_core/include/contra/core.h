@@ -109,6 +109,11 @@ typedef struct ContraCore
        drawn yet. Set at the routines' update_enemy_nametable_tiles points,
        cleared on enemy init/clear. */
     uint8_t l2_structure_tile[CONTRA_NATIVE_MAX_ENEMIES];
+    /* Companion render cache for the level-2 boss-room fortress targets (wall
+       cannon 0x08 / wall plating 0x0A), which draw as 4x4 background SUPER-tiles
+       (draw_enemy_supertile_a, level_2_nametable_update_supertile_data) rather
+       than the 2x2 tile-animation the core/turret use. 0xFF = nothing drawn. */
+    uint8_t l2_supertile[CONTRA_NATIVE_MAX_ENEMIES];
 } ContraCore;
 
 void contra_core_init(ContraCore *core);

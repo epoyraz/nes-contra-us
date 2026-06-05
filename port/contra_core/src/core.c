@@ -8241,6 +8241,7 @@ static void contra_rom_initialize_enemy(ContraCore *core, uint8_t x)
     ram[CONTRA_RAM_ENEMY_ROUTINE + x] = 0x01u;
     ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x01u;
     core->l2_structure_tile[x] = 0u; /* no wall-structure tile drawn yet */
+    core->l2_supertile[x] = 0xFFu;   /* no boss-room super-tile drawn yet */
     contra_rom_clear_enemy_pt_2(core, x);
 
     /* enemy_prop_ptr_tbl (bank7:9152): shared types (< 0x10) use the common
@@ -8372,6 +8373,7 @@ static void contra_rom_clear_enemy(ContraCore *core, uint8_t x)
     core->ram[CONTRA_RAM_ENEMY_TYPE + x] = 0u;
     core->ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0u;
     core->l2_structure_tile[x] = 0u;
+    core->l2_supertile[x] = 0xFFu;
     contra_rom_clear_enemy_pt_2(core, x);
 }
 
@@ -10529,6 +10531,170 @@ static void contra_rom_indoor_roller_gen_routine_01(ContraCore *core, uint8_t x)
     }
 }
 
+/* ===== level-2 boss room: wall cannon (0x08) + wall plating (0x0A) ==========
+   The fortress targets (shared with the level-1 boss). Both draw as 4x4 super-
+   tiles cached in l2_supertile and re-drawn each render frame. The cannon opens,
+   fires a 3-bullet downward spread, and closes on a loop; the 4 platings are the
+   shields -- each destroyed plating bumps WALL_PLATING_DESTROYED_COUNT, and once
+   all 4 are gone the boss eye wakes. (bank7:9269/9397.) */
+
+/* create_enemy_bullet_angle_a (bank7:6928-area): bullet whose quadrant is derived
+   from its 24-direction angle (type in bits 7-5, angle in bits 4-0). */
+static void contra_rom_create_enemy_bullet_angle_a(
+    ContraCore *core, uint8_t type_angle, uint8_t speed, uint8_t px, uint8_t py)
+{
+    const uint8_t btype = (uint8_t)(type_angle >> 5u);
+    const uint8_t angle = (uint8_t)(type_angle & 0x1Fu);
+    uint8_t quadrant = 0u;
+
+    if ((angle >= 0x07u) && (angle < 0x12u))
+    {
+        quadrant = 2u; /* left half */
+    }
+    if (angle >= 0x0Du)
+    {
+        quadrant = (uint8_t)(quadrant + 1u); /* upper half */
+    }
+    (void)contra_rom_create_enemy_bullet(core, btype, angle, quadrant, speed, px, py);
+}
+
+/* animate_wall_cannon (bank7:9319): show the current open/close frame super-tile
+   and set the 6-frame step delay. */
+static void contra_rom_animate_wall_cannon(ContraCore *core, uint8_t x)
+{
+    core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x06u;
+    core->l2_supertile[x] = core->ram[CONTRA_RAM_ENEMY_FRAME + x];
+}
+
+static void contra_rom_wall_cannon_routine_00(ContraCore *core, uint8_t x)
+{
+    core->ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0x08u; /* real HP held in VAR_1 */
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x50u);
+}
+
+static void contra_rom_wall_cannon_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    if (ram[CONTRA_RAM_ENEMY_ATTACK_FLAG] == 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    contra_rom_animate_wall_cannon(core, x); /* draw open frame FRAME */
+    if (ram[CONTRA_RAM_ENEMY_FRAME + x] < 0x02u)
+    {
+        ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+        return;
+    }
+    /* fully open: become hittable, queue the attack */
+    ram[CONTRA_RAM_ENEMY_HP + x] = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x04u;
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x40u);
+}
+
+static const uint8_t contra_wall_cannon_bullet_x_offset[3] = {0xF8u, 0x00u, 0x08u};
+static const uint8_t contra_wall_cannon_bullet_type_angle[3] = {0x48u, 0x46u, 0x44u};
+
+static void contra_rom_wall_cannon_routine_02(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    if (ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] - 1u);
+        if (ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] == 0u)
+        {
+            int i;
+
+            for (i = 2; i >= 0; --i) /* 3-bullet downward spread */
+            {
+                contra_rom_create_enemy_bullet_angle_a(
+                    core, contra_wall_cannon_bullet_type_angle[i], 0x07u,
+                    (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] + contra_wall_cannon_bullet_x_offset[i]),
+                    (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + 0x08u));
+            }
+        }
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = ram[CONTRA_RAM_ENEMY_HP + x]; /* save HP */
+    ram[CONTRA_RAM_ENEMY_HP + x] = 0xF1u; /* hittable but invulnerable while closing */
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x06u);
+}
+
+static void contra_rom_wall_cannon_routine_03(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    contra_rom_animate_wall_cannon(core, x); /* draw closing frame */
+    if (ram[CONTRA_RAM_ENEMY_FRAME + x] != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] - 1u);
+        return;
+    }
+    /* fully closed: wait (longer vs a weaker weapon), then reopen */
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (ram[CONTRA_RAM_PLAYER_WEAPON_STRENGTH] < 0x02u) ? 0xC0u : 0x60u;
+    contra_rom_set_enemy_routine_to_a(core, x, 0x02u); /* -> wall_cannon_routine_01 */
+}
+
+static void contra_rom_wall_cannon_routine_04(ContraCore *core, uint8_t x)
+{
+    core->l2_supertile[x] = 0x05u; /* destroyed super-tile, then explode */
+    contra_rom_begin_enemy_explosion(core, x);
+}
+
+static void contra_rom_wall_plating_routine_00(ContraCore *core, uint8_t x)
+{
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x80u);
+}
+
+static void contra_rom_wall_plating_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x04u;
+    core->l2_supertile[x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 0x03u); /* deploy frame */
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+    if (ram[CONTRA_RAM_ENEMY_FRAME + x] < 0x02u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_HP + x] = 0x0Au; /* now a destructible target */
+    contra_rom_advance_enemy_routine(core, x); /* -> routine_02 (idle target) */
+}
+
+static void contra_rom_wall_plating_routine_03(ContraCore *core, uint8_t x)
+{
+    core->l2_supertile[x] = 0x05u; /* destroyed super-tile, then explode */
+    core->ram[CONTRA_RAM_WALL_PLATING_DESTROYED_COUNT] =
+        (uint8_t)(core->ram[CONTRA_RAM_WALL_PLATING_DESTROYED_COUNT] + 1u);
+    contra_rom_begin_enemy_explosion(core, x);
+}
+
 /* --- boss bomb turret (enemy type 0x10), bank0.asm --- */
 /* super-tile per (recoil state VAR_1: 0 idle / 2 firing) and background variant
    (attr bit0: wall vs jungle), interleaved. */
@@ -10782,6 +10948,27 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 default: break; /* hit/explosion via the 0xFE actor (flag cleared there) */
             }
             break;
+        case 0x08u: /* boss-room wall cannon (triple cannon) */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_wall_cannon_routine_00(core, x); break;
+                case 0x02u: contra_rom_wall_cannon_routine_01(core, x); break;
+                case 0x03u: contra_rom_wall_cannon_routine_02(core, x); break;
+                case 0x04u: contra_rom_wall_cannon_routine_03(core, x); break;
+                case 0x05u: contra_rom_wall_cannon_routine_04(core, x); break;
+                default: break; /* explosion via the 0xFE actor */
+            }
+            break;
+        case 0x0Au: /* boss-room wall plating */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_wall_plating_routine_00(core, x); break;
+                case 0x02u: contra_rom_wall_plating_routine_01(core, x); break;
+                case 0x03u: break; /* routine_02: idle, just a target */
+                case 0x04u: contra_rom_wall_plating_routine_03(core, x); break;
+                default: break; /* explosion via the 0xFE actor */
+            }
+            break;
         case 0x19u: /* indoor soldier generator */
             switch (routine)
             {
@@ -10922,16 +11109,28 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
         if (hp == 0u)
         {
             /* set_destroyed_enemy_routine (bank7:7977): a killed enemy routes to
-               its type's destroyed routine. The level-2 wall turret/core both use
-               routine_04 (RAM index 5) as that "hit" routine -- it runs the
-               plating/destruction animation and (for the core) clears the room
-               and explodes once the plating is gone. Other types take the generic
-               explosion actor directly. */
+               its type's destroyed routine (enemy_destroyed_routine tables) rather
+               than always exploding. The cases we cover (RAM routine value =
+               nibble+1 from those tables): wall turret/core 0x13/0x14 -> 5
+               (their routine_04 plating/destruction); boss-room wall cannon 0x08
+               -> 5 (routine_04 destroyed tile); wall plating 0x0A -> 4 (routine_03
+               destroyed, bumps the plating count); level-2 boss eye 0x10 -> 4
+               (routine_03 dec real HP). Everything else takes the explosion actor. */
             const uint8_t dead_type = ram[CONTRA_RAM_ENEMY_TYPE + slot];
+            const bool is_l2 = (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u);
+            uint8_t dest_routine = 0u;
 
-            if ((dead_type == 0x13u) || (dead_type == 0x14u))
+            if ((dead_type == 0x13u) || (dead_type == 0x14u) || (dead_type == 0x08u))
             {
-                contra_rom_set_enemy_routine_to_a(core, slot, 0x05u);
+                dest_routine = 0x05u;
+            }
+            else if ((dead_type == 0x0Au) || (is_l2 && (dead_type == 0x10u)))
+            {
+                dest_routine = 0x04u;
+            }
+            if (dest_routine != 0u)
+            {
+                contra_rom_set_enemy_routine_to_a(core, slot, dest_routine);
                 return;
             }
             contra_rom_begin_enemy_explosion(core, slot); /* TODO: award score */
@@ -12285,22 +12484,34 @@ static void contra_render_level_2_wall_structures(ContraCore *core)
         const uint8_t sx = (uint8_t)slot;
         const uint8_t type = core->ram[CONTRA_RAM_ENEMY_TYPE + sx];
         const uint8_t tile = core->l2_structure_tile[sx];
+        const uint8_t supertile = core->l2_supertile[sx];
 
-        if ((core->ram[CONTRA_RAM_ENEMY_ROUTINE + sx] == 0u) || (tile == 0u))
+        if (core->ram[CONTRA_RAM_ENEMY_ROUTINE + sx] == 0u)
         {
             continue;
         }
         /* 0xFE = a killed structure mid-explosion: keep its last (destroyed) tile
-           on the wall under the explosion sprite until the room reloads. */
-        if ((type != 0x13u) && (type != 0x14u) && (type != 0xFEu))
+           on the wall under the explosion sprite until the room reloads. The
+           core/turret draw a 2x2 tile-animation block; the boss-room cannon and
+           plating draw a 4x4 super-tile. */
+        if ((tile != 0u) && ((type == 0x13u) || (type == 0x14u) || (type == 0xFEu)))
         {
-            continue;
+            contra_render_level_2_tile_animation(
+                core,
+                (int)core->ram[CONTRA_RAM_ENEMY_X_POS + sx],
+                (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + sx],
+                tile);
         }
-        contra_render_level_2_tile_animation(
-            core,
-            (int)core->ram[CONTRA_RAM_ENEMY_X_POS + sx],
-            (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + sx],
-            tile);
+        if ((supertile != 0xFFu) && ((type == 0x08u) || (type == 0x0Au) || (type == 0xFEu)))
+        {
+            const int scroll_offset = (int)core->ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET];
+            const int ex = (int)core->ram[CONTRA_RAM_ENEMY_X_POS + sx];
+            const int ey = (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + sx];
+            const int aligned_x = (((ex - 12) + scroll_offset) & ~7) - scroll_offset;
+            const int aligned_y = (ey - 12) & ~7;
+
+            contra_render_level_2_overlay_supertile(core, aligned_x, aligned_y, supertile);
+        }
     }
 }
 
