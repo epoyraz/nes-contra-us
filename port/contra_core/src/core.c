@@ -9553,9 +9553,100 @@ static void contra_rom_exe_all_enemy_routine(ContraCore *core)
     }
 }
 
+/* Faithful level-2 (indoor base) enemy system, gated independently of level 1
+   so level 2 stays on the invented path until its enemies/wall-core are ported. */
+#ifndef CONTRA_USE_ROM_ENEMY_SYSTEM_L2
+#define CONTRA_USE_ROM_ENEMY_SYSTEM_L2 0
+#endif
+
+/* level_2_enemy_screen_* (bank2.asm:2361): each indoor room is a "cores to
+   destroy" count, then enemy triples {pos, type(+pos-adjust flags), attrs},
+   0xFF-terminated. pos = (hi nibble = Y, lo nibble = X) scaled x16; type byte
+   bit7 -> +7 Y, bit6 -> +7 X. Types: 0x13 wall turret, 0x14 wall core,
+   0x19 soldier generator, 0x1A roller generator, plus the room-05 boss set. */
+static const uint8_t contra_l2_enemy_screen_00[] = {0x01u, 0x11u, 0x19u, 0x00u, 0x68u, 0x94u, 0x03u, 0xFFu};
+static const uint8_t contra_l2_enemy_screen_01[] = {
+    0x01u, 0x11u, 0x59u, 0x00u, 0x66u, 0xD4u, 0x03u, 0x69u, 0xD3u, 0x00u, 0xFFu};
+static const uint8_t contra_l2_enemy_screen_02[] = {
+    0x01u, 0x11u, 0x59u, 0x00u, 0x78u, 0x14u, 0x03u, 0x66u, 0xD3u, 0x00u, 0x69u, 0xD3u, 0x00u, 0xFFu};
+static const uint8_t contra_l2_enemy_screen_03[] = {
+    0x01u, 0x11u, 0x59u, 0x00u, 0x11u, 0x1Au, 0x00u, 0x58u, 0x93u, 0x00u, 0x68u, 0x94u, 0x03u, 0xFFu};
+static const uint8_t contra_l2_enemy_screen_04[] = {
+    0x01u, 0x11u, 0x59u, 0x00u, 0x68u, 0x94u, 0x0Bu, 0x66u, 0xD3u, 0x00u,
+    0x69u, 0xD3u, 0x00u, 0x58u, 0x13u, 0x00u, 0xFFu};
+static const uint8_t contra_l2_enemy_screen_05[] = {
+    0x01u, 0x48u, 0x10u, 0x00u, 0x65u, 0x08u, 0x00u, 0x68u, 0x0Au, 0x01u, 0x6Bu, 0x08u, 0x00u,
+    0x95u, 0x0Au, 0x00u, 0x98u, 0x0Au, 0x00u, 0x9Bu, 0x0Au, 0x00u, 0xFFu};
+static const uint8_t *const contra_l2_enemy_screen_tbl[6] = {
+    contra_l2_enemy_screen_00, contra_l2_enemy_screen_01, contra_l2_enemy_screen_02,
+    contra_l2_enemy_screen_03, contra_l2_enemy_screen_04, contra_l2_enemy_screen_05};
+
+/* load_enemy_indoor_level (bank2.asm): on room entry, clear all slots and load
+   the whole room's enemy set at once (indoor levels are room-based, not
+   scroll-triggered), setting WALL_CORE_REMAINING from the first byte. */
+static void contra_rom_load_indoor_enemy_data(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t screen = ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER];
+    const uint8_t *data;
+    size_t y;
+    int slot;
+
+    if (ram[CONTRA_RAM_ENEMY_SCREEN_READ_OFFSET] != 0u)
+    {
+        return; /* already loaded this room */
+    }
+    ram[CONTRA_RAM_ENEMY_SCREEN_READ_OFFSET] = 1u;
+    ram[CONTRA_RAM_INDOOR_ENEMY_ATTACK_COUNT] = 0u;
+    ram[CONTRA_RAM_WALL_PLATING_DESTROYED_COUNT] = 0u;
+    ram[CONTRA_RAM_INDOOR_RED_SOLDIER_CREATED] = 0u;
+    ram[CONTRA_RAM_GRENADE_LAUNCHER_FLAG] = 0u;
+    for (slot = 0x0F; slot >= 0; --slot)
+    {
+        contra_rom_clear_enemy(core, (uint8_t)slot);
+    }
+    if (screen >= 6u)
+    {
+        return;
+    }
+    data = contra_l2_enemy_screen_tbl[screen];
+    if (data[0] == 0xFFu)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_WALL_CORE_REMAINING] = data[0];
+    y = 1u;
+    for (slot = 0x0F; slot >= 0; --slot)
+    {
+        const uint8_t pos = data[y];
+        uint8_t type_byte;
+        uint8_t sx;
+
+        if (pos == 0xFFu)
+        {
+            break;
+        }
+        type_byte = data[y + 1u];
+        sx = (uint8_t)slot;
+        ram[CONTRA_RAM_ENEMY_TYPE + sx] = (uint8_t)(type_byte & 0x3Fu);
+        contra_rom_initialize_enemy(core, sx);
+        ram[CONTRA_RAM_ENEMY_Y_POS + sx] =
+            (uint8_t)((pos & 0xF0u) + (((type_byte & 0x80u) != 0u) ? 0x07u : 0x00u));
+        ram[CONTRA_RAM_ENEMY_X_POS + sx] =
+            (uint8_t)((uint8_t)(pos << 4u) + (((type_byte & 0x40u) != 0u) ? 0x07u : 0x00u));
+        ram[CONTRA_RAM_ENEMY_ATTRIBUTES + sx] = data[y + 2u];
+        y += 3u;
+    }
+}
+
 static void contra_run_level_enemy_logic(ContraCore *core)
 {
     contra_load_bank_3_handle_scroll(core);
+    if (CONTRA_USE_ROM_ENEMY_SYSTEM_L2 && (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u))
+    {
+        /* faithful level-2 indoor spawn (work in progress) */
+        contra_rom_load_indoor_enemy_data(core);
+    }
     if (CONTRA_USE_ROM_ENEMY_SYSTEM && (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0u))
     {
         /* faithful real-RAM enemy system (level 1, work in progress) */
