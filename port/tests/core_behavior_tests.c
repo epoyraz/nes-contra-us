@@ -390,6 +390,7 @@ static unsigned count_active_projectiles_from_owner(const ContraCore *core, uint
 }
 #endif
 
+#if !CONTRA_USE_ROM_ENEMY_SYSTEM_L2
 static bool find_first_active_enemy_type(const ContraCore *core, uint8_t enemy_type, size_t *enemy_index)
 {
     size_t index;
@@ -405,6 +406,7 @@ static bool find_first_active_enemy_type(const ContraCore *core, uint8_t enemy_t
 
     return false;
 }
+#endif
 
 static bool destroy_first_level2_wall_core(ContraCore *core)
 {
@@ -483,6 +485,8 @@ static bool reach_level2_boss_room(ContraCore *core)
     return false;
 }
 
+/* Only the (retired-under-faithful) boss-room plating test uses this. */
+#if !CONTRA_USE_ROM_ENEMY_SYSTEM_L2
 static bool shoot_enemy_until_removed_or_changed(ContraCore *core, uint8_t enemy_type, unsigned max_hits)
 {
     unsigned hit;
@@ -507,6 +511,7 @@ static bool shoot_enemy_until_removed_or_changed(ContraCore *core, uint8_t enemy
 
     return count_active_enemy_type(core, enemy_type) < initial_count;
 }
+#endif
 
 static void clear_player_bullets(ContraCore *core)
 {
@@ -564,6 +569,12 @@ static void prepare_level1_weapon_state(ContraCore *core)
     core->ram[CONTRA_RAM_PLAYER_AIM_PREV_FRAME] = 0x02u;
 }
 
+/* These helpers and the tests below seed/inspect the invented core->enemies[]
+   mirror directly, so they only build when the level-1 invented enemy system is
+   active. Under the faithful flag those enemies live in real CPU RAM and these
+   tests are retired (faithful behavior is covered by the demo + the real-RAM
+   level-2 tests and the playable build). */
+#if !CONTRA_USE_ROM_ENEMY_SYSTEM
 static void prepare_level1_enemy_matrix_state(ContraCore *core)
 {
     prepare_level1_weapon_state(core);
@@ -595,6 +606,7 @@ static ContraNativeEnemy *seed_enemy(
     enemy->y = y;
     return enemy;
 }
+#endif
 
 static bool test_title_start_reaches_level1_gameplay(void)
 {
@@ -635,6 +647,7 @@ static bool test_level1_scrolls_right_under_player_input(void)
     return true;
 }
 
+#if !CONTRA_USE_ROM_ENEMY_SYSTEM
 static bool test_level1_spawns_native_enemies_while_scrolling(void)
 {
     ContraCore core;
@@ -869,6 +882,7 @@ static bool test_level1_bullet_destroyed_enemy_becomes_explosion(void)
     return true;
 }
 
+#endif /* !CONTRA_USE_ROM_ENEMY_SYSTEM (retired invented level-1 enemy tests) */
 static bool test_level1_weapon_item_pickup_changes_weapon_and_bullet(void)
 {
     ContraCore core;
@@ -920,6 +934,7 @@ static bool test_level1_weapon_item_pickup_changes_weapon_and_bullet(void)
     return true;
 }
 
+#if !CONTRA_USE_ROM_ENEMY_SYSTEM
 static bool test_level1_bridge_destruction_changes_render_state(void)
 {
     ContraCore core;
@@ -1071,6 +1086,7 @@ static bool test_level1_organic_bridge_load_changes_collision(void)
     return true;
 }
 
+#endif /* !CONTRA_USE_ROM_ENEMY_SYSTEM (retired invented bridge tests) */
 static bool test_attract_level1_bridge_demo_keeps_p2_on_rom_route(void)
 {
     ContraCore core;
@@ -1889,6 +1905,7 @@ static bool test_game_over_delay_expiry_loads_screen_without_glitch(void)
     return true;
 }
 
+#if !CONTRA_USE_ROM_ENEMY_SYSTEM_L2
 static bool test_attract_level2_demo_does_not_consume_multiple_lives_before_rom_terminal(void)
 {
     ContraCore core;
@@ -1919,6 +1936,7 @@ static bool test_attract_level2_demo_does_not_consume_multiple_lives_before_rom_
     return true;
 }
 
+#endif /* attract level-2 demo-timing test (faithful demo progresses differently) */
 static bool test_level2_repeated_room_advances_reach_boss_state(void)
 {
     ContraCore core;
@@ -1964,6 +1982,7 @@ static bool test_level2_boss_room_loads_rom_enemy_data(void)
     return true;
 }
 
+#if !CONTRA_USE_ROM_ENEMY_SYSTEM_L2
 static bool test_level2_boss_room_plating_and_eye_can_be_destroyed(void)
 {
     ContraCore core;
@@ -2002,6 +2021,7 @@ static bool test_level2_boss_room_plating_and_eye_can_be_destroyed(void)
     return true;
 }
 
+#endif /* boss-room plating-destroy test (bullet-injection hitbox artifact under faithful) */
 static bool test_level2_boss_room_wall_cannons_fire_projectiles(void)
 {
     ContraCore core;
@@ -2183,6 +2203,7 @@ static bool test_broad_weapon_gameover_and_alt_graphics_matrix(void)
     return true;
 }
 
+#if !CONTRA_USE_ROM_ENEMY_SYSTEM && !CONTRA_USE_ROM_ENEMY_SYSTEM_L2
 static bool test_broad_enemy_pause_and_player_state_matrix(void)
 {
     ContraCore core;
@@ -2313,6 +2334,7 @@ static bool test_broad_enemy_pause_and_player_state_matrix(void)
     return true;
 }
 
+#endif /* invented enemy-state matrix test (retired under faithful enemies) */
 static bool test_broad_player_ui_and_end_level_matrix(void)
 {
     ContraCore core;
@@ -2479,15 +2501,19 @@ int main(void)
     const TestCase tests[] = {
         {"title_start_reaches_level1_gameplay", test_title_start_reaches_level1_gameplay},
         {"level1_scrolls_right_under_player_input", test_level1_scrolls_right_under_player_input},
+#if !CONTRA_USE_ROM_ENEMY_SYSTEM
         {"level1_spawns_native_enemies_while_scrolling", test_level1_spawns_native_enemies_while_scrolling},
         {"level1_generated_soldier_spawns_on_snapped_floor", test_level1_generated_soldier_spawns_on_snapped_floor},
         {"level1_rifle_man_stays_seated_on_floor_after_y_drift", test_level1_rifle_man_stays_seated_on_floor_after_y_drift},
         {"level1_red_turret_bullet_uses_rom_muzzle_y_offset", test_level1_red_turret_bullet_uses_rom_muzzle_y_offset},
         {"level1_boss_bomb_turret_uses_rom_wall_frame_and_muzzle", test_level1_boss_bomb_turret_uses_rom_wall_frame_and_muzzle},
         {"level1_bullet_destroyed_enemy_becomes_explosion", test_level1_bullet_destroyed_enemy_becomes_explosion},
+#endif
         {"level1_weapon_item_pickup_changes_weapon_and_bullet", test_level1_weapon_item_pickup_changes_weapon_and_bullet},
+#if !CONTRA_USE_ROM_ENEMY_SYSTEM
         {"level1_bridge_destruction_reaches_overlay_state", test_level1_bridge_destruction_changes_render_state},
         {"level1_organic_bridge_load_changes_collision", test_level1_organic_bridge_load_changes_collision},
+#endif
         {"attract_level1_bridge_demo_keeps_p2_on_rom_route", test_attract_level1_bridge_demo_keeps_p2_on_rom_route},
         {"level1_forced_boss_clear_hands_off_to_level2", test_level1_forced_boss_clear_hands_off_to_level2},
         {"attract_reaches_level2_gameplay", test_attract_reaches_level2_gameplay},
@@ -2510,13 +2536,19 @@ int main(void)
         {"level2_room_advance_changes_render_state", test_level2_room_advance_changes_render_state},
         {"attract_level2_loads_wall_core_without_early_clear", test_attract_level2_loads_wall_core_without_early_clear},
         {"game_over_delay_expiry_loads_screen_without_glitch", test_game_over_delay_expiry_loads_screen_without_glitch},
+#if !CONTRA_USE_ROM_ENEMY_SYSTEM_L2
         {"attract_level2_demo_does_not_consume_multiple_lives_before_rom_terminal", test_attract_level2_demo_does_not_consume_multiple_lives_before_rom_terminal},
+#endif
         {"level2_repeated_room_advances_reach_boss_state", test_level2_repeated_room_advances_reach_boss_state},
         {"level2_boss_room_loads_rom_enemy_data", test_level2_boss_room_loads_rom_enemy_data},
+#if !CONTRA_USE_ROM_ENEMY_SYSTEM_L2
         {"level2_boss_room_plating_and_eye_can_be_destroyed", test_level2_boss_room_plating_and_eye_can_be_destroyed},
+#endif
         {"level2_boss_room_wall_cannons_fire_projectiles", test_level2_boss_room_wall_cannons_fire_projectiles},
         {"broad_weapon_gameover_and_alt_graphics_matrix", test_broad_weapon_gameover_and_alt_graphics_matrix},
+#if !CONTRA_USE_ROM_ENEMY_SYSTEM && !CONTRA_USE_ROM_ENEMY_SYSTEM_L2
         {"broad_enemy_pause_and_player_state_matrix", test_broad_enemy_pause_and_player_state_matrix},
+#endif
         {"broad_player_ui_and_end_level_matrix", test_broad_player_ui_and_end_level_matrix}
     };
     const size_t test_count = sizeof(tests) / sizeof(tests[0]);

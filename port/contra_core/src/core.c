@@ -103,9 +103,10 @@
 
 /* Faithful real-RAM enemy system toggle (see the block before
    contra_run_level_enemy_logic). Defined here too so render code earlier in the
-   file can gate on it. Default 0 keeps the working invented layer. */
+   file can gate on it. Default 1: the faithful real-RAM enemy system is the active
+   path; build with -DCONTRA_USE_ROM_ENEMY_SYSTEM=0 for the old invented layer. */
 #ifndef CONTRA_USE_ROM_ENEMY_SYSTEM
-#define CONTRA_USE_ROM_ENEMY_SYSTEM 0
+#define CONTRA_USE_ROM_ENEMY_SYSTEM 1
 #endif
 
 static void contra_render_level_1_nametable_update_supertile(
@@ -8125,10 +8126,10 @@ static void contra_set_frame_scroll_draw_player_bullets(ContraCore *core)
    It is built behind CONTRA_USE_ROM_ENEMY_SYSTEM (default 0) so each piece can
    land and be reviewed without disturbing the working invented layer until the
    replacement (spawn -> dispatch -> per-type routines -> render -> collision)
-   is complete and validated. Define it to 1 to exercise the new spawn.
+   is complete and validated. Default 1 (faithful); the first definition above wins.
    --------------------------------------------------------------------------- */
 #ifndef CONTRA_USE_ROM_ENEMY_SYSTEM
-#define CONTRA_USE_ROM_ENEMY_SYSTEM 0
+#define CONTRA_USE_ROM_ENEMY_SYSTEM 1
 #endif
 
 /* Level 1 scripted enemy data, faithful to level_1_enemy_screen_* (bank2.asm).
@@ -12972,10 +12973,11 @@ static void contra_rom_exe_all_enemy_routine(ContraCore *core)
     }
 }
 
-/* Faithful level-2 (indoor base) enemy system, gated independently of level 1
-   so level 2 stays on the invented path until its enemies/wall-core are ported. */
+/* Faithful level-2 (indoor base) enemy system, gated independently of level 1.
+   Default 1: the faithful real-RAM level-2 enemies are the active path; build with
+   -DCONTRA_USE_ROM_ENEMY_SYSTEM_L2=0 for the old invented layer. */
 #ifndef CONTRA_USE_ROM_ENEMY_SYSTEM_L2
-#define CONTRA_USE_ROM_ENEMY_SYSTEM_L2 0
+#define CONTRA_USE_ROM_ENEMY_SYSTEM_L2 1
 #endif
 
 /* level_2_enemy_screen_* (bank2.asm:2361): each indoor room is a "cores to

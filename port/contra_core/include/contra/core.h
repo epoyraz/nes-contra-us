@@ -5,6 +5,17 @@
 
 #include "contra/ram.h"
 
+/* Enemy-system selection, shared by the core and the tests so both translation
+   units agree. Default 1: the faithful real-RAM enemy port is the active path.
+   Override on the compiler command line with -DCONTRA_USE_ROM_ENEMY_SYSTEM=0 and
+   -DCONTRA_USE_ROM_ENEMY_SYSTEM_L2=0 to build the legacy invented enemy layer. */
+#ifndef CONTRA_USE_ROM_ENEMY_SYSTEM
+#define CONTRA_USE_ROM_ENEMY_SYSTEM 1
+#endif
+#ifndef CONTRA_USE_ROM_ENEMY_SYSTEM_L2
+#define CONTRA_USE_ROM_ENEMY_SYSTEM_L2 1
+#endif
+
 typedef struct ContraInputSnapshot
 {
     uint8_t player[2];
