@@ -12201,8 +12201,13 @@ static void contra_rom_flying_capsule_routine_02(ContraCore *core, uint8_t x)
 
 /* destroy_all_enemies (bank7:8096): set every live, damageable enemy to its
    destroyed routine -- here the shared 0xFE explosion actor -- skipping the pill
-   box (0x02), flying capsule (0x03), and no-damage (HP 0xF0) enemies. */
-static void contra_rom_destroy_all_enemies(ContraCore *core)
+   box (0x02), flying capsule (0x03), and no-damage (HP 0xF0) enemies. keep_slot is
+   the caller's own enemy slot (the boss door running boss_defeated_routine, or the
+   falcon item), which is preserved: the ROM routes it via set_destroyed_enemy_
+   routine, a no-op there since its destroyed routine is <= its current routine, so
+   it keeps running its own cascade instead of becoming an explosion. Pass -1 for
+   no exception. */
+static void contra_rom_destroy_all_enemies(ContraCore *core, int keep_slot)
 {
     int s;
 
@@ -12211,7 +12216,8 @@ static void contra_rom_destroy_all_enemies(ContraCore *core)
         const uint8_t ss = (uint8_t)s;
         const uint8_t type = core->ram[CONTRA_RAM_ENEMY_TYPE + ss];
 
-        if ((core->ram[CONTRA_RAM_ENEMY_ROUTINE + ss] == 0u) ||
+        if ((s == keep_slot) ||
+            (core->ram[CONTRA_RAM_ENEMY_ROUTINE + ss] == 0u) ||
             (core->ram[CONTRA_RAM_ENEMY_SPRITES + ss] == 0u) ||
             (type == 0x02u) || (type == 0x03u) ||
             (core->ram[CONTRA_RAM_ENEMY_HP + ss] == 0xF0u))
@@ -12257,7 +12263,7 @@ static void contra_rom_pick_up_weapon_item(ContraCore *core, uint8_t slot, uint8
     }
     else
     {
-        contra_rom_destroy_all_enemies(core); /* falcon */
+        contra_rom_destroy_all_enemies(core, (int)slot); /* falcon (item slot cleared below) */
         ram[CONTRA_RAM_FALCON_FLASH_TIMER] = 0x20u;
         contra_rom_clear_enemy(core, slot);
         return;
@@ -12479,6 +12485,112 @@ static void contra_rom_enemy_routine_explosion_step(ContraCore *core, uint8_t x)
         explosion_type_00[(ram[CONTRA_RAM_ENEMY_FRAME + x] < 3u) ? ram[CONTRA_RAM_ENEMY_FRAME + x] : 0u];
 }
 
+/* --- level-1 fortress boss door (enemy type 0x11), bank0.asm:2184 ---
+   The plated door is the level-1 boss target. boss_wall_plated_door_routine_ptr_tbl:
+     RAM 1  boss_wall_plated_door_routine_00   siren, advance
+     RAM 2  add_scroll_to_enemy_pos            wait here, killable
+     RAM 3  boss_defeated_routine              the set_destroyed_enemy_routine target
+     RAM 4  enemy_routine_explosion
+     RAM 5  shared_enemy_routine_clear_sprite
+     RAM 6  boss_wall_plated_door_routine_05   arm the tunnel-open sequence
+     RAM 7  boss_wall_plated_door_routine_06   blast the tunnel super-tiles open
+   When the player shoots the door to 0 HP, set_destroyed_enemy_routine routes it
+   to RAM routine 3 (enemy_destroyed_routine_00 byte $33, door = low nibble = 3),
+   which sets BOSS_DEFEATED_FLAG + the auto-move delay, wipes the other enemies,
+   then cascades through the explosion and tunnel-open. */
+
+/* boss_wall_plated_door_routine_00 (bank0:2194): play the jungle-boss siren and
+   advance to the wait/killable routine. */
+static void contra_rom_boss_door_routine_00(ContraCore *core, uint8_t x)
+{
+    contra_play_sound(core, 0x1Bu); /* sound_1b: level-1 boss siren */
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+/* boss_defeated_routine (bank7:7536): init the APU, play the boss-destroyed sound,
+   set BOSS_DEFEATED_FLAG + the auto-move delay (level_boss_defeated), destroy all
+   the other enemies, then fall through to enemy_routine_init_explosion (hide the
+   door and advance to its explosion routine). */
+static void contra_rom_boss_door_routine_02(ContraCore *core, uint8_t x)
+{
+    contra_init_apu_channels(core);
+    contra_play_sound(core, 0x57u);                    /* sound_57: boss destroyed */
+    core->ram[CONTRA_RAM_DELAY_TIME_LOW_BYTE] = 0xFFu; /* auto-move delay */
+    core->ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] = 0x01u;
+    contra_rom_destroy_all_enemies(core, (int)x); /* keep the door's own slot alive */
+    contra_rom_enemy_routine_init_explosion_step(core, x); /* -> RAM routine 4 */
+}
+
+/* shared_enemy_routine_clear_sprite (bank7): blank the sprite, advance. */
+static void contra_rom_boss_door_routine_clear_sprite(ContraCore *core, uint8_t x)
+{
+    core->ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0u; /* set_sprite_0 */
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+/* boss_wall_plated_door_routine_05 (bank0:2200): arm the tunnel-blast loop. */
+static void contra_rom_boss_door_routine_05(ContraCore *core, uint8_t x)
+{
+    core->ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0x00u;
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x08u);
+}
+
+/* tunnel super-tiles (bank0:2257), per-cell {y,x} move offsets (bank0:2245, the
+   8th entry's 0xFF terminates), and collision codes (bank0:2261). */
+static const uint8_t contra_door_tunnel_supertile_tbl[8] = {
+    0x1Eu, 0x22u, 0x1Fu, 0x23u, 0x20u, 0x24u, 0x21u, 0x25u};
+static const int8_t contra_door_tunnel_offset_tbl[8][2] = {
+    {(int8_t)0xF0, (int8_t)0xF0}, {0x20, 0x00}, {(int8_t)0xE0, 0x20}, {0x20, 0x00},
+    {(int8_t)0xE0, 0x20}, {0x20, 0x00}, {(int8_t)0xE0, 0x20}, {0x20, 0x00}};
+
+/* boss_wall_plated_door_routine_06 (bank0:2207): every 8th frame stamp the next
+   tunnel super-tile and pop an explosion at the door position; on the in-between
+   tick move the door to the next tunnel cell; after the 8 cells, remove the door.
+   The ROM also rewrites bg collision per cell (set_supertile_bg_collision); the
+   native L1 background has no per-tile collision array (same gap the exploding
+   bridge documents), and the post-defeat auto-move + engine end-of-level handle
+   progression, so the collision rewrite is omitted. */
+static void contra_rom_boss_door_routine_06(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t delay = (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    uint8_t idx;
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = delay;
+    if (delay != 0u)
+    {
+        /* @create_tunnel_explosion: only the final tick before the next stamp
+           moves the door (or, once the offset table hits its 0xFF, removes it). */
+        if (delay != 0x01u)
+        {
+            return;
+        }
+        idx = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
+        if (idx >= 8u) /* wall_plated_door_explosion_offset_tbl terminator */
+        {
+            ram[CONTRA_RAM_DELAY_TIME_LOW_BYTE] = 0x30u;
+            ram[CONTRA_RAM_DELAY_TIME_HIGH_BYTE] = 0x00u;
+            contra_rom_clear_enemy(core, x); /* set_delay_remove_enemy */
+            return;
+        }
+        ram[CONTRA_RAM_ENEMY_Y_POS + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + (uint8_t)contra_door_tunnel_offset_tbl[idx][0]);
+        ram[CONTRA_RAM_ENEMY_X_POS + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] + (uint8_t)contra_door_tunnel_offset_tbl[idx][1]);
+        return;
+    }
+    /* delay reached 0: stamp this cell's tunnel super-tile + explosion, advance.
+       In the ROM the delay is set to 8 before the draw and a successful draw leaves
+       it alone; the native draw helper unconditionally writes delay=1 (a side effect
+       other callers rely on), so set the 8 *after* the draw for the same net result. */
+    idx = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
+    contra_rom_draw_enemy_supertile_a_set_delay(core, x, contra_door_tunnel_supertile_tbl[idx]);
+    contra_rom_create_explosion_at(
+        core, ram[CONTRA_RAM_ENEMY_X_POS + x], ram[CONTRA_RAM_ENEMY_Y_POS + x]);
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)(idx + 1u);
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x08u;
+}
+
 /* dispatch one enemy slot to its type routine by (ENEMY_TYPE, ENEMY_ROUTINE).
    Only ported types act; others hold until their routine is ported. */
 static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
@@ -12570,12 +12682,29 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 default: break; /* hit/explosion via the 0xFE actor */
             }
             break;
-        case 0x11u: /* level-2 indoor roller (level-1 0x11 = boss door, not ported) */
-            switch (routine)
+        case 0x11u:
+            if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x00u)
             {
-                case 0x01u: contra_rom_roller_routine_00(core, x); break;
-                case 0x02u: contra_rom_roller_routine_01(core, x); break;
-                default: break; /* hit/explosion via the 0xFE actor */
+                switch (routine) /* level-1 fortress boss door */
+                {
+                    case 0x01u: contra_rom_boss_door_routine_00(core, x); break;
+                    case 0x02u: contra_rom_add_scroll_to_enemy_pos(core, x); break;
+                    case 0x03u: contra_rom_boss_door_routine_02(core, x); break;
+                    case 0x04u: contra_rom_enemy_routine_explosion_step(core, x); break;
+                    case 0x05u: contra_rom_boss_door_routine_clear_sprite(core, x); break;
+                    case 0x06u: contra_rom_boss_door_routine_05(core, x); break;
+                    case 0x07u: contra_rom_boss_door_routine_06(core, x); break;
+                    default: break;
+                }
+            }
+            else
+            {
+                switch (routine) /* level-2 indoor roller */
+                {
+                    case 0x01u: contra_rom_roller_routine_00(core, x); break;
+                    case 0x02u: contra_rom_roller_routine_01(core, x); break;
+                    default: break; /* hit/explosion via the 0xFE actor */
+                }
             }
             break;
         case 0x1Au: /* indoor roller generator */
@@ -12839,6 +12968,10 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
             else if (dead_type == 0x03u)
             {
                 dest_routine = 0x03u; /* flying capsule -> routine_02 (drop weapon item) */
+            }
+            else if ((dead_type == 0x11u) && !is_l2)
+            {
+                dest_routine = 0x03u; /* L1 fortress boss door -> boss_defeated_routine */
             }
             if (dest_routine != 0u)
             {
