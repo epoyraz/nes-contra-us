@@ -14118,44 +14118,21 @@ static void contra_render_level_2_wall_core_updates(ContraCore *core, const Cont
    bank7.asm:8631 / update_nametable_tiles bank7.asm:1643.) */
 #define CONTRA_LEVEL_2_4_TILE_ANIMATION_ADDR 0x86E1u
 
-/* Palette slot the level background uses at framebuffer pixel (px, py), decoded
-   from level_screen_supertiles exactly like contra_render_level_background. The
-   wall turret/core always pass a tile-animation offset with bit 7 set
-   ("leave existing palette"), so their tiles inherit this background palette. */
-static uint8_t contra_level_screen_palette_slot_at(const ContraCore *core, int px, int py)
-{
-    const uint8_t *const ram = core->ram;
-    const size_t visible_super_rows = (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u) ? 8u : 7u;
-    const int visible_tile_rows = (int)(visible_super_rows * 4u);
-    const int origin_y = ((int)CONTRA_FRAMEBUFFER_HEIGHT > (visible_tile_rows * 8))
-        ? ((int)CONTRA_FRAMEBUFFER_HEIGHT - (visible_tile_rows * 8))
-        : 0;
-    int tile_col = px >> 3;
-    int tile_row = (py - origin_y) >> 3;
-    const uint16_t palette_ptr = (uint16_t)(
-        (uint16_t)ram[CONTRA_RAM_LEVEL_SUPERTILE_PALETTE_DATA] |
-        ((uint16_t)ram[CONTRA_RAM_LEVEL_SUPERTILE_PALETTE_DATA + 1u] << 8u));
-    size_t supertile_offset;
-    uint8_t supertile_index;
-    uint8_t supertile_palette;
-    uint8_t palette_shift;
-
-    if (tile_col < 0) { tile_col = 0; }
-    if (tile_col > 31) { tile_col = 31; }
-    if (tile_row < 0) { tile_row = 0; }
-    if (tile_row >= visible_tile_rows) { tile_row = visible_tile_rows - 1; }
-
-    supertile_offset = ((size_t)(tile_row >> 2) * 8u) + (size_t)(tile_col >> 2);
-    supertile_index = core->level_screen_supertiles[supertile_offset & (CONTRA_LEVEL_SCREEN_SUPERTILES_SIZE - 1u)];
-    supertile_palette = contra_rom_read_u8(3u, (uint16_t)(palette_ptr + supertile_index));
-    palette_shift = (uint8_t)(((tile_row & 0x02) << 1) | (tile_col & 0x02));
-    return (uint8_t)((supertile_palette >> palette_shift) & 0x03u);
-}
-
 /* Draw the 2x2 level_2_4_tile_animation block for offset anim_offset (0x80..0x8a)
    at the enemy position, as a framebuffer overlay. Mirrors the placement of
    update_enemy_nametable_tiles (top-left = enemy pos - 4, rounded to the 8px tile
-   grid in world space so it lines up with the back wall). */
+   grid in world space so it lines up with the back wall).
+
+   Palette: the wall turret/core write their attribute quadrant when they draw
+   (update_nametable_tiles, bank7.asm:1676) by merging the tile_animation entry's
+   first byte (the "row flag") into the super-tile palette for that quadrant. For
+   every level_2_4_tile_animation entry that first byte is $00, so the structure's
+   quadrant is forced to background palette slot 0 -- which is why the metallic
+   turret/core stands out against the blue (slot 3) back wall. The open frames
+   inherit this with bit 7 set ("leave existing palette"), so they stay slot 0
+   too. We therefore draw the whole block at slot 0 rather than inheriting the
+   surrounding wall's palette (which would tint the turret blue and wash out the
+   head). */
 static void contra_render_level_2_tile_animation(
     ContraCore *core,
     int enemy_x,
@@ -14186,9 +14163,7 @@ static void contra_render_level_2_tile_animation(
             const int px = aligned_x + (int)(tile_x * 8u);
             const int py = aligned_y + (int)(tile_y * 8u);
 
-            contra_draw_background_tile(
-                core, px, py, pattern_index,
-                contra_level_screen_palette_slot_at(core, px, py));
+            contra_draw_background_tile(core, px, py, pattern_index, 0u);
         }
     }
 }
