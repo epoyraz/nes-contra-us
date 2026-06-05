@@ -9209,7 +9209,10 @@ static void contra_rom_begin_enemy_explosion(ContraCore *core, uint8_t x)
     ram[CONTRA_RAM_ENEMY_ROUTINE + x] = 0x01u;
     ram[CONTRA_RAM_ENEMY_FRAME + x] = 0x00u;
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x0Au;
-    ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] | 0x80u);
+    /* enemy_routine_init_explosion (bank7:7546): ora #$81 -- set bit 7 (bullets
+       pass through) AND bit 0 (skip player-body collision), so the explosion of a
+       killed enemy can't damage the player who walks into it. */
+    ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] | 0x81u);
     ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x38u;
     ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = 0x00u;
 }
@@ -12112,7 +12115,7 @@ static void contra_rom_create_explosion_at(ContraCore *core, uint8_t px, uint8_t
     core->ram[CONTRA_RAM_ENEMY_ROUTINE + s] = 0x01u;
     core->ram[CONTRA_RAM_ENEMY_FRAME + s] = 0x00u;
     core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + s] = 0x0Au;
-    core->ram[CONTRA_RAM_ENEMY_STATE_WIDTH + s] = 0x80u;
+    core->ram[CONTRA_RAM_ENEMY_STATE_WIDTH + s] = 0x81u; /* bullets pass + no player-body collision */
     core->ram[CONTRA_RAM_ENEMY_SPRITES + s] = 0x38u;
     core->ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + s] = 0x00u;
     core->ram[CONTRA_RAM_ENEMY_Y_POS + s] = py;
