@@ -9128,6 +9128,38 @@ static void contra_rom_begin_enemy_explosion(ContraCore *core, uint8_t x)
     ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = 0x00u;
 }
 
+/* --- level-2 wall core (enemy type 0x14), bank0.asm:3143 --- */
+static const uint8_t contra_wall_core_hp_tbl[4] = {0x08u, 0x05u, 0x10u, 0x05u};
+static const uint8_t contra_wall_core_init_dmg_tile_anim_tbl[4] = {0x00u, 0x03u, 0x00u, 0x03u};
+static const uint8_t contra_core_opening_delay[4] = {0x20u, 0x80u, 0xB0u, 0xF0u};
+
+/* wall_core_routine_00 (bank0:3143): set HP, score/collision code, the
+   destruction-animation offset, and the opening delay, from the core's size +
+   plating attributes; advance to the open/expose cycle. */
+static void contra_rom_wall_core_routine_00(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t attr = ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x];
+    const uint8_t type_idx = (uint8_t)((attr >> 2u) & 0x03u);
+    const bool plated = (attr & 0x04u) != 0u;
+    uint8_t delay_idx;
+
+    if (plated)
+    {
+        ram[CONTRA_RAM_ENEMY_VAR_A + x] = 0x04u;
+        ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = 0x22u;
+    }
+    else
+    {
+        ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = 0x25u;
+    }
+    ram[CONTRA_RAM_ENEMY_HP + x] = contra_wall_core_hp_tbl[type_idx];
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = contra_wall_core_init_dmg_tile_anim_tbl[type_idx];
+    delay_idx = plated ? 0u : (uint8_t)(attr & 0x03u);
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = contra_core_opening_delay[delay_idx];
+    contra_rom_advance_enemy_routine(core, x);
+}
+
 /* --- boss bomb turret (enemy type 0x10), bank0.asm --- */
 /* super-tile per (recoil state VAR_1: 0 idle / 2 firing) and background variant
    (attr bit0: wall vs jungle), interleaved. */
@@ -9299,6 +9331,13 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x01u: contra_rom_boss_bomb_turret_routine_00(core, x); break;
                 case 0x02u: contra_rom_boss_bomb_turret_routine_01(core, x); break;
                 default: break; /* explosion handled via the kill path */
+            }
+            break;
+        case 0x14u: /* level-2 wall core */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_wall_core_routine_00(core, x); break;
+                default: break; /* open/fire/destroy/room-advance routines pending */
             }
             break;
         case 0x07u: /* red turret */
@@ -9644,7 +9683,8 @@ static void contra_run_level_enemy_logic(ContraCore *core)
     contra_load_bank_3_handle_scroll(core);
     if (CONTRA_USE_ROM_ENEMY_SYSTEM_L2 && (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u))
     {
-        /* faithful level-2 indoor spawn (work in progress) */
+        /* faithful level-2 indoor enemy system (work in progress) */
+        contra_rom_exe_all_enemy_routine(core);
         contra_rom_load_indoor_enemy_data(core);
     }
     if (CONTRA_USE_ROM_ENEMY_SYSTEM && (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0u))
