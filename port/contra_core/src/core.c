@@ -8421,6 +8421,14 @@ static void contra_rom_enable_enemy_collision(ContraCore *core, uint8_t x)
         (uint8_t)(core->ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x7Eu);
 }
 
+/* enable_bullet_enemy_collision (bank7.asm:8371): ENEMY_STATE_WIDTH &= 0x7F
+   (clear bit 7 only, so bullets hit but the body stays non-collidable). */
+static void contra_rom_enable_bullet_collision(ContraCore *core, uint8_t x)
+{
+    core->ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
+        (uint8_t)(core->ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x7Fu);
+}
+
 /* --- enemy bullets (type 0x01), bank0/bank7 --- */
 /* quadrant aim direction -> offset into the fractional-velocity table */
 static const uint8_t contra_bullet_fract_vel_dir_lookup_tbl[24] = {
@@ -11166,6 +11174,386 @@ static void contra_rom_red_turret_routine_03(ContraCore *core, uint8_t x)
     (void)contra_rom_red_turret_load_supertile(core, x);
 }
 
+/* --- rotating gun (enemy type 0x04), bank0.asm:742-970 --- */
+
+/* quadrant_aim_dir_00 (bank7:10545): within-quadrant aim nibble for a quadrant
+   split into 3 parts [#$00-#$03]; indexed [row = |dy|>>5][col = |dx|>>6], high
+   nibble used when bit5 of |dx| is clear, low nibble when set. Used by the
+   rotating gun's incremental aim (the 12-direction emerge/rotate). */
+static const uint8_t contra_quadrant_aim_dir_00[32] = {
+    0x00u, 0x00u, 0x00u, 0x00u, 0x32u, 0x11u, 0x00u, 0x00u,
+    0x32u, 0x11u, 0x11u, 0x11u, 0x32u, 0x22u, 0x11u, 0x11u,
+    0x33u, 0x22u, 0x11u, 0x11u, 0x33u, 0x22u, 0x22u, 0x11u,
+    0x33u, 0x22u, 0x22u, 0x11u, 0x33u, 0x22u, 0x22u, 0x22u};
+
+/* player_enemy_x_dist (bank7:8844 + lda_closer_distance:8885): the index (0/1) of
+   the closest normal-state player by |X distance|; non-normal players are pushed
+   to max distance (0xFE for p1, 0xFF for p2) so they're never chosen, and a tie
+   resolves to player 1. */
+static uint8_t contra_rom_player_enemy_x_dist_idx(const ContraCore *core, uint8_t x)
+{
+    const uint8_t *const ram = core->ram;
+    const uint8_t ex = ram[CONTRA_RAM_ENEMY_X_POS + x];
+    const uint8_t p0 = ram[CONTRA_RAM_SPRITE_X_POS + 0u];
+    const uint8_t p1 = ram[CONTRA_RAM_SPRITE_X_POS + 1u];
+    uint8_t d0 = (p0 >= ex) ? (uint8_t)(p0 - ex) : (uint8_t)(ex - p0);
+    uint8_t d1 = (p1 >= ex) ? (uint8_t)(p1 - ex) : (uint8_t)(ex - p1);
+
+    if (ram[CONTRA_RAM_PLAYER_STATE + 0u] != 0x01u)
+    {
+        d0 = 0xFEu;
+    }
+    if (ram[CONTRA_RAM_PLAYER_STATE + 1u] != 0x01u)
+    {
+        d1 = 0xFFu;
+    }
+    return (d1 < d0) ? 1u : 0u;
+}
+
+/* get_quadrant_aim_dir_for_player (bank7:10425): pick the within-quadrant aim
+   nibble from source (sx,sy) to player_idx; if that player isn't in a normal
+   state try the other, and if neither is, aim at screen center-bottom
+   (0x80,0xFF). Indoor levels target a fixed player Y (0xB0). *quadrant returns
+   $07 (bit0 = player above, bit1 = player left). */
+static uint8_t contra_rom_get_quadrant_aim_dir_for_player(
+    ContraCore *core, uint8_t sx, uint8_t sy, uint8_t player_idx,
+    const uint8_t *tbl, uint8_t *quadrant)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t idx = (uint8_t)(player_idx & 0x01u);
+    uint8_t tx;
+    uint8_t ty;
+
+    if (ram[CONTRA_RAM_PLAYER_STATE + idx] != 0x01u)
+    {
+        idx ^= 0x01u;
+    }
+    if (ram[CONTRA_RAM_PLAYER_STATE + idx] != 0x01u)
+    {
+        ty = 0xFFu;
+        tx = 0x80u;
+    }
+    else
+    {
+        tx = ram[CONTRA_RAM_SPRITE_X_POS + idx];
+        ty = (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u)
+            ? 0xB0u
+            : ram[CONTRA_RAM_SPRITE_Y_POS + idx];
+    }
+    return contra_rom_get_quadrant_aim_dir(sx, sy, tx, ty, tbl, quadrant);
+}
+
+/* get_rotate_dir (bank7:10236): given a within-quadrant aim nibble and the
+   quadrant ($07), reflect it across the quadrant boundaries into the full
+   direction wheel ($0c, target_out), and pick the shortest rotation from the
+   current ENEMY_VAR_1. Returns 0x00 = clockwise, 0x01 = counter-clockwise,
+   0x80 = already aimed. table_idx selects the wheel size: 0/2 -> 12 directions
+   (midway 6, max 0x0c), 1 -> 24 directions (midway 0x0c, max 0x18). */
+static uint8_t contra_rom_get_rotate_dir(
+    ContraCore *core, uint8_t x, uint8_t aim, uint8_t quadrant, uint8_t table_idx,
+    uint8_t *target_out)
+{
+    const uint8_t var1 = core->ram[CONTRA_RAM_ENEMY_VAR_1 + x];
+    const uint8_t midway = ((table_idx & 0x01u) == 0u) ? 0x06u : 0x0Cu;
+    const uint8_t max_dir = ((table_idx & 0x01u) == 0u) ? 0x0Cu : 0x18u;
+    uint8_t target = aim;
+    uint8_t reflected;
+    uint8_t wrapped = 0u;
+    uint8_t tmp;
+
+    if ((quadrant & 0x02u) != 0u)
+    {
+        target = (uint8_t)(midway - target); /* player to the left: reflect horizontally */
+    }
+    if ((quadrant & 0x01u) != 0u)
+    {
+        tmp = (uint8_t)(max_dir - target); /* player above: reflect across the x-axis */
+        target = (tmp < max_dir) ? tmp : 0u;
+    }
+    *target_out = target;
+
+    /* $0d/$0e: the current aim reflected past the midway, and whether it wrapped */
+    tmp = (uint8_t)(var1 + midway);
+    if (tmp >= max_dir)
+    {
+        wrapped = 1u;
+        tmp = (uint8_t)(tmp - max_dir);
+    }
+    reflected = tmp;
+
+    if (target == var1)
+    {
+        return 0x80u; /* already aiming there */
+    }
+    if (wrapped == 0u)
+    {
+        if (target < var1)
+        {
+            return 0x01u; /* counter-clockwise */
+        }
+        return (target >= reflected) ? 0x01u : 0x00u;
+    }
+    if (target >= var1)
+    {
+        return 0x00u; /* clockwise */
+    }
+    return (target < reflected) ? 0x00u : 0x01u;
+}
+
+/* aim_var_1_for_quadrant_aim_dir_00 (bank7:10128) + rotate_enemy_var_1 (10136):
+   step ENEMY_VAR_1 one direction toward the player and return true when it has
+   reached the target (the ROM's carry-set "aiming at player" result). */
+static bool contra_rom_aim_var_1(ContraCore *core, uint8_t x, uint8_t table_idx, uint8_t player_idx)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t max_dir = ((table_idx & 0x01u) == 0u) ? 0x0Cu : 0x18u;
+    const uint8_t *tbl = (table_idx == 0u) ? contra_quadrant_aim_dir_00 : contra_quadrant_aim_dir_01;
+    uint8_t quadrant = 0u;
+    uint8_t target = 0u;
+    uint8_t rot;
+    uint8_t v;
+
+    rot = contra_rom_get_quadrant_aim_dir_for_player(
+        core, ram[CONTRA_RAM_ENEMY_X_POS + x], ram[CONTRA_RAM_ENEMY_Y_POS + x],
+        player_idx, tbl, &quadrant);
+    rot = contra_rom_get_rotate_dir(core, x, rot, quadrant, table_idx, &target);
+
+    if ((rot & 0x80u) != 0u)
+    {
+        return true; /* no rotation needed -- already aimed */
+    }
+    v = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
+    if (rot != 0u)
+    {
+        v = (uint8_t)(v - 1u); /* counter-clockwise */
+        if ((v & 0x80u) != 0u)
+        {
+            v = (uint8_t)(max_dir - 1u); /* underflow: wrap to the top */
+        }
+    }
+    else
+    {
+        v = (uint8_t)(v + 1u); /* clockwise */
+        if (v >= max_dir)
+        {
+            v = 0u; /* wrap back to direction 0 */
+        }
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = v;
+    return (v == target);
+}
+
+/* bullet_generation (bank7:9778): asl the 12-direction aim into the 24-step
+   bullet angle, then create_enemy_bullet_if_attack_enabled -- type 0x20 (the
+   level-1 boss cannonball) always fires, everything else only when
+   ENEMY_ATTACK_FLAG is set. */
+static void contra_rom_bullet_generation(
+    ContraCore *core, uint8_t aim, uint8_t speed, uint8_t px, uint8_t py)
+{
+    const uint8_t type_angle = (uint8_t)(aim << 1u);
+
+    if (((type_angle & 0xE0u) != 0x20u) && (core->ram[CONTRA_RAM_ENEMY_ATTACK_FLAG] == 0u))
+    {
+        return;
+    }
+    contra_rom_create_enemy_bullet_angle_a(core, type_angle, speed, px, py);
+}
+
+/* draw_enemy_supertile_a_set_delay (bank7:8527): draw the level-1 background
+   super-tile at the enemy and set ANIMATION_DELAY=1 (the native draw never
+   fails, so the buffer-full retry path is unreachable). */
+static void contra_rom_draw_enemy_supertile_a_set_delay(ContraCore *core, uint8_t x, uint8_t supertile)
+{
+    contra_render_level_1_nametable_update_supertile(
+        core, (int)core->ram[CONTRA_RAM_ENEMY_X_POS + x],
+        (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + x], supertile);
+    core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u;
+}
+
+static const uint8_t contra_rotating_gun_bullets_per_attack_tbl[4] = {0x01u, 0x02u, 0x03u, 0x03u};
+static const uint8_t contra_rotating_gun_rotation_delay_tbl[4] = {0x30u, 0x28u, 0x20u, 0x18u};
+static const uint8_t contra_rotating_gun_animation_delay_tbl[4] = {0x80u, 0x60u, 0x40u, 0x30u};
+/* rotating_gun_bullet_y_offset_tbl (3 bytes) flows directly into
+   rotating_gun_bullet_x_offset_tbl (12 bytes) in the ROM, so the firing code
+   reads y_offset = tbl[aim] and x_offset = tbl[aim+3] from this 15-byte block. */
+static const uint8_t contra_rotating_gun_bullet_offset_tbl[15] = {
+    0x00u, 0x07u, 0x0Cu, 0x0Du, 0x0Cu, 0x07u, 0x00u, 0xF9u,
+    0xF4u, 0xF3u, 0xF4u, 0xF9u, 0x00u, 0x07u, 0x0Cu};
+
+/* rotating_gun_should_disable (bank0:865): track scroll, then report whether the
+   gun has scrolled into the left 10% of the screen (X < 0x18) and should retract. */
+static bool contra_rom_rotating_gun_should_disable(ContraCore *core, uint8_t x)
+{
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    return contra_rom_past_trigger_x(core, x, 0x18u);
+}
+
+/* rotating_gun_disable (bank0:811): retract by jumping to routine_05 (ROUTINE 6),
+   guarding the removed-by-scroll case like the ROM's set_enemy_routine_to_a. */
+static void contra_rom_rotating_gun_disable(ContraCore *core, uint8_t x)
+{
+    if (core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] != 0u)
+    {
+        contra_rom_set_enemy_routine_to_a(core, x, 0x06u);
+    }
+}
+
+/* rotating_gun_routine_00 (bank0:756): face left, advance. */
+static void contra_rom_rotating_gun_routine_00(ContraCore *core, uint8_t x)
+{
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    core->ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0x06u; /* aim direction = left */
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+/* rotating_gun_routine_01 (bank0:764): wait until the gun has scrolled past the
+   activation trigger (X < 0xF0), then start the opening animation. */
+static void contra_rom_rotating_gun_routine_01(ContraCore *core, uint8_t x)
+{
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    if (!contra_rom_past_trigger_x(core, x, 0xF0u))
+    {
+        return; /* not yet at the activation point */
+    }
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x08u); /* -> routine_02 */
+}
+
+/* rotating_gun_routine_02 (bank0:784): play the 3-frame opening animation (gun
+   emerges from the wall), then become bullet-collidable and advance to aim. */
+static void contra_rom_rotating_gun_routine_02(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    /* draw the next opening super-tile (offset 3 + FRAME); set_delay drops the
+       delay to 1 so the animation steps each frame. */
+    contra_rom_draw_enemy_supertile_a_set_delay(
+        core, x, (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 0x03u));
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+    if (ram[CONTRA_RAM_ENEMY_FRAME + x] < 0x03u)
+    {
+        return; /* gun not fully open yet */
+    }
+    contra_rom_enable_bullet_collision(core, x); /* STATE_WIDTH &= 0x7F */
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x08u); /* -> routine_03 */
+}
+
+/* rotating_gun_routine_03 (bank0:805): retract if scrolled off; otherwise rotate
+   the gun one step toward the player each beat, and when it lines up load the
+   per-attribute burst count and advance to fire. */
+static void contra_rom_rotating_gun_routine_03(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    bool aimed;
+    uint8_t supertile;
+    uint8_t idx;
+
+    if (contra_rom_rotating_gun_should_disable(core, x))
+    {
+        contra_rom_rotating_gun_disable(core, x);
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        contra_rotating_gun_rotation_delay_tbl[ram[CONTRA_RAM_PLAYER_WEAPON_STRENGTH] & 0x03u];
+    aimed = contra_rom_aim_var_1(core, x, 0u, contra_rom_player_enemy_x_dist_idx(core, x));
+    /* draw the gun super-tile for the new aim direction: ((VAR_1 + 6) % 12) + 5 */
+    supertile = (uint8_t)(((ram[CONTRA_RAM_ENEMY_VAR_1 + x] + 0x06u) % 12u) + 0x05u);
+    contra_rom_draw_enemy_supertile_a_set_delay(core, x, supertile);
+    if (!aimed)
+    {
+        return; /* still rotating toward the player */
+    }
+    idx = (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x03u);
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = contra_rotating_gun_bullets_per_attack_tbl[idx];
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x08u); /* -> routine_04 */
+}
+
+/* rotating_gun_routine_04 (bank0:873): fire VAR_2 bullets at the aimed direction
+   (one per 0x10-frame beat), then return to routine_03 to re-aim. */
+static void contra_rom_rotating_gun_routine_04(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t aim;
+    uint8_t bx;
+    uint8_t by;
+
+    if (contra_rom_rotating_gun_should_disable(core, x))
+    {
+        contra_rom_rotating_gun_disable(core, x);
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    aim = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
+    by = (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + contra_rotating_gun_bullet_offset_tbl[aim]);
+    bx = (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] + contra_rotating_gun_bullet_offset_tbl[aim + 3u]);
+    contra_rom_bullet_generation(core, aim, 0x04u, bx, by);
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x10u; /* delay between bullets */
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_2 + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_VAR_2 + x] != 0u)
+    {
+        return; /* more bullets in this burst */
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        contra_rotating_gun_animation_delay_tbl[ram[CONTRA_RAM_PLAYER_WEAPON_STRENGTH] & 0x03u];
+    contra_rom_set_enemy_routine_to_a(core, x, 0x04u); /* -> routine_03 */
+}
+
+/* rotating_gun_routine_05 (bank0:924): retract -- draw the closed super-tile (3)
+   and remove the enemy. */
+static void contra_rom_rotating_gun_routine_05(ContraCore *core, uint8_t x)
+{
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    contra_render_level_1_nametable_update_supertile(
+        core, (int)core->ram[CONTRA_RAM_ENEMY_X_POS + x],
+        (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + x], 0x03u);
+    contra_rom_clear_enemy(core, x); /* remove_enemy */
+}
+
+/* rotating_gun_routine_06 (bank0:933): destroyed -- restore the rock background
+   super-tile (0x16) then start the explosion actor (the ROM advances to
+   enemy_routine_init_explosion). */
+static void contra_rom_rotating_gun_routine_06(ContraCore *core, uint8_t x)
+{
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    contra_render_level_1_nametable_update_supertile(
+        core, (int)core->ram[CONTRA_RAM_ENEMY_X_POS + x],
+        (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + x], 0x16u);
+    contra_rom_begin_enemy_explosion(core, x);
+}
+
 /* dispatch one enemy slot to its type routine by (ENEMY_TYPE, ENEMY_ROUTINE).
    Only ported types act; others hold until their routine is ported. */
 static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
@@ -11329,6 +11717,19 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 default: break; /* fire/rotate/retract deferred */
             }
             break;
+        case 0x04u: /* rotating gun */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_rotating_gun_routine_00(core, x); break;
+                case 0x02u: contra_rom_rotating_gun_routine_01(core, x); break;
+                case 0x03u: contra_rom_rotating_gun_routine_02(core, x); break;
+                case 0x04u: contra_rom_rotating_gun_routine_03(core, x); break;
+                case 0x05u: contra_rom_rotating_gun_routine_04(core, x); break;
+                case 0x06u: contra_rom_rotating_gun_routine_05(core, x); break;
+                case 0x07u: contra_rom_rotating_gun_routine_06(core, x); break;
+                default: break; /* explosion via the 0xFE actor */
+            }
+            break;
         case 0x01u: /* enemy bullet */
             switch (routine)
             {
@@ -11469,6 +11870,10 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
             else if ((dead_type == 0x0Au) || (is_l2 && (dead_type == 0x10u)))
             {
                 dest_routine = 0x04u;
+            }
+            else if (dead_type == 0x04u)
+            {
+                dest_routine = 0x07u; /* rotating gun -> routine_06 (restore rock, explode) */
             }
             if (dest_routine != 0u)
             {
