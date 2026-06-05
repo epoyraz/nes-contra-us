@@ -9228,6 +9228,14 @@ static void contra_rom_wall_turret_routine_03(ContraCore *core, uint8_t x)
     }
 }
 
+/* wall_turret_routine_04 (bank0:3123): the turret's "hit" routine -- draw the
+   destroyed tile, then explode (the ROM advances into wall_core_routine_05). */
+static void contra_rom_wall_turret_routine_04(ContraCore *core, uint8_t x)
+{
+    core->l2_structure_tile[x] = 0x83u; /* 'core - destroyed' */
+    contra_rom_begin_enemy_explosion(core, x);
+}
+
 /* --- level-2 wall core (enemy type 0x14), bank0.asm:3143 --- */
 static const uint8_t contra_wall_core_hp_tbl[4] = {0x08u, 0x05u, 0x10u, 0x05u};
 static const uint8_t contra_wall_core_init_dmg_tile_anim_tbl[4] = {0x00u, 0x03u, 0x00u, 0x03u};
@@ -9359,6 +9367,55 @@ static void contra_rom_wall_core_routine_03(ContraCore *core, uint8_t x)
     }
     ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x28u;
     contra_rom_enemy_fire_horizontal_at_player(core, x, 0x03u, 0x05u);
+}
+
+/* destruction tile sequence (bank0:3329): normal core indices 0-3, big core 4-7
+   -- destroyed / open / more-cracks / cracked. */
+static const uint8_t contra_wall_core_tile_anim_tbl[8] = {
+    0x83u, 0x87u, 0x82u, 0x81u, 0x83u, 0x8Au, 0x82u, 0x81u};
+
+/* wall_core_routine_04 (bank0:3290): the core's "hit" routine (reached when its
+   HP hits 0). Draw the next destruction tile and step down one plating layer:
+   while plating remains, reset HP and return to firing; once the plating is gone,
+   clear the room and explode. The ROM's separate explosion/back-wall blow-open
+   chain (routine_05/07/08/09) is collapsed into the room-advance + explosion
+   here; the 4-quadrant back-wall destruction is a follow-up. */
+static void contra_rom_wall_core_routine_04(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t idx = ram[CONTRA_RAM_ENEMY_VAR_2 + x];
+
+    if ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x08u) != 0u)
+    {
+        idx = (uint8_t)(idx + 4u); /* big-core tile variant */
+    }
+    core->l2_structure_tile[x] = contra_wall_core_tile_anim_tbl[idx & 0x07u];
+
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_2 + x] - 1u);
+    if ((ram[CONTRA_RAM_ENEMY_VAR_2 + x] & 0x80u) != 0u)
+    {
+        /* plating gone: clear the room (last core -> screen cleared) and explode */
+        ram[CONTRA_RAM_WALL_CORE_REMAINING] =
+            (uint8_t)(ram[CONTRA_RAM_WALL_CORE_REMAINING] - 1u);
+        if (ram[CONTRA_RAM_WALL_CORE_REMAINING] == 0u)
+        {
+            ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] = 0x01u;
+        }
+        contra_rom_begin_enemy_explosion(core, x);
+        return;
+    }
+    if (ram[CONTRA_RAM_ENEMY_VAR_2 + x] == 0u)
+    {
+        /* last plating layer cracked: bare core exposed */
+        ram[CONTRA_RAM_ENEMY_VAR_A + x] = 0x00u;
+        ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = 0x25u;
+        ram[CONTRA_RAM_ENEMY_HP + x] = 0x08u;
+    }
+    else
+    {
+        ram[CONTRA_RAM_ENEMY_HP + x] = 0x05u;
+    }
+    contra_rom_set_enemy_routine_to_a(core, x, 0x04u); /* back to wall_core_routine_03 */
 }
 
 /* --- boss bomb turret (enemy type 0x10), bank0.asm --- */
@@ -9541,7 +9598,8 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x02u: contra_rom_wall_turret_routine_01(core, x); break;
                 case 0x03u: contra_rom_wall_turret_routine_02(core, x); break;
                 case 0x04u: contra_rom_wall_turret_routine_03(core, x); break;
-                default: break; /* destroyed/explosion via the kill path */
+                case 0x05u: contra_rom_wall_turret_routine_04(core, x); break;
+                default: break; /* explosion via the 0xFE actor */
             }
             break;
         case 0x14u: /* level-2 wall core */
@@ -9551,7 +9609,8 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x02u: contra_rom_wall_core_routine_01(core, x); break;
                 case 0x03u: contra_rom_wall_core_routine_02(core, x); break;
                 case 0x04u: contra_rom_wall_core_routine_03(core, x); break;
-                default: break; /* destroy/explosion/room-advance routines pending */
+                case 0x05u: contra_rom_wall_core_routine_04(core, x); break;
+                default: break; /* explosion via the 0xFE actor */
             }
             break;
         case 0x07u: /* red turret */
@@ -9685,18 +9744,18 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
         ram[CONTRA_RAM_ENEMY_HP + slot] = hp;
         if (hp == 0u)
         {
-            /* wall_core_routine_07 core mechanic: a destroyed level-2 core
-               decrements the room's remaining cores; clearing the last one marks
-               the room cleared so the level routine advances to the next room.
-               (Full destruction/back-wall animation is the wall-core follow-up.) */
-            if (ram[CONTRA_RAM_ENEMY_TYPE + slot] == 0x14u)
+            /* set_destroyed_enemy_routine (bank7:7977): a killed enemy routes to
+               its type's destroyed routine. The level-2 wall turret/core both use
+               routine_04 (RAM index 5) as that "hit" routine -- it runs the
+               plating/destruction animation and (for the core) clears the room
+               and explodes once the plating is gone. Other types take the generic
+               explosion actor directly. */
+            const uint8_t dead_type = ram[CONTRA_RAM_ENEMY_TYPE + slot];
+
+            if ((dead_type == 0x13u) || (dead_type == 0x14u))
             {
-                ram[CONTRA_RAM_WALL_CORE_REMAINING] =
-                    (uint8_t)(ram[CONTRA_RAM_WALL_CORE_REMAINING] - 1u);
-                if (ram[CONTRA_RAM_WALL_CORE_REMAINING] == 0u)
-                {
-                    ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] = 0x01u;
-                }
+                contra_rom_set_enemy_routine_to_a(core, slot, 0x05u);
+                return;
             }
             contra_rom_begin_enemy_explosion(core, slot); /* TODO: award score */
             return;
@@ -11054,7 +11113,9 @@ static void contra_render_level_2_wall_structures(ContraCore *core)
         {
             continue;
         }
-        if ((type != 0x13u) && (type != 0x14u))
+        /* 0xFE = a killed structure mid-explosion: keep its last (destroyed) tile
+           on the wall under the explosion sprite until the room reloads. */
+        if ((type != 0x13u) && (type != 0x14u) && (type != 0xFEu))
         {
             continue;
         }
