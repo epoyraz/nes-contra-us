@@ -9166,22 +9166,91 @@ static void contra_rom_begin_enemy_explosion(ContraCore *core, uint8_t x)
 /* --- level-2 wall turret (enemy type 0x13), bank0.asm --- */
 static const uint8_t contra_wall_turret_initial_delay_tbl[4] = {0x50u, 0x80u, 0xB0u, 0xF0u};
 
-/* fire a type-3 bullet horizontally at the nearest player (the ROM's
-   aim_and_create_enemy_bullet diagonal solve is deferred, as for the sniper). */
-static void contra_rom_enemy_fire_horizontal_at_player(ContraCore *core, uint8_t x, uint8_t btype, uint8_t speed)
+/* quadrant_aim_dir_01 (bank7:10563): the within-quadrant aim direction nibble
+   indexed by [row = |dy|>>5][col = |dx|>>6]; the high nibble is used when bit5 of
+   |dx| is clear, the low nibble when set. Indoor enemies (wall turret/core,
+   jumping soldier) all aim through this table. */
+static const uint8_t contra_quadrant_aim_dir_01[32] = {
+    0x00u, 0x00u, 0x00u, 0x00u, 0x63u, 0x21u, 0x11u, 0x11u,
+    0x64u, 0x32u, 0x21u, 0x11u, 0x65u, 0x43u, 0x22u, 0x22u,
+    0x65u, 0x44u, 0x33u, 0x22u, 0x65u, 0x54u, 0x33u, 0x32u,
+    0x65u, 0x54u, 0x43u, 0x33u, 0x65u, 0x54u, 0x44u, 0x33u};
+
+/* get_quadrant_aim_dir (bank7:10469): the aim-direction nibble pointing from
+   source (sx,sy) toward target (tx,ty) using table tbl; *quadrant returns $07
+   (bit0 = source below target -> fire up, bit1 = source right of target -> fire
+   left), which the bullet creator turns into velocity sign flips. */
+static uint8_t contra_rom_get_quadrant_aim_dir(
+    uint8_t sx, uint8_t sy, uint8_t tx, uint8_t ty, const uint8_t *tbl, uint8_t *quadrant)
+{
+    uint8_t q = 0u;
+    uint8_t dy;
+    uint8_t dx;
+    uint8_t byte;
+
+    if (ty >= sy)
+    {
+        dy = (uint8_t)(ty - sy);
+    }
+    else
+    {
+        dy = (uint8_t)(sy - ty);
+        q |= 0x01u; /* source below target */
+    }
+    if (tx >= sx)
+    {
+        dx = (uint8_t)(tx - sx);
+    }
+    else
+    {
+        dx = (uint8_t)(sx - tx);
+        q |= 0x02u; /* source right of target */
+    }
+    byte = tbl[(size_t)(((dy >> 5) << 2) + (dx >> 6)) & 0x1Fu];
+    *quadrant = q;
+    return ((dx & 0x20u) != 0u) ? (uint8_t)(byte & 0x0Fu) : (uint8_t)((byte >> 4u) & 0x0Fu);
+}
+
+/* aim_and_create_enemy_bullet (bank7): fire a bullet of type btype at the closest
+   normal-state player using table tbl. Indoor levels aim at a fixed player Y
+   (0xB0), matching the ROM (it ignores indoor jump height); if neither player is
+   in a normal state, aim at screen center-bottom (0x80, 0xFF). */
+static void contra_rom_aim_and_create_enemy_bullet(
+    ContraCore *core, uint8_t sx, uint8_t sy, uint8_t btype, uint8_t speed, const uint8_t *tbl)
 {
     uint8_t *const ram = core->ram;
-    const uint8_t ex = ram[CONTRA_RAM_ENEMY_X_POS + x];
     const uint8_t p0 = ram[CONTRA_RAM_SPRITE_X_POS + 0u];
     const uint8_t p1 = ram[CONTRA_RAM_SPRITE_X_POS + 1u];
-    const uint8_t d0 = (p0 >= ex) ? (uint8_t)(p0 - ex) : (uint8_t)(ex - p0);
-    const uint8_t d1 = (p1 >= ex) ? (uint8_t)(p1 - ex) : (uint8_t)(ex - p1);
-    const uint8_t player_x = ((p1 != 0u) && ((p0 == 0u) || (d1 < d0))) ? p1 : p0;
-    const bool firing_left = (player_x < ex);
+    const uint8_t d0 = (p0 >= sx) ? (uint8_t)(p0 - sx) : (uint8_t)(sx - p0);
+    const uint8_t d1 = (p1 >= sx) ? (uint8_t)(p1 - sx) : (uint8_t)(sx - p1);
+    uint8_t idx = ((p1 != 0u) && ((p0 == 0u) || (d1 < d0))) ? 1u : 0u;
+    uint8_t tx;
+    uint8_t ty;
+    uint8_t quadrant;
+    uint8_t nibble;
 
-    (void)contra_rom_create_enemy_bullet(
-        core, btype, 0u, firing_left ? 0x02u : 0x00u, speed,
-        (uint8_t)(ex + (firing_left ? 0xF3u : 0x0Du)), ram[CONTRA_RAM_ENEMY_Y_POS + x]);
+    if (ram[CONTRA_RAM_ENEMY_ATTACK_FLAG] == 0u)
+    {
+        return; /* create_enemy_bullet_if_attack_enabled: only fire when allowed */
+    }
+    if (ram[CONTRA_RAM_PLAYER_STATE + idx] != 0x01u)
+    {
+        idx ^= 0x01u; /* closest player isn't in a normal state; try the other */
+    }
+    if (ram[CONTRA_RAM_PLAYER_STATE + idx] != 0x01u)
+    {
+        tx = 0x80u;
+        ty = 0xFFu;
+    }
+    else
+    {
+        tx = ram[CONTRA_RAM_SPRITE_X_POS + idx];
+        ty = (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u)
+            ? 0xB0u
+            : ram[CONTRA_RAM_SPRITE_Y_POS + idx];
+    }
+    nibble = contra_rom_get_quadrant_aim_dir(sx, sy, tx, ty, tbl, &quadrant);
+    (void)contra_rom_create_enemy_bullet(core, btype, nibble, quadrant, speed, sx, sy);
 }
 
 /* wall_turret_routine_00..04 (bank0:3049-3127): deploy, open, fire at the
@@ -9255,10 +9324,9 @@ static void contra_rom_wall_turret_routine_03(ContraCore *core, uint8_t x)
         return;
     }
     ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x50u;
-    if (ram[CONTRA_RAM_ENEMY_ATTACK_FLAG] != 0u)
-    {
-        contra_rom_enemy_fire_horizontal_at_player(core, x, 0x03u, 0x04u);
-    }
+    contra_rom_aim_and_create_enemy_bullet(
+        core, ram[CONTRA_RAM_ENEMY_X_POS + x], ram[CONTRA_RAM_ENEMY_Y_POS + x],
+        0x03u, 0x04u, contra_quadrant_aim_dir_01);
 }
 
 /* wall_turret_routine_04 (bank0:3123): the turret's "hit" routine -- draw the
@@ -9399,7 +9467,9 @@ static void contra_rom_wall_core_routine_03(ContraCore *core, uint8_t x)
         return;
     }
     ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x28u;
-    contra_rom_enemy_fire_horizontal_at_player(core, x, 0x03u, 0x05u);
+    contra_rom_aim_and_create_enemy_bullet(
+        core, ram[CONTRA_RAM_ENEMY_X_POS + x], ram[CONTRA_RAM_ENEMY_Y_POS + x],
+        0x03u, 0x05u, contra_quadrant_aim_dir_01);
 }
 
 /* destruction tile sequence (bank0:3329): normal core indices 0-3, big core 4-7
