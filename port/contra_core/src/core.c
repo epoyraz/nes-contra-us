@@ -9491,9 +9491,7 @@ static const uint8_t contra_wall_core_tile_anim_tbl[8] = {
 /* wall_core_routine_04 (bank0:3290): the core's "hit" routine (reached when its
    HP hits 0). Draw the next destruction tile and step down one plating layer:
    while plating remains, reset HP and return to firing; once the plating is gone,
-   clear the room and explode. The ROM's separate explosion/back-wall blow-open
-   chain (routine_05/07/08/09) is collapsed into the room-advance + explosion
-   here; the 4-quadrant back-wall destruction is a follow-up. */
+   advance into the explosion + back-wall blow-open chain (routine_05..09). */
 static void contra_rom_wall_core_routine_04(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -9508,14 +9506,7 @@ static void contra_rom_wall_core_routine_04(ContraCore *core, uint8_t x)
     ram[CONTRA_RAM_ENEMY_VAR_2 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_2 + x] - 1u);
     if ((ram[CONTRA_RAM_ENEMY_VAR_2 + x] & 0x80u) != 0u)
     {
-        /* plating gone: clear the room (last core -> screen cleared) and explode */
-        ram[CONTRA_RAM_WALL_CORE_REMAINING] =
-            (uint8_t)(ram[CONTRA_RAM_WALL_CORE_REMAINING] - 1u);
-        if (ram[CONTRA_RAM_WALL_CORE_REMAINING] == 0u)
-        {
-            ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] = 0x01u;
-        }
-        contra_rom_begin_enemy_explosion(core, x);
+        contra_rom_advance_enemy_routine(core, x); /* plating gone -> routine_05 */
         return;
     }
     if (ram[CONTRA_RAM_ENEMY_VAR_2 + x] == 0u)
@@ -9530,6 +9521,111 @@ static void contra_rom_wall_core_routine_04(ContraCore *core, uint8_t x)
         ram[CONTRA_RAM_ENEMY_HP + x] = 0x05u;
     }
     contra_rom_set_enemy_routine_to_a(core, x, 0x04u); /* back to wall_core_routine_03 */
+}
+
+/* wall_core_routine_05/06 (bank7:e737 / enemy_routine_explosion): play the core's
+   own explosion (sprites 0x38..0x3a) -- bit7 of STATE_WIDTH stops further bullet
+   hits so the chain isn't re-entered -- then advance to the room/blow-open. */
+static const uint8_t contra_wall_core_explosion_sprite_tbl[3] = {0x38u, 0x39u, 0x3Au};
+
+static void contra_rom_wall_core_routine_05(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] | 0x80u); /* no more bullet hits */
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = contra_wall_core_explosion_sprite_tbl[0];
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x0Au;
+    contra_rom_advance_enemy_routine(core, x); /* -> routine_06 */
+}
+
+static void contra_rom_wall_core_routine_06(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+    if (ram[CONTRA_RAM_ENEMY_FRAME + x] >= 0x03u)
+    {
+        contra_rom_advance_enemy_routine(core, x); /* -> routine_07 */
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x0Au;
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] =
+        contra_wall_core_explosion_sprite_tbl[ram[CONTRA_RAM_ENEMY_FRAME + x]];
+}
+
+/* wall_core_routine_07 (bank0:3333): one fewer core to destroy; if this was the
+   last, hide it, wipe the other enemies, and start the back-wall blow-open. */
+static void contra_rom_wall_core_routine_07(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    int slot;
+
+    ram[CONTRA_RAM_WALL_CORE_REMAINING] =
+        (uint8_t)(ram[CONTRA_RAM_WALL_CORE_REMAINING] - 1u);
+    if (ram[CONTRA_RAM_WALL_CORE_REMAINING] != 0u)
+    {
+        contra_rom_clear_enemy(core, x); /* not the last core -- just remove it */
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x00u; /* hide the core */
+    for (slot = 0x0F; slot >= 0; --slot)
+    {
+        if ((uint8_t)slot != x)
+        {
+            contra_rom_clear_enemy(core, (uint8_t)slot); /* destroy_all_enemies */
+        }
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_3 + x] = 0x03u; /* quadrant index 3..0 */
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x04u); /* -> routine_08 */
+}
+
+/* wall_core_routine_08 (bank0:3347): blow the back wall open one quadrant at a
+   time (4 super-tiles at fixed wall positions, recorded in l2_blowopen_quadrants
+   for the render), then advance to mark the screen cleared. */
+static void contra_rom_wall_core_routine_08(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t q;
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    q = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_3 + x] & 0x03u);
+    core->l2_blowopen_quadrants = (uint8_t)(core->l2_blowopen_quadrants | (uint8_t)(1u << q));
+    ram[CONTRA_RAM_ENEMY_VAR_3 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_3 + x] - 1u);
+    if ((ram[CONTRA_RAM_ENEMY_VAR_3 + x] & 0x80u) != 0u)
+    {
+        contra_rom_set_enemy_delay_adv_routine(core, x, 0x10u); /* blown open -> routine_09 */
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u; /* next quadrant next frame */
+}
+
+/* wall_core_routine_09 (bank0:3412): wait out the blast, mark the room cleared
+   (advances to the next room), and remove the core. */
+static void contra_rom_wall_core_routine_09(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] = 0x01u;
+    contra_rom_clear_enemy(core, x);
 }
 
 /* ===== level-2 indoor soldiers (0x15) + their generator (0x19) ==============
@@ -11128,7 +11224,12 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x03u: contra_rom_wall_core_routine_02(core, x); break;
                 case 0x04u: contra_rom_wall_core_routine_03(core, x); break;
                 case 0x05u: contra_rom_wall_core_routine_04(core, x); break;
-                default: break; /* explosion via the 0xFE actor */
+                case 0x06u: contra_rom_wall_core_routine_05(core, x); break;
+                case 0x07u: contra_rom_wall_core_routine_06(core, x); break;
+                case 0x08u: contra_rom_wall_core_routine_07(core, x); break;
+                case 0x09u: contra_rom_wall_core_routine_08(core, x); break;
+                case 0x0Au: contra_rom_wall_core_routine_09(core, x); break;
+                default: break;
             }
             break;
         case 0x15u: /* indoor running soldier */
@@ -11541,6 +11642,7 @@ static void contra_rom_load_indoor_enemy_data(ContraCore *core)
     ram[CONTRA_RAM_ENEMY_SCREEN_READ_OFFSET] = 1u;
     ram[CONTRA_RAM_INDOOR_ENEMY_ATTACK_COUNT] = 0u;
     ram[CONTRA_RAM_WALL_PLATING_DESTROYED_COUNT] = 0u;
+    core->l2_blowopen_quadrants = 0u;
     ram[CONTRA_RAM_INDOOR_RED_SOLDIER_CREATED] = 0u;
     ram[CONTRA_RAM_GRENADE_LAUNCHER_FLAG] = 0u;
     for (slot = 0x0F; slot >= 0; --slot)
@@ -12752,6 +12854,26 @@ static void contra_render_level_2_wall_structures(ContraCore *core)
             const int aligned_y = (ey - 12) & ~7;
 
             contra_render_level_2_overlay_supertile(core, aligned_x, aligned_y, supertile);
+        }
+    }
+
+    /* back-wall blow-open: 4 destroyed quadrant super-tiles at fixed positions,
+       drawn one-by-one by wall_core_routine_08 and persisting until the room
+       reloads (same positions the invented path uses). */
+    if (core->l2_blowopen_quadrants != 0u)
+    {
+        unsigned q;
+
+        for (q = 0u; q < 4u; ++q)
+        {
+            if ((core->l2_blowopen_quadrants & (uint8_t)(1u << q)) != 0u)
+            {
+                contra_render_level_2_overlay_supertile(
+                    core,
+                    (int)contra_level_2_wall_core_update_x_tbl[q],
+                    (int)contra_level_2_wall_core_update_y_tbl[q],
+                    contra_level_2_wall_core_update_supertile_tbl[q]);
+            }
         }
     }
 }

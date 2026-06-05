@@ -114,6 +114,11 @@ typedef struct ContraCore
        (draw_enemy_supertile_a, level_2_nametable_update_supertile_data) rather
        than the 2x2 tile-animation the core/turret use. 0xFF = nothing drawn. */
     uint8_t l2_supertile[CONTRA_NATIVE_MAX_ENEMIES];
+    /* Bitmask of the back-wall blow-open quadrants drawn so far when a level-2
+       wall core is destroyed (wall_core_routine_08). They persist as super-tiles
+       at FIXED back-wall positions (not the enemy slot), so they live here rather
+       than in l2_supertile; reset on room load. */
+    uint8_t l2_blowopen_quadrants;
 } ContraCore;
 
 void contra_core_init(ContraCore *core);
