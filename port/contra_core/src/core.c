@@ -9451,6 +9451,329 @@ static void contra_rom_wall_core_routine_04(ContraCore *core, uint8_t x)
     contra_rom_set_enemy_routine_to_a(core, x, 0x04u); /* back to wall_core_routine_03 */
 }
 
+/* ===== level-2 indoor soldiers (0x15) + their generator (0x19) ==============
+   Deterministic (no RANDOM_NUM): soldiers walk in from a fixed side X (0xA8
+   right / 0x58 left) at Y=0x6D with a table velocity, and their regular bullet
+   is aimed by the soldier's horizontal screen segment. (bank0:2412 generator,
+   bank0:3432 soldier, bank7 helpers.) */
+
+/* indoor_soldier_x_velocity_tbl (bank0): {fract, fast} per generator sub-type. */
+static const uint8_t contra_indoor_soldier_x_velocity_tbl[4][2] = {
+    {0x20u, 0xFFu}, /* running soldier  (-0.875) */
+    {0x40u, 0xFFu}, /* jumping soldier  (-0.75) */
+    {0x40u, 0xFFu}, /* group of 4       (-0.75) */
+    {0x40u, 0xFFu}, /* grenade launcher (-0.75) */
+};
+/* indoor_bullet_velocity_tbl (bank0): x {fract, fast} per horizontal segment. */
+static const uint8_t contra_indoor_bullet_velocity_tbl[7][2] = {
+    {0xD4u, 0x00u}, {0x8Du, 0x00u}, {0x46u, 0x00u}, {0x00u, 0x00u},
+    {0xBAu, 0xFFu}, {0x73u, 0xFFu}, {0x2Cu, 0xFFu}};
+/* far_segment_code_tbl (bank7): X thresholds, segment 6 (far left) .. 0 (right). */
+static const uint8_t contra_far_segment_code_tbl[7] = {
+    0xFFu, 0x94u, 0x8Cu, 0x84u, 0x7Cu, 0x74u, 0x6Cu};
+
+/* lvl_2_enemy_gen_screen_xx (bank0:2547): 2-byte entries
+   {type<<6 | attributes, attack<<7 | delay}. The entry whose delay byte has
+   bit7 set ends the cycle: it counts an attack round and restarts at offset 0. */
+static const uint8_t contra_l2_enemy_gen_screen_00[] = {0x42u, 0x30u, 0x01u, 0x01u, 0x00u, 0xC0u};
+static const uint8_t contra_l2_enemy_gen_screen_01[] = {
+    0x46u, 0x30u, 0x81u, 0x50u, 0x01u, 0x10u, 0x00u, 0x30u, 0x00u, 0x10u, 0x01u, 0xE0u};
+static const uint8_t contra_l2_enemy_gen_screen_02[] = {0x00u, 0x30u, 0xC5u, 0xA0u};
+static const uint8_t contra_l2_enemy_gen_screen_03[] = {0x46u, 0x20u, 0x81u, 0x60u, 0xC3u, 0xE1u};
+static const uint8_t contra_l2_enemy_gen_screen_04[] = {
+    0x40u, 0x30u, 0x81u, 0x60u, 0x00u, 0x10u, 0x03u, 0x30u,
+    0x02u, 0x10u, 0x01u, 0x40u, 0x47u, 0x10u, 0x4Au, 0xE0u};
+static const uint8_t *const contra_l2_enemy_gen_screen_tbl[5] = {
+    contra_l2_enemy_gen_screen_00, contra_l2_enemy_gen_screen_01, contra_l2_enemy_gen_screen_02,
+    contra_l2_enemy_gen_screen_03, contra_l2_enemy_gen_screen_04};
+static const size_t contra_l2_enemy_gen_screen_len[5] = {6u, 12u, 4u, 6u, 16u};
+
+/* reverse_enemy_x_direction (bank7): negate the 16-bit X velocity. */
+static void contra_rom_reverse_enemy_x_direction(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint16_t v = (uint16_t)(((uint16_t)ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] << 8u) |
+                                  ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x]);
+    const uint16_t neg = (uint16_t)(0u - (unsigned)v);
+
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x] = (uint8_t)(neg & 0xFFu);
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] = (uint8_t)(neg >> 8u);
+}
+
+/* find_far_segment_for_a (bank7): 6 (far left) .. 0 (far right) for X position. */
+static uint8_t contra_rom_find_far_segment(uint8_t xpos)
+{
+    int y;
+
+    for (y = 6; y >= 0; --y)
+    {
+        if (xpos < contra_far_segment_code_tbl[y])
+        {
+            return (uint8_t)y;
+        }
+    }
+    return 0u;
+}
+
+/* init_indoor_enemy_pos_and_vel (bank0): fixed spawn position + table velocity;
+   ENEMY_ATTRIBUTES bit0 set = arrives from the left (reverse direction, X=0x58). */
+static void contra_rom_init_indoor_enemy_pos_and_vel(ContraCore *core, uint8_t x, uint8_t kind)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x] = contra_indoor_soldier_x_velocity_tbl[kind][0];
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] = contra_indoor_soldier_x_velocity_tbl[kind][1];
+    if ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x01u) != 0u)
+    {
+        contra_rom_reverse_enemy_x_direction(core, x);
+        ram[CONTRA_RAM_ENEMY_X_POS + x] = 0x58u; /* from the left */
+    }
+    else
+    {
+        ram[CONTRA_RAM_ENEMY_X_POS + x] = 0xA8u; /* from the right */
+    }
+    ram[CONTRA_RAM_ENEMY_Y_POS + x] = 0x6Du;
+}
+
+/* init_sprite_from_frame (bank0:3479): 3-frame walk cycle (advance every 4th
+   FRAME_COUNTER tick), sprite 0x93+frame, flip horizontally when moving left. */
+static void contra_rom_init_sprite_from_frame(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t frame = ram[CONTRA_RAM_ENEMY_FRAME + x];
+    uint8_t attr;
+
+    if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x03u) == 0u)
+    {
+        frame = (uint8_t)(frame + 1u);
+        if (frame >= 0x03u)
+        {
+            frame = 0u;
+        }
+        ram[CONTRA_RAM_ENEMY_FRAME + x] = frame;
+    }
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = (uint8_t)(0x93u + frame);
+    attr = ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x];
+    if ((ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] & 0x80u) != 0u)
+    {
+        attr = (uint8_t)(attr | 0x40u); /* moving left: flip horizontally */
+    }
+    else
+    {
+        attr = (uint8_t)(attr & 0xBFu);
+    }
+    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = attr;
+}
+
+/* apply_enemy_velocity_set_bg_priority (bank7): integrate X velocity, remove the
+   enemy once it walks off the indoor screen (X>=0xB0 moving right, X<0x50 moving
+   left), and set the sprite bg-priority bit by X. Returns true if removed. */
+static bool contra_rom_apply_indoor_velocity(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const unsigned accum = (unsigned)ram[CONTRA_RAM_ENEMY_X_VEL_ACCUM + x] +
+                           ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x];
+    const uint8_t fast = ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x];
+    uint8_t newx;
+    uint8_t attr;
+
+    ram[CONTRA_RAM_ENEMY_X_VEL_ACCUM + x] = (uint8_t)accum;
+    newx = (uint8_t)((unsigned)ram[CONTRA_RAM_ENEMY_X_POS + x] + fast + (accum >> 8u));
+    ram[CONTRA_RAM_ENEMY_X_POS + x] = newx;
+
+    if ((fast & 0x80u) != 0u)
+    {
+        if (newx < 0x50u)
+        {
+            contra_rom_clear_enemy(core, x);
+            return true;
+        }
+    }
+    else if (newx >= 0xB0u)
+    {
+        contra_rom_clear_enemy(core, x);
+        return true;
+    }
+
+    attr = ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x];
+    if ((newx >= 0x60u) && (newx < 0xA0u))
+    {
+        attr = (uint8_t)(attr & 0xDFu); /* draw in front of background */
+    }
+    else
+    {
+        attr = (uint8_t)(attr | 0x20u); /* draw behind background */
+    }
+    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = attr;
+    return false;
+}
+
+/* create_indoor_bullet (bank0): fire a regular bullet aimed by the firing
+   soldier's horizontal segment (a type-0x01 enemy, VAR_1=3; the shared
+   enemy-bullet routines then animate and move it). */
+static void contra_rom_create_indoor_bullet(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t ex = ram[CONTRA_RAM_ENEMY_X_POS + x];
+    const uint8_t ey = ram[CONTRA_RAM_ENEMY_Y_POS + x];
+    uint8_t seg;
+    int slot;
+
+    if ((ex >= 0xA0u) || (ex < 0x60u))
+    {
+        return;
+    }
+    if (ram[CONTRA_RAM_ENEMY_ATTACK_FLAG] == 0u)
+    {
+        return;
+    }
+    slot = contra_rom_find_next_enemy_slot(core);
+    if (slot < 0)
+    {
+        return;
+    }
+    seg = contra_rom_find_far_segment(ex);
+    ram[CONTRA_RAM_ENEMY_TYPE + slot] = 0x01u;
+    contra_rom_initialize_enemy(core, (uint8_t)slot);
+    ram[CONTRA_RAM_ENEMY_Y_POS + slot] = ey;
+    ram[CONTRA_RAM_ENEMY_X_POS + slot] = ex;
+    ram[CONTRA_RAM_ENEMY_VAR_1 + slot] = 0x03u; /* indoor regular bullet */
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + slot] = contra_indoor_bullet_velocity_tbl[seg][0];
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + slot] = contra_indoor_bullet_velocity_tbl[seg][1];
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + slot] = 0x40u;
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + slot] = 0x01u;
+}
+
+/* indoor_soldier_routine_00/01 (bank0:3432): a running indoor soldier walks in
+   from a side, animates, and (with the regular-bullet weapon) fires on a cadence
+   while inside the central firing band. Grenade/roller weapon variants of the
+   soldier are deferred. */
+static void contra_rom_indoor_soldier_routine_00(ContraCore *core, uint8_t x)
+{
+    contra_rom_init_indoor_enemy_pos_and_vel(core, x, 0u);
+    core->ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x08u;
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+static void contra_rom_indoor_soldier_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_init_sprite_from_frame(core, x);
+    if (contra_rom_apply_indoor_velocity(core, x))
+    {
+        return; /* walked off-screen and was removed */
+    }
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x10u;
+    if ((ram[CONTRA_RAM_ENEMY_X_POS + x] < 0x68u) || (ram[CONTRA_RAM_ENEMY_X_POS + x] >= 0x98u))
+    {
+        return; /* outside the firing band */
+    }
+    if (((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] >> 1u) & 0x03u) == 0u)
+    {
+        contra_rom_create_indoor_bullet(core, x); /* regular-bullet weapon */
+    }
+    /* grenade (weapon 1) / roller (weapon 2,3) deferred */
+}
+
+/* create the generator sub-type soldier (bank0:2485): running (0x15), jumping
+   (0x16), group-of-4 (0x18), grenade launcher (0x17). Only the running soldier
+   is ported; other kinds are skipped -- their script entry still advances, so
+   the generator cadence and attack-round count stay faithful. */
+static void contra_rom_create_indoor_soldier(ContraCore *core, uint8_t stype, uint8_t attrs)
+{
+    int slot;
+
+    if (stype != 0x00u)
+    {
+        return; /* jumping / group-of-4 / grenade launcher deferred */
+    }
+    slot = contra_rom_find_next_enemy_slot(core);
+    if (slot < 0)
+    {
+        return;
+    }
+    core->ram[CONTRA_RAM_ENEMY_TYPE + slot] = 0x15u; /* running indoor soldier */
+    contra_rom_initialize_enemy(core, (uint8_t)slot);
+    core->ram[CONTRA_RAM_ENEMY_ATTRIBUTES + slot] = attrs;
+}
+
+/* indoor_soldier_gen_routine_00/01 (bank0:2412): the per-room enemy-cycle
+   generator. On odd frames, after its delay elapses, read the next script entry
+   and spawn that soldier; the cycle-ending entry counts an attack round and
+   restarts, and the generator removes itself after 7 rounds. */
+static void contra_rom_indoor_soldier_gen_routine_00(ContraCore *core, uint8_t x)
+{
+    core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x40u;
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+static void contra_rom_indoor_soldier_gen_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t screen = ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER];
+    const uint8_t *data;
+    size_t data_len;
+    uint8_t offset;
+    uint8_t byte0;
+    uint8_t byte1;
+    uint8_t attrs;
+    uint8_t stype;
+
+    if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x01u) == 0u)
+    {
+        return; /* generate only on odd frames */
+    }
+    if (ram[CONTRA_RAM_GRENADE_LAUNCHER_FLAG] != 0u)
+    {
+        return; /* a grenade launcher is already on screen */
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    if (screen >= 5u)
+    {
+        return; /* no generation script for this room */
+    }
+    data = contra_l2_enemy_gen_screen_tbl[screen];
+    data_len = contra_l2_enemy_gen_screen_len[screen];
+
+    offset = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
+    if ((size_t)(offset + 1u) >= data_len)
+    {
+        offset = 0u; /* safety: stay in-bounds */
+    }
+    byte0 = data[offset];
+    byte1 = data[offset + 1u];
+    attrs = (uint8_t)(byte0 & 0x3Fu);
+    stype = (uint8_t)(byte0 >> 6u);
+    offset = (uint8_t)(offset + 2u);
+
+    if ((byte1 & 0x80u) != 0u)
+    {
+        offset = 0u; /* end of cycle: restart and count an attack round */
+        ram[CONTRA_RAM_INDOOR_ENEMY_ATTACK_COUNT] =
+            (uint8_t)(ram[CONTRA_RAM_INDOOR_ENEMY_ATTACK_COUNT] + 1u);
+        if (ram[CONTRA_RAM_INDOOR_ENEMY_ATTACK_COUNT] >= 0x07u)
+        {
+            contra_rom_clear_enemy(core, x); /* generator removed after 7 rounds */
+            return;
+        }
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = (uint8_t)(byte1 & 0x7Fu);
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = offset;
+    contra_rom_create_indoor_soldier(core, stype, attrs);
+}
+
 /* --- boss bomb turret (enemy type 0x10), bank0.asm --- */
 /* super-tile per (recoil state VAR_1: 0 idle / 2 firing) and background variant
    (attr bit0: wall vs jungle), interleaved. */
@@ -9644,6 +9967,22 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x04u: contra_rom_wall_core_routine_03(core, x); break;
                 case 0x05u: contra_rom_wall_core_routine_04(core, x); break;
                 default: break; /* explosion via the 0xFE actor */
+            }
+            break;
+        case 0x15u: /* indoor running soldier */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_indoor_soldier_routine_00(core, x); break;
+                case 0x02u: contra_rom_indoor_soldier_routine_01(core, x); break;
+                default: break; /* hit/explosion via the 0xFE actor */
+            }
+            break;
+        case 0x19u: /* indoor soldier generator */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_indoor_soldier_gen_routine_00(core, x); break;
+                case 0x02u: contra_rom_indoor_soldier_gen_routine_01(core, x); break;
+                default: break; /* removed via clear once the cycles are done */
             }
             break;
         case 0x07u: /* red turret */
