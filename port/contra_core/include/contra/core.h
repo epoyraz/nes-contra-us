@@ -87,6 +87,12 @@ typedef struct ContraCore
        outdoor collision lookup. Reset on level load. */
     uint16_t l1_bridge_gap_world_x[16];
     uint8_t l1_bridge_gap_screen_y[16];
+    /* Destroyed-bridge super-tile index drawn for each cleared cell. The native
+       background re-composes from the level supertile data every frame and does
+       not persist nametable writes, so (like the level-2 wall structures) the
+       destroyed super-tiles must be re-drawn each frame from this record or the
+       intact bridge re-appears over the gap. */
+    uint8_t l1_bridge_gap_tile[16];
     uint8_t l1_bridge_gap_count;
 } ContraCore;
 

@@ -29,9 +29,9 @@ static const ExpectedTraceRow expected_rows[] = {
     {"attract_level2_demo", "level2-wall-core-loaded", 3007u, 1u, 1u, 0u, 0u, 0u, 1u},
     {"level2_room_chain", "level2-first-room", 236u, 1u, 1u, 0u, 0u, 0u, 1u},
     {"level2_room_chain", "level2-after-room-1", 403u, 1u, 1u, 1u, 0u, 0u, 1u},
-    {"level2_room_chain", "level2-after-room-4", 811u, 1u, 1u, 4u, 0u, 0u, 1u},
-    {"level2_room_chain", "level2-boss-state", 947u, 1u, 128u, 5u, 0u, 0u, 1u},
-    {"level2_room_chain", "level2-boss-defeated", 1204u, 1u, 128u, 5u, 0u, 0u, 1u}
+    {"level2_room_chain", "level2-after-room-4", 956u, 1u, 1u, 4u, 0u, 0u, 1u},
+    {"level2_room_chain", "level2-boss-state", 1092u, 1u, 128u, 5u, 0u, 0u, 1u},
+    {"level2_room_chain", "level2-boss-defeated", 1349u, 1u, 128u, 5u, 0u, 0u, 1u}
 };
 
 static bool contains_string_field(const char *line, const char *key, const char *value)

@@ -104,6 +104,8 @@
 static void contra_render_level_1_nametable_update_supertile(
     ContraCore *core, int enemy_x, int enemy_y, uint8_t supertile_index);
 static void contra_rom_update_enemy_pos(ContraCore *core, uint8_t x);
+static void contra_rom_bullet_generation(
+    ContraCore *core, uint8_t aim, uint8_t speed, uint8_t px, uint8_t py);
 
 /* Faithful enemy types that render as background super-tiles (nametable writes)
    rather than OAM sprites: pill box, rotating gun, red turret, bomb turret,
@@ -1386,10 +1388,17 @@ static void contra_build_oam_for_next_frame(ContraCore *core)
     while (sprite_index-- != 0u)
     {
         /* In the faithful enemy system the enemy slots (10..25) hold real enemy
-           state. Background-tile enemy types (pill box, turrets, bridge) draw to
-           the nametable, not OAM, so skip them here to avoid a stray sprite. */
+           state. Background-tile enemy types (pill box, turrets, door, bridge)
+           draw their *structure* to the nametable, not OAM, so the live structure
+           is suppressed here to avoid a stray sprite (its ENEMY_SPRITES is the
+           invisible placeholder 0x01). But when such a slot is DESTROYED it runs
+           the shared in-slot explosion routine (boss_defeated -> routine 4) which
+           sets a real explosion sprite (0x38..) on the SAME slot while keeping its
+           type; that death cloud must still render (the ROM's draw_enemy_sprites
+           draws every nonzero sprite). So only suppress the invisible placeholder. */
         if ((core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0u) &&
             (sprite_index >= 10u) &&
+            (core->ram[CONTRA_RAM_ENEMY_SPRITES + (sprite_index - 10u)] <= 0x01u) &&
             contra_rom_enemy_type_is_supertile(core->ram[CONTRA_RAM_ENEMY_TYPE + (sprite_index - 10u)]))
         {
             continue;
@@ -3848,19 +3857,30 @@ static void contra_move_player_horizontally(ContraCore *core, uint8_t player_ind
     const uint8_t screen_type = contra_get_level_screen_type(core);
     const uint8_t right_edge = (screen_type == 0u) ? 0xE6u : ((screen_type == 1u) ? 0xE0u : 0xD0u);
     const uint8_t left_edge = (screen_type == 0u) ? 0x1Au : ((screen_type == 1u) ? 0x20u : 0x30u);
+    /* calc_player_x_vel (bank7): once the level boss is defeated the engine sets
+       bit 7 of BOSS_DEFEATED_FLAG (0x81) to flag the scripted end-of-level walk.
+       While that bit is set the player auto-walks past the boss-screen geometry:
+       the positive-velocity path skips the solid-bg/right-edge clamp entirely (the
+       lvl-1 fortress door is a solid bg object at x #$88 the player must pass to
+       reach the tunnel), and the negative-velocity path skips the left-edge clamp.
+       Without this the scripted walk stalls at the door and the jump-into-building
+       step never fires. */
+    const bool boss_defeated_walk = (ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] & 0x80u) != 0u;
 
     if (x_velocity > 0)
     {
-        if ((ram[CONTRA_RAM_SPRITE_X_POS + player_index] < right_edge) &&
-            !contra_player_has_solid_collision_ahead(core, player_index, 8))
+        if (boss_defeated_walk ||
+            ((ram[CONTRA_RAM_SPRITE_X_POS + player_index] < right_edge) &&
+             !contra_player_has_solid_collision_ahead(core, player_index, 8)))
         {
             ram[CONTRA_RAM_SPRITE_X_POS + player_index] =
                 (uint8_t)(ram[CONTRA_RAM_SPRITE_X_POS + player_index] + 1u);
         }
     }
     else if ((x_velocity < 0) &&
-             (ram[CONTRA_RAM_SPRITE_X_POS + player_index] > left_edge) &&
-             !contra_player_has_solid_collision_ahead(core, player_index, -8))
+             !contra_player_has_solid_collision_ahead(core, player_index, -8) &&
+             (boss_defeated_walk ||
+              (ram[CONTRA_RAM_SPRITE_X_POS + player_index] > left_edge)))
     {
         ram[CONTRA_RAM_SPRITE_X_POS + player_index] =
             (uint8_t)(ram[CONTRA_RAM_SPRITE_X_POS + player_index] - 1u);
@@ -3907,23 +3927,34 @@ static void contra_kill_player(ContraCore *core, uint8_t player_index)
 
 static void contra_set_player_aim_for_input(ContraCore *core, uint8_t player_index)
 {
+    uint8_t *const ram = core->ram;
     uint8_t table_row;
-    uint8_t dpad = (uint8_t)(core->ram[CONTRA_RAM_CONTROLLER_STATE + player_index] & 0x0Fu);
+    uint8_t aim_context;
+    uint8_t dpad = (uint8_t)(ram[CONTRA_RAM_CONTROLLER_STATE + player_index] & 0x0Fu);
 
-    if (core->ram[CONTRA_RAM_PLAYER_JUMP_STATUS + player_index] != 0u)
+    /* bank7:4965-4990 set_player_aim_for_input
+     * Default to the jump-aim rows ($20 standing / $30 jumping). These rows are
+     * only actually used on the indoor (base) boss screen; for every other
+     * screen the row is overridden below with the facing-direction rows
+     * ($00/$10) regardless of jump status. */
+    table_row = (ram[CONTRA_RAM_PLAYER_JUMP_STATUS + player_index] != 0u) ? 0x30u : 0x20u;
+
+    /* bank7:4110-4119 run_player_state_routine computes $08: it is #$03 on the
+     * indoor (base) boss screen (LEVEL_LOCATION_TYPE bit 7 set), otherwise the
+     * level_spawn_position_index entry (values 0/1/2 only, never 3). Only the
+     * indoor-boss case keeps the jump-aim row. */
+    aim_context = ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] & 0x80u) != 0u)
+        ? 0x03u
+        : contra_level_spawn_position_index[ram[CONTRA_RAM_CURRENT_LEVEL] & 0x07u];
+
+    if (aim_context != 0x03u)
     {
-        table_row = 0x20u;
-    }
-    else if (core->ram[CONTRA_RAM_PLAYER_AIM_PREV_FRAME + player_index] >= 0x05u)
-    {
-        table_row = 0x10u;
-    }
-    else
-    {
-        table_row = 0x00u;
+        table_row = (ram[CONTRA_RAM_PLAYER_AIM_PREV_FRAME + player_index] >= 0x05u)
+            ? 0x10u
+            : 0x00u;
     }
 
-    core->ram[CONTRA_RAM_PLAYER_AIM_DIR + player_index] = contra_d_pad_player_aim_tbl[table_row + dpad];
+    ram[CONTRA_RAM_PLAYER_AIM_DIR + player_index] = contra_d_pad_player_aim_tbl[table_row + dpad];
 }
 
 static void contra_set_jump_status_and_y_velocity(ContraCore *core, uint8_t player_index)
@@ -4311,7 +4342,15 @@ static void contra_apply_outdoor_horizontal_frame_scroll(ContraCore *core, uint8
     if ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u) ||
         (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u) ||
         ((uint8_t)(ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] | ram[CONTRA_RAM_AUTO_SCROLL_TIMER_01]) != 0u) ||
-        ((ram[CONTRA_RAM_LEVEL_STOP_SCROLL] & 0x80u) != 0u))
+        ((ram[CONTRA_RAM_LEVEL_STOP_SCROLL] & 0x80u) != 0u) ||
+        /* set_frame_scroll_if_appropriate (bank7): on the boss screen the boss-
+           reveal auto-scroll has set LEVEL_STOP_SCROLL to #$FF, so this routine
+           early-exits and the scripted post-boss walk (BOSS_DEFEATED_FLAG bit 7)
+           moves the player freely instead of holding it for a screen scroll. The
+           native boss-reveal leaves LEVEL_STOP_SCROLL at the boss screen number,
+           so key off the end-of-level walk flag directly to get the same behavior:
+           the boss screen is the last screen, so the end-walk never scrolls. */
+        ((ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] & 0x80u) != 0u))
     {
         return;
     }
@@ -5805,6 +5844,9 @@ static void contra_rom_enemy_bullet_routine_01(ContraCore *core, uint8_t x)
 
 /* --- sniper (enemy type 0x06), bank0.asm:1738 --- */
 static const uint8_t contra_sniper_animation_delay_tbl[3] = {0x01u, 0x30u, 0x80u};
+/* sniper_animation_delay_2_tbl (bank0.asm:1774): re-hide -> re-stand-up delay
+   per sniper type, set when sniper_routine_03 loops back to sniper_routine_01. */
+static const uint8_t contra_sniper_animation_delay_2_tbl[3] = {0x01u, 0x60u, 0x80u};
 static const uint8_t contra_sniper_frame_tbl[3] = {0x03u, 0x00u, 0x00u};
 static const uint8_t contra_sniper_attack_delay_tbl[3] = {0x40u, 0x04u, 0x10u};
 static const uint8_t contra_sniper_bullet_attack_count_tbl[3] = {0x03u, 0x01u, 0x01u};
@@ -5895,6 +5937,51 @@ static void contra_rom_sniper_routine_02(ContraCore *core, uint8_t x)
         ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x80u;
         contra_rom_advance_enemy_routine(core, x);
     }
+}
+
+/* defined later; forward-declared so sniper_routine_03 (the re-hide state) can
+   call them without reordering the file. */
+static void contra_rom_set_enemy_routine_to_a(ContraCore *core, uint8_t x, uint8_t a);
+static void contra_rom_disable_enemy_collision(ContraCore *core, uint8_t x);
+
+/* sniper_routine_03 (bank0.asm:1991): the post-attack RE-HIDE state for the
+   crouching/boss sniper. It crouches back down (decrementing ENEMY_FRAME), and
+   when the crouch animation completes loops the sniper back to sniper_routine_01
+   (ENEMY_ROUTINE = 2) so it pops up and attacks again. CRUCIALLY it ends by
+   applying add_scroll_to_enemy_pos (the ROM's `jmp add_scroll_to_enemy_pos`) so
+   the hidden sniper stays world-anchored while the screen scrolls. Without this
+   state the sniper froze in this routine and drifted with the scroll. */
+static void contra_rom_sniper_routine_03(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] == 0u)
+    {
+        contra_rom_disable_enemy_collision(core, x);
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x08u;
+        ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] - 1u);
+        if (ram[CONTRA_RAM_ENEMY_FRAME + x] == 0u)
+        {
+            const uint8_t attr = ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x];
+            const uint8_t idx = (attr < 3u) ? attr : 0u;
+            ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = contra_sniper_animation_delay_2_tbl[idx];
+            /* -> ENEMY_ROUTINE = 2, i.e. re-run sniper_routine_01 (stand up). */
+            contra_rom_set_enemy_routine_to_a(core, x, 0x02u);
+        }
+        /* @continue: boss sniper (type 0x02) at crouch frame 2 nudges position */
+        if (ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] == 0x02u &&
+            ram[CONTRA_RAM_ENEMY_FRAME + x] == 0x02u)
+        {
+            contra_rom_add_a_to_enemy_y_pos(core, x, 0x0Eu);
+            contra_rom_add_a_to_enemy_x_pos(core, x, 0xFFu);
+        }
+    }
+
+    /* @set_sprite_add_scroll_exit */
+    contra_rom_sniper_set_sprite(core, x);
+    contra_rom_add_scroll_to_enemy_pos(core, x);
 }
 
 /* sniper_routine_00 (bank0.asm:1751): init delay/frame from attributes, nudge Y
@@ -8369,8 +8456,11 @@ static void contra_rom_boss_bomb_turret_routine_01(ContraCore *core, uint8_t x)
     {
         return; /* recoil frame only, no bomb */
     }
-    (void)contra_rom_create_enemy_bullet(
-        core, 0u, 0x17u, 0x01u,
+    /* lda #$17; jmp bullet_generation -- the asl inside bullet_generation turns
+       #$17 into #$2E, so the bomb is bullet type 1 (large cannonball, sprite
+       $21) fired up-left, not a raw type-0 regular bullet. */
+    contra_rom_bullet_generation(
+        core, 0x17u,
         contra_boss_bomb_turret_bomb_velocity_tbl[ram[CONTRA_RAM_RANDOM_NUM] & 0x03u],
         (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] + 0xF8u),
         ram[CONTRA_RAM_ENEMY_Y_POS + x]);
@@ -9565,6 +9655,10 @@ static void contra_rom_bridge_destroy_supertile(
         if ((core->l1_bridge_gap_world_x[i] == world_x) &&
             (core->l1_bridge_gap_screen_y[i] == cell_screen_y))
         {
+            /* A later section re-draws this cell with a more-destroyed super-tile
+               (e.g. 0x1a -> 0x1b); keep the latest so the persistent per-frame
+               redraw matches what the ROM left on the nametable. */
+            core->l1_bridge_gap_tile[i] = tile;
             return; /* already recorded */
         }
     }
@@ -9572,6 +9666,7 @@ static void contra_rom_bridge_destroy_supertile(
     {
         core->l1_bridge_gap_world_x[core->l1_bridge_gap_count] = world_x;
         core->l1_bridge_gap_screen_y[core->l1_bridge_gap_count] = cell_screen_y;
+        core->l1_bridge_gap_tile[core->l1_bridge_gap_count] = tile;
         core->l1_bridge_gap_count = (uint8_t)(core->l1_bridge_gap_count + 1u);
     }
 }
@@ -10115,7 +10210,8 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x01u: contra_rom_sniper_routine_00(core, x); break;
                 case 0x02u: contra_rom_sniper_routine_01(core, x); break;
                 case 0x03u: contra_rom_sniper_routine_02(core, x); break;
-                default: break; /* post-attack/explosion routines not yet ported */
+                case 0x04u: contra_rom_sniper_routine_03(core, x); break;
+                default: break; /* hit/float (04/05) + explosion not yet ported */
             }
             break;
         default:
@@ -10243,9 +10339,25 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
     }
 }
 
-/* Player collision boxes vs an enemy, by player state: jumping (box 01) and
-   standing (box 02), bank7.asm:7240/7259. Water (00) and crouching (03) fall
-   back to standing for now. */
+/* Player collision boxes vs an enemy, selected by player state (4 bytes each:
+   y offset, x offset, height, width). The ROM's collision_box_codes_tbl
+   (bank7.asm:7211) indexes these tables by the player-state offset computed in
+   check_players_collision (@set_collision_code_offset, bank7.asm:6728-6747):
+     0 = in water    (collision_box_codes_00, bank7.asm:7221)
+     1 = jumping     (collision_box_codes_01, bank7.asm:7240)
+     2 = crouching   (collision_box_codes_02, bank7.asm:7259) -- lower/shorter
+     3 = standing    (collision_box_codes_03, bank7.asm:7278) -- tall
+   The crouch box is lower and shorter than the standing box, so a crouched
+   player ducks under head-height bullets. */
+static const uint8_t contra_collision_box_codes_00[15][4] = {
+    {0xF1u, 0xF7u, 0x28u, 0x12u}, {0xFEu, 0xF9u, 0x14u, 0x14u},
+    {0xF8u, 0xF3u, 0x1Au, 0x1Au}, {0xF2u, 0xEDu, 0x26u, 0x26u},
+    {0xE0u, 0xF0u, 0x08u, 0x20u}, {0xFDu, 0xF8u, 0x10u, 0x10u},
+    {0xF5u, 0xF7u, 0x20u, 0x12u}, {0xE7u, 0xE2u, 0x3Cu, 0x3Cu},
+    {0xF1u, 0xE2u, 0x28u, 0x3Cu}, {0xE4u, 0xD3u, 0x48u, 0x5Au},
+    {0x00u, 0xF6u, 0x16u, 0x16u}, {0x08u, 0xF1u, 0x12u, 0x1Eu},
+    {0xF5u, 0xF1u, 0x20u, 0x1Eu}, {0xEAu, 0xECu, 0x37u, 0x28u},
+    {0xF3u, 0xF3u, 0x11u, 0x1Au}};
 static const uint8_t contra_collision_box_codes_01[15][4] = {
     {0xEAu, 0xF8u, 0x1Eu, 0x10u}, {0xF6u, 0xFAu, 0x0Cu, 0x0Cu},
     {0xF1u, 0xF5u, 0x12u, 0x16u}, {0xEAu, 0xEEu, 0x24u, 0x24u},
@@ -10264,12 +10376,22 @@ static const uint8_t contra_collision_box_codes_02[15][4] = {
     {0xF4u, 0xF0u, 0x19u, 0x22u}, {0xFCu, 0xEBu, 0x08u, 0x2Au},
     {0xE3u, 0xF2u, 0x1Au, 0x1Cu}, {0xDEu, 0xE6u, 0x2Du, 0x34u},
     {0xE9u, 0xEAu, 0x0Du, 0x2Cu}};
+static const uint8_t contra_collision_box_codes_03[15][4] = {
+    {0xF3u, 0xF8u, 0x24u, 0x10u}, {0xF0u, 0xFBu, 0x1Fu, 0x0Au},
+    {0xEAu, 0xF5u, 0x2Bu, 0x16u}, {0xE3u, 0xEEu, 0x39u, 0x24u},
+    {0xE0u, 0xF0u, 0x08u, 0x20u}, {0xEEu, 0xF9u, 0x23u, 0x0Eu},
+    {0xE6u, 0xF8u, 0x33u, 0x10u}, {0xD8u, 0xE3u, 0x4Fu, 0x3Au},
+    {0xE2u, 0xE3u, 0x3Bu, 0x3Au}, {0xD5u, 0xD4u, 0x5Bu, 0x58u},
+    {0xF1u, 0xF7u, 0x29u, 0x14u}, {0xF9u, 0xF2u, 0x25u, 0x1Cu},
+    {0xE4u, 0xF2u, 0x35u, 0x1Cu}, {0xDAu, 0xEDu, 0x4Au, 0x26u},
+    {0xE6u, 0xF1u, 0x2Au, 0x1Eu}};
 
-/* check_players_collision (bank7.asm:6671), outdoor focus: if a normal-state
-   player's body overlaps this enemy's collision box, kill the player (barrier
-   invincibility destroys the enemy instead; new-life invincibility passes
-   through). DEFERRED: water/crouch boxes (use standing), landing on rideable
-   enemies, and weapon-item pickup. */
+/* check_players_collision (bank7.asm:6671): if a normal-state player's body
+   overlaps this enemy's collision box, kill the player (barrier invincibility
+   destroys the enemy instead; new-life invincibility passes through). The
+   collision box is selected by the player's state -- water/jumping/crouching/
+   standing -- and on indoor levels a crouching player is immune to bullets
+   (ducks under them). DEFERRED: landing on rideable enemies. */
 static void contra_rom_check_players_collision(ContraCore *core, uint8_t slot)
 {
     uint8_t *const ram = core->ram;
@@ -10292,8 +10414,38 @@ static void contra_rom_check_players_collision(ContraCore *core, uint8_t slot)
         {
             continue;
         }
-        tbl = (ram[CONTRA_RAM_PLAYER_JUMP_STATUS + p] != 0u)
-            ? contra_collision_box_codes_01 : contra_collision_box_codes_02;
+        /* Indoor levels (LEVEL_LOCATION_TYPE bit 0 set): a crouching player is
+           immune to enemy bullets -- they duck underneath (bank7.asm:6682-6692).
+           PLAYER_SPRITE_SEQUENCE == 2 is the crouch animation; ENEMY_TYPE 1 is a
+           bullet. */
+        if (((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] & 0x01u) != 0u) &&
+            (ram[CONTRA_RAM_ENEMY_TYPE + slot] == 0x01u) &&
+            (ram[CONTRA_RAM_PLAYER_SPRITE_SEQUENCE + p] == 0x02u))
+        {
+            continue;
+        }
+        /* Select the player-state collision box (bank7.asm:6728-6747):
+           water(0)/jumping(1)/crouching(2)/standing(3). */
+        if (ram[CONTRA_RAM_PLAYER_WATER_STATE + p] != 0u)
+        {
+            if ((ram[CONTRA_RAM_CONTROLLER_STATE + p] & 0x04u) != 0u)
+            {
+                continue; /* invisible while crouching in water -- no collision */
+            }
+            tbl = contra_collision_box_codes_00; /* in water */
+        }
+        else if (ram[CONTRA_RAM_PLAYER_JUMP_STATUS + p] != 0u)
+        {
+            tbl = contra_collision_box_codes_01; /* jumping */
+        }
+        else if (ram[CONTRA_RAM_PLAYER_SPRITE_CODE + p] == 0x17u)
+        {
+            tbl = contra_collision_box_codes_02; /* crouching (lower/shorter box) */
+        }
+        else
+        {
+            tbl = contra_collision_box_codes_03; /* standing */
+        }
         box = tbl[code];
         box_y = (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + slot] + box[0]);
         box_x = (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + slot] + box[1]);
@@ -11476,6 +11628,50 @@ static void contra_render_level_2_wall_structures(ContraCore *core)
     }
 }
 
+/* Faithful level-1 exploding bridge: the destroyed super-tiles the bridge writes
+   to the nametable must be re-drawn over the re-composed background every frame
+   (the native background ignores one-shot nametable writes), the same way the
+   level-2 wall structures persist. Each recorded gap cell keeps its destroyed
+   super-tile index and a scroll-invariant world X; map that back to the current
+   screen X and re-draw it with the same -0x0c / 8px alignment the bridge used. */
+static void contra_render_level_1_bridge_gaps(ContraCore *core)
+{
+    const uint8_t *const ram = core->ram;
+    const int scroll_offset = (int)ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET];
+    const uint16_t world_base =
+        (uint16_t)(((uint16_t)ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] << 8u) +
+                   ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET]);
+    uint8_t i;
+
+    for (i = 0u; i < core->l1_bridge_gap_count; ++i)
+    {
+        const uint8_t tile = core->l1_bridge_gap_tile[i];
+        /* cell_screen_x already has the -0x0c super-tile offset folded in (it was
+           recorded as draw_x_base - 12), so the alignment matches the draw path. */
+        const int cell_screen_x =
+            (int)core->l1_bridge_gap_world_x[i] - (int)world_base;
+        const int aligned_x = ((cell_screen_x + scroll_offset) & ~7) - scroll_offset;
+        const int aligned_y = (int)core->l1_bridge_gap_screen_y[i] & ~7;
+
+        if (tile == 0u)
+        {
+            continue;
+        }
+        /* Framebuffer overlay only: the destroyed super-tile was already written
+           to the PPU nametable model once at explosion time (the ROM's one-shot
+           load_bank_3_update_nametable_supertile). Re-writing it here every frame
+           is unnecessary and would perturb the nametable; only the visible
+           framebuffer needs the persistent redraw. */
+        contra_render_overlay_supertile(
+            core,
+            contra_level_1_nametable_update_supertile_data_addr,
+            contra_level_1_nametable_update_palette_data_addr,
+            aligned_x,
+            aligned_y,
+            tile);
+    }
+}
+
 static void contra_render_native_enemies(ContraCore *core)
 {
     if (!contra_is_native_combat_active(core))
@@ -11487,6 +11683,12 @@ static void contra_render_native_enemies(ContraCore *core)
         /* faithful indoor wall turret/core backgrounds; L1 + soldiers/bullets
            render via their routines and the OAM build */
         contra_render_level_2_wall_structures(core);
+    }
+    else
+    {
+        /* faithful level-1 destroyed-bridge super-tiles persist over the
+           re-composed background */
+        contra_render_level_1_bridge_gaps(core);
     }
 }
 
