@@ -163,6 +163,64 @@ static bool run_attract_until_level(ContraCore *core, uint8_t level, unsigned fr
     return false;
 }
 
+/* Enemy-slot accessors used by the level-2 helpers. With the faithful ROM enemy
+   system on, level-2 enemies live in real CPU RAM (16 slots); otherwise they live
+   in the invented core->enemies[] mirror. These read whichever is active so the
+   same level-2 tests pass under both builds. */
+#if CONTRA_USE_ROM_ENEMY_SYSTEM_L2
+static bool l2_enemy_active(const ContraCore *core, size_t i)
+{
+    return (i < 16u) && (core->ram[CONTRA_RAM_ENEMY_ROUTINE + i] != 0u);
+}
+static uint8_t l2_enemy_type(const ContraCore *core, size_t i)
+{
+    return core->ram[CONTRA_RAM_ENEMY_TYPE + i];
+}
+static uint8_t l2_enemy_hp(const ContraCore *core, size_t i)
+{
+    return core->ram[CONTRA_RAM_ENEMY_HP + i];
+}
+static uint8_t l2_enemy_x(const ContraCore *core, size_t i)
+{
+    return core->ram[CONTRA_RAM_ENEMY_X_POS + i];
+}
+static uint8_t l2_enemy_y(const ContraCore *core, size_t i)
+{
+    return core->ram[CONTRA_RAM_ENEMY_Y_POS + i];
+}
+/* The wall core is destroyable once it has opened -- bullet collision enabled,
+   i.e. ENEMY_STATE_WIDTH bit 7 clear (the faithful analogue of invented state 3).*/
+static bool l2_enemy_core_destroyable(const ContraCore *core, size_t i)
+{
+    return (core->ram[CONTRA_RAM_ENEMY_STATE_WIDTH + i] & 0x80u) == 0u;
+}
+#else
+static bool l2_enemy_active(const ContraCore *core, size_t i)
+{
+    return core->enemies[i].active != 0u;
+}
+static uint8_t l2_enemy_type(const ContraCore *core, size_t i)
+{
+    return core->enemies[i].type;
+}
+static uint8_t l2_enemy_hp(const ContraCore *core, size_t i)
+{
+    return core->enemies[i].hp;
+}
+static uint8_t l2_enemy_x(const ContraCore *core, size_t i)
+{
+    return (uint8_t)core->enemies[i].x;
+}
+static uint8_t l2_enemy_y(const ContraCore *core, size_t i)
+{
+    return (uint8_t)core->enemies[i].y;
+}
+static bool l2_enemy_core_destroyable(const ContraCore *core, size_t i)
+{
+    return core->enemies[i].state == 0x03u;
+}
+#endif
+
 static bool destroy_first_level2_wall_core(ContraCore *core);
 
 static bool advance_level2_room_once(ContraCore *core)
@@ -234,8 +292,7 @@ static bool find_first_active_wall_core(const ContraCore *core, size_t *wall_cor
 
     for (index = 0u; index < CONTRA_NATIVE_MAX_ENEMIES; ++index)
     {
-        if ((core->enemies[index].active != 0u) &&
-            (core->enemies[index].type == 0x14u))
+        if (l2_enemy_active(core, index) && (l2_enemy_type(core, index) == 0x14u))
         {
             *wall_core_index = index;
             return true;
@@ -252,8 +309,7 @@ static unsigned count_active_enemy_type(const ContraCore *core, uint8_t enemy_ty
 
     for (index = 0u; index < CONTRA_NATIVE_MAX_ENEMIES; ++index)
     {
-        if ((core->enemies[index].active != 0u) &&
-            (core->enemies[index].type == enemy_type))
+        if (l2_enemy_active(core, index) && (l2_enemy_type(core, index) == enemy_type))
         {
             ++count;
         }
@@ -285,8 +341,7 @@ static bool find_first_active_enemy_type(const ContraCore *core, uint8_t enemy_t
 
     for (index = 0u; index < CONTRA_NATIVE_MAX_ENEMIES; ++index)
     {
-        if ((core->enemies[index].active != 0u) &&
-            (core->enemies[index].type == enemy_type))
+        if (l2_enemy_active(core, index) && (l2_enemy_type(core, index) == enemy_type))
         {
             *enemy_index = index;
             return true;
@@ -305,7 +360,7 @@ static bool destroy_first_level2_wall_core(ContraCore *core)
     {
         step_no_input(core);
         if (find_first_active_wall_core(core, &wall_core_index) &&
-            (core->enemies[wall_core_index].state == 0x03u))
+            l2_enemy_core_destroyable(core, wall_core_index))
         {
             break;
         }
@@ -318,20 +373,20 @@ static bool destroy_first_level2_wall_core(ContraCore *core)
 
     for (frame = 0u;
          (frame < 128u) &&
-         (core->enemies[wall_core_index].active != 0u) &&
-         (core->enemies[wall_core_index].type == 0x14u) &&
-         (core->enemies[wall_core_index].hp != 0u);
+         l2_enemy_active(core, wall_core_index) &&
+         (l2_enemy_type(core, wall_core_index) == 0x14u) &&
+         (l2_enemy_hp(core, wall_core_index) != 0u);
          ++frame)
     {
         core->ram[CONTRA_RAM_PLAYER_BULLET_SLOT] = 0x01u;
-        core->ram[CONTRA_RAM_PLAYER_BULLET_X_POS] = (uint8_t)core->enemies[wall_core_index].x;
-        core->ram[CONTRA_RAM_PLAYER_BULLET_Y_POS] = (uint8_t)core->enemies[wall_core_index].y;
+        core->ram[CONTRA_RAM_PLAYER_BULLET_X_POS] = l2_enemy_x(core, wall_core_index);
+        core->ram[CONTRA_RAM_PLAYER_BULLET_Y_POS] = l2_enemy_y(core, wall_core_index);
         step_no_input(core);
     }
 
     if ((frame == 128u) ||
         !find_first_active_wall_core(core, &wall_core_index) ||
-        (core->enemies[wall_core_index].hp != 0u))
+        (l2_enemy_hp(core, wall_core_index) != 0u))
     {
         return false;
     }
@@ -389,8 +444,8 @@ static bool shoot_enemy_until_removed_or_changed(ContraCore *core, uint8_t enemy
         }
 
         core->ram[CONTRA_RAM_PLAYER_BULLET_SLOT] = 0x01u;
-        core->ram[CONTRA_RAM_PLAYER_BULLET_X_POS] = (uint8_t)core->enemies[enemy_index].x;
-        core->ram[CONTRA_RAM_PLAYER_BULLET_Y_POS] = (uint8_t)core->enemies[enemy_index].y;
+        core->ram[CONTRA_RAM_PLAYER_BULLET_X_POS] = l2_enemy_x(core, enemy_index);
+        core->ram[CONTRA_RAM_PLAYER_BULLET_Y_POS] = l2_enemy_y(core, enemy_index);
         step_no_input(core);
 
         if (count_active_enemy_type(core, enemy_type) < initial_count)
@@ -1416,7 +1471,7 @@ static bool test_level2_wall_core_destroy_allows_room_advance(void)
     step_no_input(&core);
     CHECK(find_first_active_wall_core(&core, &wall_core_index));
     CHECK(core.ram[CONTRA_RAM_WALL_CORE_REMAINING] == 0x01u);
-    CHECK(core.enemies[wall_core_index].hp == 0x08u);
+    CHECK(l2_enemy_hp(&core, wall_core_index) == 0x08u);
     CHECK(core.ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] == 0x00u);
 
     CHECK(destroy_first_level2_wall_core(&core));
@@ -1724,7 +1779,7 @@ static bool test_attract_level2_loads_wall_core_without_early_clear(void)
     CHECK(core.ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] == 0x00u);
     CHECK(core.ram[CONTRA_RAM_WALL_CORE_REMAINING] == 0x01u);
     CHECK(core.ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] == 0x00u);
-    CHECK(core.enemies[wall_core_index].type == 0x14u);
+    CHECK(l2_enemy_type(&core, wall_core_index) == 0x14u);
     CHECK(core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] == 0x00u);
     return true;
 }
