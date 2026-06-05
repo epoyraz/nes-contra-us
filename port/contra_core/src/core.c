@@ -9778,7 +9778,7 @@ static void contra_rom_jumping_soldier_routine_00(ContraCore *core, uint8_t x)
             ram[CONTRA_RAM_INDOOR_RED_SOLDIER_CREATED] = 0x01u;
         }
     }
-    contra_rom_init_indoor_enemy_pos_and_vel(core, x, 2u);
+    contra_rom_init_indoor_enemy_pos_and_vel(core, x, 1u); /* jumping velocity entry */
     contra_rom_advance_enemy_routine(core, x);
 }
 
@@ -9849,20 +9849,116 @@ static void contra_rom_jumping_soldier_routine_01(ContraCore *core, uint8_t x)
     }
 }
 
+/* group-of-4 (0x18) delay tables (bank0:3856/3899), indexed by
+   VAR_2 (fire round 0..2) * 4 + VAR_1 (soldier index 0..3). */
+static const uint8_t contra_four_soldiers_delay_running_tbl[12] = {
+    0x3Fu, 0x39u, 0x33u, 0x2Du, 0x18u, 0x10u, 0x10u, 0x18u, 0xFFu, 0xFFu, 0xFFu, 0xFFu};
+static const uint8_t contra_four_soldiers_firing_delay_tbl[12] = {
+    0x01u, 0x07u, 0x0Du, 0x13u, 0x18u, 0x18u, 0x18u, 0x18u, 0x10u, 0x18u, 0x18u, 0x10u};
+
+static uint8_t contra_rom_four_soldiers_delay_offset(const ContraCore *core, uint8_t x)
+{
+    return (uint8_t)(((core->ram[CONTRA_RAM_ENEMY_VAR_2 + x] << 2) +
+                      core->ram[CONTRA_RAM_ENEMY_VAR_1 + x]) % 12u);
+}
+
+static void contra_rom_four_soldiers_set_firing_delay(ContraCore *core, uint8_t x)
+{
+    core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        contra_four_soldiers_firing_delay_tbl[contra_rom_four_soldiers_delay_offset(core, x)];
+}
+
+/* four_soldiers_routine_00/01/02 (bank0:3820): a member of a group of four runs
+   in, periodically stops in a firing pose to shoot a segment-aimed bullet, and
+   the back two of the four split off in the opposite direction after the first
+   shot. */
+static void contra_rom_four_soldiers_routine_00(ContraCore *core, uint8_t x)
+{
+    contra_rom_init_indoor_enemy_pos_and_vel(core, x, 2u); /* group velocity entry */
+    contra_rom_four_soldiers_set_firing_delay(core, x);
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+static void contra_rom_four_soldiers_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] == 0x04u)
+        {
+            contra_rom_create_indoor_bullet(core, x); /* fire on the firing beat */
+        }
+        return;
+    }
+    /* delay elapsed: the back two soldiers reverse after the first round */
+    if ((ram[CONTRA_RAM_ENEMY_VAR_2 + x] == 0x01u) && (ram[CONTRA_RAM_ENEMY_VAR_1 + x] >= 0x02u))
+    {
+        contra_rom_reverse_enemy_x_direction(core, x);
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        contra_four_soldiers_delay_running_tbl[contra_rom_four_soldiers_delay_offset(core, x)];
+    contra_rom_advance_enemy_routine(core, x); /* -> routine_02 (run) */
+}
+
+static void contra_rom_four_soldiers_routine_02(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_init_sprite_from_frame(core, x);
+    if (contra_rom_apply_indoor_velocity(core, x))
+    {
+        return; /* ran off-screen and was removed */
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x96u; /* stop in the firing pose */
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_2 + x] + 1u);
+    contra_rom_four_soldiers_set_firing_delay(core, x);
+    contra_rom_set_enemy_routine_to_a(core, x, 0x02u); /* back to four_soldiers_routine_01 */
+}
+
 /* create the generator sub-type soldier (bank0:2485): running (0x15), jumping
-   (0x16), group-of-4 (0x18), grenade launcher (0x17). Running and jumping are
-   ported; group-of-4 / grenade launcher are skipped -- their script entry still
+   (0x16), group-of-4 (4x 0x18), grenade launcher (0x17). Running/jumping/group
+   are ported; the grenade launcher is skipped -- its script entry still
    advances, so the generator cadence and attack-round count stay faithful. */
 static void contra_rom_create_indoor_soldier(ContraCore *core, uint8_t stype, uint8_t attrs)
 {
     uint8_t type;
     int slot;
 
+    if (stype == 0x02u)
+    {
+        /* group of four: spawn 4 type-0x18 soldiers, labelled VAR_1 = 3..0
+           (@create_group_of_4, bank0:2505). */
+        int i;
+
+        for (i = 3; i >= 0; --i)
+        {
+            slot = contra_rom_find_next_enemy_slot(core);
+            if (slot < 0)
+            {
+                return;
+            }
+            core->ram[CONTRA_RAM_ENEMY_TYPE + slot] = 0x18u;
+            contra_rom_initialize_enemy(core, (uint8_t)slot);
+            core->ram[CONTRA_RAM_ENEMY_ATTRIBUTES + slot] = attrs;
+            core->ram[CONTRA_RAM_ENEMY_VAR_1 + slot] = (uint8_t)i;
+        }
+        return;
+    }
+
     switch (stype)
     {
         case 0x00u: type = 0x15u; break; /* running indoor soldier */
         case 0x01u: type = 0x16u; break; /* jumping indoor soldier */
-        default: return;                 /* group-of-4 / grenade launcher deferred */
+        default: return;                 /* grenade launcher deferred */
     }
     slot = contra_rom_find_next_enemy_slot(core);
     if (slot < 0)
@@ -10152,6 +10248,15 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
             {
                 case 0x01u: contra_rom_jumping_soldier_routine_00(core, x); break;
                 case 0x02u: contra_rom_jumping_soldier_routine_01(core, x); break;
+                default: break; /* hit/explosion via the 0xFE actor */
+            }
+            break;
+        case 0x18u: /* indoor group-of-4 soldier */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_four_soldiers_routine_00(core, x); break;
+                case 0x02u: contra_rom_four_soldiers_routine_01(core, x); break;
+                case 0x03u: contra_rom_four_soldiers_routine_02(core, x); break;
                 default: break; /* hit/explosion via the 0xFE actor */
             }
             break;
