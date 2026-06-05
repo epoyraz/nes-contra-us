@@ -8153,6 +8153,25 @@ static const uint8_t contra_enemy_prop_00[][4] = {
     {0x0Fu, 0x42u, 0x10u, 0x00u}, {0x0Cu, 0x82u, 0x20u, 0x00u},
     {0x89u, 0x00u, 0x01u, 0x00u}};
 
+/* enemy_prop_01/02 level-2/4 entries (bank7:9196), indexed by type-0x10:
+   {ENEMY_STATE_WIDTH, ENEMY_SCORE_COLLISION, ENEMY_HP, ENEMY_VAR_A}. The ROM
+   selects this via enemy_prop_ptr_tbl[CURRENT_LEVEL] for types >= 0x10, so the
+   indoor types get their own init (e.g. the wall turret's HP, the soldiers'
+   collision box) instead of the level-1 table. */
+static const uint8_t contra_enemy_prop_level2[][4] = {
+    {0x8Du, 0x02u, 0x01u, 0x00u}, /* 0x10 boss eye */
+    {0x2Fu, 0x22u, 0x05u, 0x00u}, /* 0x11 rollers */
+    {0x81u, 0x03u, 0x01u, 0x00u}, /* 0x12 grenades */
+    {0x9Fu, 0x35u, 0x04u, 0x00u}, /* 0x13 wall turret (wall cannon) */
+    {0x9Fu, 0x05u, 0x01u, 0x00u}, /* 0x14 wall core */
+    {0x13u, 0x16u, 0x01u, 0x00u}, /* 0x15 running indoor soldier */
+    {0x13u, 0x16u, 0x01u, 0x00u}, /* 0x16 jumping indoor soldier */
+    {0x13u, 0x36u, 0x01u, 0x00u}, /* 0x17 seeking guy (grenade launcher) */
+    {0x13u, 0x16u, 0x01u, 0x00u}, /* 0x18 group of 4 */
+    {0x89u, 0x00u, 0xF1u, 0x00u}, /* 0x19 indoor soldier generator */
+    {0x81u, 0x00u, 0xF1u, 0x00u}, /* 0x1A roller generator */
+};
+
 /* find_next_enemy_slot (bank7.asm:9024): first free slot scanning 15->0, or -1. */
 static int contra_rom_find_next_enemy_slot(const ContraCore *core)
 {
@@ -8224,7 +8243,21 @@ static void contra_rom_initialize_enemy(ContraCore *core, uint8_t x)
     core->l2_structure_tile[x] = 0u; /* no wall-structure tile drawn yet */
     contra_rom_clear_enemy_pt_2(core, x);
 
-    if (type < (sizeof(contra_enemy_prop_00) / sizeof(contra_enemy_prop_00[0])))
+    /* enemy_prop_ptr_tbl (bank7:9152): shared types (< 0x10) use the common
+       table; level-specific types (>= 0x10) use the per-level table. */
+    if ((type >= 0x10u) && (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u))
+    {
+        const size_t i = (size_t)(type - 0x10u);
+
+        if (i < (sizeof(contra_enemy_prop_level2) / sizeof(contra_enemy_prop_level2[0])))
+        {
+            ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = contra_enemy_prop_level2[i][0];
+            ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = contra_enemy_prop_level2[i][1];
+            ram[CONTRA_RAM_ENEMY_HP + x] = contra_enemy_prop_level2[i][2];
+            ram[CONTRA_RAM_ENEMY_VAR_A + x] = contra_enemy_prop_level2[i][3];
+        }
+    }
+    else if (type < (sizeof(contra_enemy_prop_00) / sizeof(contra_enemy_prop_00[0])))
     {
         ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = contra_enemy_prop_00[type][0];
         ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = contra_enemy_prop_00[type][1];
