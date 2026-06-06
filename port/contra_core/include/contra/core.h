@@ -94,6 +94,14 @@ typedef struct ContraCore
        intact bridge re-appears over the gap. */
     uint8_t l1_bridge_gap_tile[16];
     uint8_t l1_bridge_gap_count;
+    /* Render cache for faithful level-1 background super-tile enemies (red turret
+       0x07, rotating gun 0x04, door tunnel, etc.). Like the level-2 wall
+       structures and the bridge gaps above, the native L1 background re-composes
+       from the level super-tile data every frame and does not persist the
+       routines' one-shot nametable writes, so each active enemy's current
+       super-tile is re-drawn every frame from this per-slot cache or it is
+       invisible. 0xFF = nothing drawn. */
+    uint8_t l1_supertile[CONTRA_NATIVE_MAX_ENEMIES];
 } ContraCore;
 
 void contra_core_init(ContraCore *core);

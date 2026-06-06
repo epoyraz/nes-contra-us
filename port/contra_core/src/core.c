@@ -1682,6 +1682,12 @@ static void contra_zero_out_nametables(ContraCore *core)
     core->ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER] = 0x00u;
     memset(&core->ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER], 0, CONTRA_CPU_GRAPHICS_BUFFER_SIZE);
     memset(core->ppu_nametable, 0, sizeof(core->ppu_nametable));
+
+    /* zero_out_nametables falls through to write_graphic_data_to_ppu (bank7),
+       which resets both scroll offsets so the freshly drawn screen (game over /
+       intro / title) sits at scroll origin instead of the gameplay scroll. */
+    core->ram[CONTRA_RAM_VERTICAL_SCROLL] = 0x00u;
+    core->ram[CONTRA_RAM_HORIZONTAL_SCROLL] = 0x00u;
 }
 
 static void contra_load_intro_graphics(ContraCore *core)
@@ -2149,6 +2155,69 @@ static void contra_init_player_bullet_position(
         (uint8_t)(ram[CONTRA_RAM_SPRITE_Y_POS + player_index] + position_table[aim_dir][1]);
 }
 
+/* set_vel_for_speed_vars (bank7:4919): rotate `speed` right `shift` bits into a
+ * {fast,fract} pair (lsr fast / ror fract), then optionally negate. */
+static void contra_speed_code_to_velocity(
+    uint8_t speed, uint8_t shift, bool negate, uint8_t *out_fast, uint8_t *out_fract)
+{
+    uint8_t fast = speed;
+    uint8_t fract = 0u;
+    uint8_t i;
+
+    for (i = 0u; i < shift; ++i)
+    {
+        const uint8_t carry = (uint8_t)(fast & 0x01u);
+
+        fast = (uint8_t)(fast >> 1);
+        fract = (uint8_t)((fract >> 1) | (uint8_t)(carry << 7));
+    }
+    if (negate)
+    {
+        const uint16_t nf = (uint16_t)(0u - (uint16_t)fract);
+
+        fract = (uint8_t)nf;
+        fast = (uint8_t)(0u - (uint16_t)fast - ((nf >> 8u) & 1u));
+    }
+    *out_fast = fast;
+    *out_fract = fract;
+}
+
+/* set_indoor_bullet_vel (bank6:985): in the base/indoor level every player
+ * bullet ignores aim direction. Y is fixed "up" (into the screen); X drifts
+ * toward the screen-center vanishing point 0x80 (the pseudo-3D convergence),
+ * with magnitude |player_x - 0x80|. shift = 6 normally, 5 with rapid fire. */
+static void contra_set_indoor_bullet_velocity(
+    ContraCore *core, size_t bullet_slot, uint8_t player_index, bool rapid_fire)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t shift = rapid_fire ? 5u : 6u;
+    const uint8_t player_x = ram[CONTRA_RAM_SPRITE_X_POS + player_index];
+    const bool right_of_center = (player_x >= 0x80u);
+    const uint8_t x_speed = right_of_center
+        ? (uint8_t)(player_x - 0x80u)
+        : (uint8_t)(0x80u - player_x);
+    uint8_t fast;
+    uint8_t fract;
+
+    /* Y velocity: speed code 0x40, always negated (up). */
+    contra_speed_code_to_velocity(0x40u, shift, true, &fast, &fract);
+    ram[CONTRA_RAM_PLAYER_BULLET_Y_VEL_FAST + bullet_slot] = fast;
+    ram[CONTRA_RAM_PLAYER_BULLET_Y_VEL_FRACT + bullet_slot] = fract;
+
+    /* X velocity: magnitude |player_x - 0x80|, negated (toward center) when the
+       player is right of center. */
+    contra_speed_code_to_velocity(x_speed, shift, right_of_center, &fast, &fract);
+    ram[CONTRA_RAM_PLAYER_BULLET_X_VEL_FAST + bullet_slot] = fast;
+    ram[CONTRA_RAM_PLAYER_BULLET_X_VEL_FRACT + bullet_slot] = fract;
+}
+
+/* LEVEL_LOCATION_TYPE == 0x01: indoor base level (NOT the indoor boss screen,
+   whose location type has bit 7 set and uses the outdoor aim path). */
+static bool contra_in_indoor_base_level(const uint8_t *ram)
+{
+    return ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0x01u;
+}
+
 static void contra_set_player_bullet_velocity(
     ContraCore *core,
     size_t bullet_slot,
@@ -2224,6 +2293,10 @@ static bool contra_create_standard_or_machine_gun_bullet(
         rapid_fire ? contra_bullet_velocity_fract_rapid : contra_bullet_velocity_fract,
         aim_dir
     );
+    if (contra_in_indoor_base_level(ram))
+    {
+        contra_set_indoor_bullet_velocity(core, (size_t)bullet_slot, player_index, rapid_fire);
+    }
     contra_play_sound(core, 0x0Au);
     return true;
 }
@@ -2333,6 +2406,10 @@ static void contra_create_spray_bullets(ContraCore *core, uint8_t player_index)
             );
         contra_init_player_bullet_position(core, (size_t)bullet_slot, player_index, aim_dir);
         contra_set_spray_bullet_velocity(core, (size_t)bullet_slot, aim_dir, bullet_num, rapid_fire);
+        if (contra_in_indoor_base_level(ram))
+        {
+            contra_set_indoor_bullet_velocity(core, (size_t)bullet_slot, player_index, rapid_fire);
+        }
         ram[CONTRA_RAM_PLAYER_BULLET_S_BULLET_NUM + (size_t)bullet_slot] = bullet_num;
     }
 
@@ -2433,6 +2510,10 @@ static void contra_create_laser_bullets(ContraCore *core, uint8_t player_index, 
             contra_bullet_velocity_fract_rapid,
             aim_dir
         );
+        if (contra_in_indoor_base_level(ram))
+        {
+            contra_set_indoor_bullet_velocity(core, bullet_slot, player_index, true);
+        }
         ram[CONTRA_RAM_PLAYER_BULLET_TIMER + bullet_slot] = contra_laser_bullet_delay_tbl[bullet_num];
     }
 
@@ -3893,6 +3974,10 @@ static void contra_handle_player_fall_out(ContraCore *core, uint8_t player_index
     const bool demo_mode = ram[CONTRA_RAM_DEMO_MODE] != 0u;
     const bool demo_life_floor_reached =
         demo_mode && (ram[CONTRA_RAM_P1_NUM_LIVES + player_index] <= 0x61u);
+
+    /* init_player_and_weapon (bank7:5314): reset current weapon to the default
+       rifle on death, then fall through to init_player_attributes. */
+    ram[CONTRA_RAM_P1_CURRENT_WEAPON + player_index] = 0x00u;
 
     contra_init_player_attributes(core, player_index);
     ram[CONTRA_RAM_PLAYER_STATE + player_index] = 0x00u;
@@ -5569,6 +5654,7 @@ static void contra_rom_initialize_enemy(ContraCore *core, uint8_t x)
     ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x01u;
     core->l2_structure_tile[x] = 0u; /* no wall-structure tile drawn yet */
     core->l2_supertile[x] = 0xFFu;   /* no boss-room super-tile drawn yet */
+    core->l1_supertile[x] = 0xFFu;   /* no L1 enemy super-tile drawn yet */
     contra_rom_clear_enemy_pt_2(core, x);
 
     if ((type == 0x12u) && (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x00u))
@@ -5706,6 +5792,7 @@ static void contra_rom_clear_enemy(ContraCore *core, uint8_t x)
     core->ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0u;
     core->l2_structure_tile[x] = 0u;
     core->l2_supertile[x] = 0xFFu;
+    core->l1_supertile[x] = 0xFFu;
     contra_rom_clear_enemy_pt_2(core, x);
 }
 
@@ -5771,6 +5858,8 @@ static const uint8_t contra_bullet_fract_vel_tbl[14] = {
 static const uint8_t contra_bullet_sprite_tbl[6] = {0x1Eu, 0x21u, 0x21u, 0x1Eu, 0x79u, 0x07u};
 static const uint8_t contra_bullet_palette_tbl[6] = {0x01u, 0x02u, 0x02u, 0x01u, 0x01u, 0x02u};
 static const uint8_t contra_bullet_collision_code_tbl[6] = {0x01u, 0x05u, 0x05u, 0x01u, 0x02u, 0x00u};
+/* cannonball_explosion_sprite_tbl (bank0:498): type-1 bomb ground-explosion frames. */
+static const uint8_t contra_cannonball_explosion_sprite_tbl[3] = {0x37u, 0x36u, 0x37u};
 /* adjust_bullet_velocity speed scaling reduces to vel*mult/8: 0.5x .. 1.875x */
 static const uint8_t contra_bullet_speed_mult[8] = {4u, 6u, 8u, 10u, 12u, 13u, 14u, 15u};
 
@@ -5839,7 +5928,61 @@ static void contra_rom_enemy_bullet_routine_01(ContraCore *core, uint8_t x)
 
     core->ram[CONTRA_RAM_ENEMY_SPRITES + x] = contra_bullet_sprite_tbl[btype];
     core->ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = contra_bullet_palette_tbl[btype];
-    contra_rom_update_enemy_pos(core, x); /* removes itself off-screen */
+    contra_rom_update_enemy_pos(core, x); /* applies velocity + scroll, removes off-screen */
+    if (core->ram[CONTRA_RAM_ENEMY_TYPE + x] != 0x01u)
+    {
+        return; /* update_enemy_pos cleared the slot (off-screen) */
+    }
+    if (core->ram[CONTRA_RAM_ENEMY_VAR_1 + x] == 0x01u)
+    {
+        /* cannonball_add_gravity_explode (bank0:457): the large cannonball
+           (bullet sub-type 1, the L1 boss bomb) arcs under gravity -- add #$14 to
+           the 16-bit Y velocity each frame -- and explodes at the ground
+           (Y >= 0xD0), advancing to the explosion routine. Without this the bomb
+           flies in a straight line. */
+        const unsigned f =
+            (unsigned)core->ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] + 0x14u;
+
+        core->ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = (uint8_t)f;
+        core->ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] =
+            (uint8_t)(core->ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] + (f >> 8u));
+        if (core->ram[CONTRA_RAM_ENEMY_Y_POS + x] >= 0xD0u)
+        {
+            core->ram[CONTRA_RAM_ENEMY_FRAME + x] = 0x00u;
+            core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u;
+            contra_rom_advance_enemy_routine(core, x); /* -> enemy_bullet_routine_02 */
+        }
+    }
+}
+
+/* enemy_bullet_routine_02 (bank0:482): the L1 boss cannonball ground-explosion
+   animation -- 3 frames (sprites $37,$36,$37) on an 8-frame step, then advance to
+   remove_enemy. */
+static void contra_rom_enemy_bullet_routine_02(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t frame;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return; /* removed by scroll */
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x08u;
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+    frame = ram[CONTRA_RAM_ENEMY_FRAME + x];
+    if (frame >= 0x03u)
+    {
+        contra_rom_advance_enemy_routine(core, x); /* -> remove_enemy */
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = contra_cannonball_explosion_sprite_tbl[frame];
 }
 
 /* --- sniper (enemy type 0x06), bank0.asm:1738 --- */
@@ -8489,11 +8632,13 @@ static bool contra_rom_red_turret_load_supertile(ContraCore *core, uint8_t x)
     {
         idx = (uint8_t)(idx + 3u); /* alternate background variant */
     }
+    core->l1_supertile[x] =
+        contra_red_turret_supertile_tbl[(idx < 11u) ? idx : 0u];
     contra_render_level_1_nametable_update_supertile(
         core,
         (int)core->ram[CONTRA_RAM_ENEMY_X_POS + x],
         (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + x],
-        contra_red_turret_supertile_tbl[(idx < 11u) ? idx : 0u]);
+        core->l1_supertile[x]);
     return true;
 }
 
@@ -8745,6 +8890,7 @@ static void contra_rom_draw_enemy_supertile_a_set_delay(ContraCore *core, uint8_
     contra_render_level_1_nametable_update_supertile(
         core, (int)core->ram[CONTRA_RAM_ENEMY_X_POS + x],
         (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + x], supertile);
+    core->l1_supertile[x] = supertile; /* persist for the per-frame L1 redraw */
     core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u;
 }
 
@@ -10160,6 +10306,8 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
             {
                 case 0x01u: contra_rom_enemy_bullet_routine_00(core, x); break;
                 case 0x02u: contra_rom_enemy_bullet_routine_01(core, x); break;
+                case 0x03u: contra_rom_enemy_bullet_routine_02(core, x); break;
+                case 0x04u: contra_rom_clear_enemy(core, x); break; /* remove_enemy */
                 default: break;
             }
             break;
@@ -11686,6 +11834,37 @@ static void contra_render_native_enemies(ContraCore *core)
     }
     else
     {
+        int slot;
+
+        /* faithful level-1 background super-tile enemies (red turret 0x07,
+           rotating gun 0x04, door tunnel, ...) must be re-drawn over the
+           re-composed background every frame, exactly like the level-2 wall
+           structures: the routines' one-shot nametable write is wiped by the
+           background recompose, so without this redraw the turret is invisible
+           even though its logic runs and it fires. The per-slot cache is only
+           populated by the two super-tile draw helpers (red_turret_load_supertile
+           and draw_enemy_supertile_a_set_delay), so the bridge gaps below are not
+           double-drawn. */
+        for (slot = 0; slot < CONTRA_NATIVE_MAX_ENEMIES; ++slot)
+        {
+            const uint8_t sx = (uint8_t)slot;
+            const uint8_t st = core->l1_supertile[sx];
+            const int scroll_offset = (int)core->ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET];
+            int aligned_x;
+            int aligned_y;
+
+            if ((st == 0xFFu) || (core->ram[CONTRA_RAM_ENEMY_ROUTINE + sx] == 0u) ||
+                !contra_rom_enemy_type_is_supertile(core->ram[CONTRA_RAM_ENEMY_TYPE + sx]))
+            {
+                continue;
+            }
+            /* same -0x0c / 8px world-space alignment the draw path uses
+               (contra_render_level_1_nametable_update_supertile). */
+            aligned_x = ((((int)core->ram[CONTRA_RAM_ENEMY_X_POS + sx] - 12) + scroll_offset) & ~7) - scroll_offset;
+            aligned_y = ((int)core->ram[CONTRA_RAM_ENEMY_Y_POS + sx] - 12) & ~7;
+            contra_render_level_1_overlay_supertile(core, aligned_x, aligned_y, st);
+        }
+
         /* faithful level-1 destroyed-bridge super-tiles persist over the
            re-composed background */
         contra_render_level_1_bridge_gaps(core);
