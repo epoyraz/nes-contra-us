@@ -419,6 +419,12 @@ static const uint16_t contra_level_1_nametable_update_supertile_data_addr = 0x83
 static const uint16_t contra_level_1_nametable_update_palette_data_addr = 0x86ACu;
 static const uint16_t contra_level_2_nametable_update_supertile_data_addr = 0x88A8u;
 static const uint16_t contra_level_2_nametable_update_palette_data_addr = 0x8E91u;
+/* Boss-room (LEVEL_LOCATION_TYPE bit 7) destructible overlay set: update_nametable_supertile
+   (bank7:1356-1365) forces ptr-table index 8 -> level_2_4_nametable_update_supertile_data
+   (bank3:1146, CPU $BA1A) + level_2_4_boss_nametable_update_palette_data (bank3:1212, $BDC4).
+   This is the cannon/plating housing graphics, distinct from the corridor set at $88A8. */
+static const uint16_t contra_level_2_4_boss_nametable_update_supertile_data_addr = 0xBA1Au;
+static const uint16_t contra_level_2_4_boss_nametable_update_palette_data_addr = 0xBDC4u;
 /* level_3_nametable_update_supertile_data / _palette_data (bank3, from the cc65
    symbol map): the dragon-boss mouth (and its defeat) supertiles. */
 static const uint16_t contra_level_3_nametable_update_supertile_data_addr = 0x9368u;
@@ -13918,18 +13924,29 @@ static void contra_render_level_2_overlay_supertile(
     uint8_t supertile_index
 )
 {
+    /* update_nametable_supertile (bank7:1356-1365) forces the boss-room overlay table
+       when LEVEL_LOCATION_TYPE bit 7 is set, so the wall cannon/plating housings draw
+       from level_2_4_nametable_update_supertile_data ($BA1A) not the corridor set. */
+    const int boss = (core->ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] & 0x80u) != 0u;
+    const uint16_t supertile_addr = boss
+        ? contra_level_2_4_boss_nametable_update_supertile_data_addr
+        : contra_level_2_nametable_update_supertile_data_addr;
+    const uint16_t palette_addr = boss
+        ? contra_level_2_4_boss_nametable_update_palette_data_addr
+        : contra_level_2_nametable_update_palette_data_addr;
+
     contra_write_overlay_supertile_to_ppu(
         core,
-        contra_level_2_nametable_update_supertile_data_addr,
-        contra_level_2_nametable_update_palette_data_addr,
+        supertile_addr,
+        palette_addr,
         dest_x,
         dest_y,
         supertile_index
     );
     contra_render_overlay_supertile(
         core,
-        contra_level_2_nametable_update_supertile_data_addr,
-        contra_level_2_nametable_update_palette_data_addr,
+        supertile_addr,
+        palette_addr,
         dest_x,
         dest_y,
         supertile_index
