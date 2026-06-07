@@ -1,0 +1,33 @@
+port/tests/core_behavior_tests.c
+  s_613cc88c061869::t_573da9382b11f2 1846-1877
+  s_613cc88c061869::t_fb88446cabc0fe 1834
+  s_613cc88c061869::t_f9e903fb01d65c 1962
+tools/mesen_l2_demo_trace.lua
+  s_613cc88c061869::t_964ed3fadbd8d6 130-138
+  s_613cc88c061869::t_f54e6f184aca9d 21
+  s_613cc88c061869::t_2bf69e2d2e547f 40
+port/contra_core/src/core.c
+  s_613cc88c061869::t_5de72fa455b735 3670,3672,3675-3680
+  s_613cc88c061869::t_c9f88e8bd68f03 3728-3730
+  s_613cc88c061869::t_bc821615110d0e 2125-2128
+  s_613cc88c061869::t_af8d92be831f01 7307-7312
+port/tools/level1_frame_trace.c
+  s_613cc88c061869::t_3c81de3ef04723 158-167
+  s_613cc88c061869::t_6657bffa19e4a8 40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "e4d59ab99a9408ddb78f87b9b6e273b407a3abcb",
+  "prompts": {},
+  "sessions": {
+    "s_613cc88c061869": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cc32df33-e503-4de3-99cb-5cfbe54eb58b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
