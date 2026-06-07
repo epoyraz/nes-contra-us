@@ -1,0 +1,28 @@
+port/contra_core/src/core.c
+  s_5c0dbe839e4c8d::t_68aa1e2294137b 9106-9112,9123-9125,9134-9136,9144,9147-9157,9160,9180-9187
+  s_5c0dbe839e4c8d::t_fac0c734941ff1 6338-6349
+  s_5c0dbe839e4c8d::t_cf0026da77cbb1 6398
+  s_5c0dbe839e4c8d::t_629a8a878e11af 6561,6567-6574
+  s_5c0dbe839e4c8d::t_13d24ba88603cd 6375-6376,6380
+  s_5c0dbe839e4c8d::t_a2daa50b4b46ed 8533-8538,8553-8557
+  s_5c0dbe839e4c8d::t_9a4f464847976e 9105,9113-9122,9126-9133,9137-9143,9145-9146,9158-9159,9161-9179,9188-9194
+port/tests/checkpoint_trace_tests.c
+  s_5c0dbe839e4c8d::t_21b753a092fe0f 75
+  s_5c0dbe839e4c8d::t_f08df41012b1ae 67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "a14c076265baa447d7090cf7afc346e13c9f7abe",
+  "prompts": {},
+  "sessions": {
+    "s_5c0dbe839e4c8d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4f40fdc6-1b1e-48bb-90fc-9d022eb2ba64",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
