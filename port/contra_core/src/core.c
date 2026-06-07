@@ -110,6 +110,7 @@ static void contra_rom_bullet_generation(
 /* Faithful enemy types that render as background super-tiles (nametable writes)
    rather than OAM sprites: pill box, rotating gun, red turret, bomb turret,
    plated door, bridge. */
+/* PORT HARNESS (enemy_type_is_supertile): no single ASM routine -- classify enemy types rendered as background super-tiles. */
 static bool contra_rom_enemy_type_is_supertile(uint8_t type)
 {
     switch (type)
@@ -590,6 +591,7 @@ static size_t contra_prg_rom_offset(uint8_t bank, uint16_t cpu_addr)
     return header_size + ((size_t)bank * bank_size) + cpu_offset;
 }
 
+/* PORT HARNESS (read_u8): no single ASM routine -- read a byte from the PRG-ROM image. */
 static uint8_t contra_rom_read_u8(uint8_t bank, uint16_t cpu_addr)
 {
     const size_t offset = contra_prg_rom_offset(bank, cpu_addr);
@@ -602,6 +604,7 @@ static uint8_t contra_rom_read_u8(uint8_t bank, uint16_t cpu_addr)
     return contra_rom_image.bytes[offset];
 }
 
+/* PORT HARNESS (read_u16): no single ASM routine -- read a little-endian word from the PRG-ROM image. */
 static uint16_t contra_rom_read_u16(uint8_t bank, uint16_t cpu_addr)
 {
     const uint8_t low = contra_rom_read_u8(bank, cpu_addr);
@@ -3161,6 +3164,7 @@ static bool contra_read_level_collision_pattern_index(
    in world space (screen<<8 + scroll + x is scroll-invariant), so it persists as
    the level scrolls and after the bridge enemy is removed. When the faithful
    system is off this list stays empty, so the check is a no-op. */
+/* PORT HARNESS (bridge_has_gap): no single ASM routine -- test the port-side bridge-gap list at a world position. */
 static bool contra_rom_bridge_has_gap(const ContraCore *core, uint8_t screen_x, uint8_t screen_y)
 {
     const uint16_t world_x =
@@ -6450,6 +6454,7 @@ static uint16_t contra_rom_adjust_bullet_velocity(uint8_t fract, uint8_t speed)
 
 /* create_enemy_bullet (bank7): spawn a type-1 enemy bullet at (px,py) aimed by
    (angle, quadrant: bit0 up, bit1 left) at the given speed. */
+/* create_enemy_bullet (bank7:9857-9911): spawn type-1 enemy bullet aimed by angle/quadrant. */
 static bool contra_rom_create_enemy_bullet(
     ContraCore *core, uint8_t btype, uint8_t angle, uint8_t quadrant, uint8_t speed,
     uint8_t px, uint8_t py)
@@ -6924,10 +6929,16 @@ static void contra_rom_weapon_box_routine_03(ContraCore *core, uint8_t x)
     contra_rom_clear_enemy(core, x); /* remove_enemy */
 }
 
-/* add_4_to_enemy_y_pos (bank7.asm): ENEMY_Y_POS += 4. */
+/* Defined later (used by the weapon-item landing code); forward-declared so
+   add_4_to_enemy_y_pos can grid-snap the enemy Y here. */
+static void contra_rom_add_a_with_vert_scroll_to_enemy_y_pos(ContraCore *core, uint8_t x, uint8_t a);
+
+/* add_4_to_enemy_y_pos (bank7:8491-8509): a=4, then add_a_with_vert_scroll. The ROM
+   falls through into the vert-scroll snap, so this is NOT a plain Y += 4 -- it grid-
+   aligns the enemy to the terrain before nudging down. */
 static void contra_rom_add_4_to_enemy_y_pos(ContraCore *core, uint8_t x)
 {
-    contra_rom_add_a_to_enemy_y_pos(core, x, 0x04u);
+    contra_rom_add_a_with_vert_scroll_to_enemy_y_pos(core, x, 0x04u);
 }
 
 /* add_y_to_y_pos_get_bg_collision (bank7.asm:8679): bg collision code at
@@ -6939,12 +6950,13 @@ static uint8_t contra_rom_add_y_to_y_pos_get_bg_collision(const ContraCore *core
     return contra_get_outdoor_horizontal_bg_collision(core, core->ram[CONTRA_RAM_ENEMY_X_POS + x], ey);
 }
 
-/* set_enemy_y_velocity_to_0 (bank7.asm). */
+/* set_enemy_y_velocity_to_0 (bank7:7858-7862): zero only ENEMY_Y_VELOCITY FRACT and
+   FAST. The ROM deliberately leaves ENEMY_Y_VEL_ACCUM (the running sub-pixel carry)
+   untouched, so the next time Y velocity resumes its accumulator phase continues. */
 static void contra_rom_set_enemy_y_velocity_to_0(ContraCore *core, uint8_t x)
 {
     core->ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] = 0u;
     core->ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = 0u;
-    core->ram[CONTRA_RAM_ENEMY_Y_VEL_ACCUM + x] = 0u;
 }
 
 /* --- soldier / running man (enemy type 0x05), bank0.asm:1217 --- */
@@ -7077,6 +7089,7 @@ static void contra_rom_update_enemy_x_pos(ContraCore *core, uint8_t x)
         ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] + (uint8_t)(accum >> 8u));
 }
 
+/* update_enemy_y_pos (bank7:7881-7890): apply Y velocity (accum+fract, Y += fast + carry). */
 static void contra_rom_update_enemy_y_pos(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -7162,6 +7175,7 @@ static void contra_rom_set_soldier_sprite(ContraCore *core, uint8_t x)
 }
 
 /* soldier_change_direction (bank0.asm): flip direction, reset X velocity. */
+/* soldier_change_direction (bank0:1477-1483): flip soldier direction, reset X velocity. */
 static void contra_rom_soldier_change_direction(ContraCore *core, uint8_t x)
 {
     core->ram[CONTRA_RAM_ENEMY_VAR_4 + x] = (uint8_t)(core->ram[CONTRA_RAM_ENEMY_VAR_4 + x] + 1u);
@@ -7246,12 +7260,40 @@ static void contra_rom_flying_capsule_routine_00(ContraCore *core, uint8_t x)
     contra_rom_advance_enemy_routine(core, x);
 }
 
-/* flying_capsule_routine_01 (bank0.asm): sprite 0x4D, weave the Y velocity,
-   apply velocity + scroll. */
+/* set_flying_capsule_x_vel + set_flying_capsule_path (bank7:8739/8765): the vertical-
+   level weave -- pull X velocity toward the base column VAR_2 by subtracting
+   2*(ENEMY_X_POS - VAR_2) (16-bit) from the X velocity. Mirror of the Y weave. */
+static void contra_rom_set_flying_capsule_x_vel(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t pos = ram[CONTRA_RAM_ENEMY_X_POS + x];
+    const uint8_t base = ram[CONTRA_RAM_ENEMY_VAR_2 + x];
+    uint16_t dist = (uint16_t)(((pos < base) ? 0xFF00u : 0x0000u) | (uint8_t)(pos - base));
+    uint16_t vel;
+
+    dist = (uint16_t)(dist << 1u); /* shift count = 1 (vertical) */
+    vel = (uint16_t)(((uint16_t)ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] << 8u) |
+                     ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x]);
+    vel = (uint16_t)(vel - dist);
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] = (uint8_t)(vel >> 8u);
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x] = (uint8_t)vel;
+}
+
+/* flying_capsule_routine_01 (bank0:720-734): sprite 0x4D; the weave axis depends on
+   LEVEL_SCROLLING_TYPE -- vertical levels weave X (set_flying_capsule_x_vel),
+   horizontal/indoor weave Y -- then apply velocity + scroll. The port previously
+   always wove Y, so a capsule on a vertical level drifted on the wrong axis. */
 static void contra_rom_flying_capsule_routine_01(ContraCore *core, uint8_t x)
 {
     core->ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x4Du;
-    contra_rom_set_flying_capsule_y_vel(core, x);
+    if (core->ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u)
+    {
+        contra_rom_set_flying_capsule_x_vel(core, x);
+    }
+    else
+    {
+        contra_rom_set_flying_capsule_y_vel(core, x);
+    }
     contra_rom_update_enemy_pos(core, x);
 }
 
@@ -7364,19 +7406,26 @@ static uint8_t contra_rom_get_quadrant_aim_dir(
    normal-state player using table tbl. Indoor levels aim at a fixed player Y
    (0xB0), matching the ROM (it ignores indoor jump height); if neither player is
    in a normal state, aim at screen center-bottom (0x80, 0xFF). */
+/* aim_and_create_enemy_bullet (bank7:9750-9769): aim enemy bullet at closest normal player, fire. */
 static void contra_rom_aim_and_create_enemy_bullet(
     ContraCore *core, uint8_t sx, uint8_t sy, uint8_t btype, uint8_t speed, const uint8_t *tbl)
 {
     uint8_t *const ram = core->ram;
     const uint8_t p0 = ram[CONTRA_RAM_SPRITE_X_POS + 0u];
     const uint8_t p1 = ram[CONTRA_RAM_SPRITE_X_POS + 1u];
-    const uint8_t d0 = (p0 >= sx) ? (uint8_t)(p0 - sx) : (uint8_t)(sx - p0);
-    const uint8_t d1 = (p1 >= sx) ? (uint8_t)(p1 - sx) : (uint8_t)(sx - p1);
-    uint8_t idx = ((p1 != 0u) && ((p0 == 0u) || (d1 < d0))) ? 1u : 0u;
+    /* player_enemy_x_dist (bank7:8844): closest player by |X dist|, non-normal players
+       forced to max distance (0xFE/0xFF) via PLAYER_STATE -- not an x==0 absent proxy. */
+    uint8_t d0 = (p0 >= sx) ? (uint8_t)(p0 - sx) : (uint8_t)(sx - p0);
+    uint8_t d1 = (p1 >= sx) ? (uint8_t)(p1 - sx) : (uint8_t)(sx - p1);
+    uint8_t idx;
     uint8_t tx;
     uint8_t ty;
     uint8_t quadrant;
     uint8_t nibble;
+
+    if (ram[CONTRA_RAM_PLAYER_STATE + 0u] != 0x01u) { d0 = 0xFEu; }
+    if (ram[CONTRA_RAM_PLAYER_STATE + 1u] != 0x01u) { d1 = 0xFFu; }
+    idx = (d1 < d0) ? 1u : 0u;
 
     if (ram[CONTRA_RAM_ENEMY_ATTACK_FLAG] == 0u)
     {
@@ -7417,6 +7466,7 @@ static void contra_rom_wall_turret_routine_00(ContraCore *core, uint8_t x)
     contra_rom_advance_enemy_routine(core, x);
 }
 
+/* wall_turret_routine_01 (bank0:3059-3070): draw closed turret tile, wait, advance. */
 static void contra_rom_wall_turret_routine_01(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -7462,6 +7512,7 @@ static void contra_rom_wall_turret_routine_02(ContraCore *core, uint8_t x)
     contra_rom_advance_enemy_routine(core, x);
 }
 
+/* wall_turret_routine_03 (bank0:3106-3117): on timer, aim and fire a bullet. */
 static void contra_rom_wall_turret_routine_03(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -7661,9 +7712,12 @@ static void contra_rom_wall_core_routine_04(ContraCore *core, uint8_t x)
     contra_rom_set_enemy_routine_to_a(core, x, 0x04u); /* back to wall_core_routine_03 */
 }
 
-/* wall_core_routine_05/06 (bank7:e737 / enemy_routine_explosion): play the core's
-   own explosion (sprites 0x38..0x3a) -- bit7 of STATE_WIDTH stops further bullet
-   hits so the chain isn't re-entered -- then advance to the room/blow-open. */
+/* wall_core_routine_05 (bank7:7527-7531): enemy_routine_init_explosion then FRAME=0.
+   Unlike most enemies, the wall core can't convert to the shared type-0xFE explosion
+   actor -- it must stay a wall_core to reach routine_07 (the room blow-open) -- so it
+   inline-runs the explosion (sprites 0x38..0x3a). Faithful to init_explosion: set
+   STATE_WIDTH |= 0x81 (bit7 lets bullets pass, bit0 skips player-body collision) and
+   force sprite palette 2 ((attr & 0xFC) | 0x06), the explosion's orange/yellow. */
 static const uint8_t contra_wall_core_explosion_sprite_tbl[3] = {0x38u, 0x39u, 0x3Au};
 
 static void contra_rom_wall_core_routine_05(ContraCore *core, uint8_t x)
@@ -7671,17 +7725,23 @@ static void contra_rom_wall_core_routine_05(ContraCore *core, uint8_t x)
     uint8_t *const ram = core->ram;
 
     ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
-        (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] | 0x80u); /* no more bullet hits */
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] | 0x81u);
+    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] =
+        (uint8_t)((ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] & 0xFCu) | 0x06u);
     ram[CONTRA_RAM_ENEMY_FRAME + x] = 0u;
     ram[CONTRA_RAM_ENEMY_SPRITES + x] = contra_wall_core_explosion_sprite_tbl[0];
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x0Au;
     contra_rom_advance_enemy_routine(core, x); /* -> routine_06 */
 }
 
+/* wall_core_routine_06 (bank7:7616-7670 enemy_routine_explosion, 3-frame variant):
+   scroll with the background each frame, then step the explosion sprites; on the last
+   frame advance to routine_07. */
 static void contra_rom_wall_core_routine_06(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
 
+    contra_rom_add_scroll_to_enemy_pos(core, x);
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
         (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
     if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
@@ -7804,6 +7864,7 @@ static const uint8_t *const contra_l2_enemy_gen_screen_tbl[5] = {
 static const size_t contra_l2_enemy_gen_screen_len[5] = {6u, 12u, 4u, 6u, 16u};
 
 /* reverse_enemy_x_direction (bank7): negate the 16-bit X velocity. */
+/* reverse_enemy_x_direction (bank7:7919-7927): negate 16-bit enemy X velocity. */
 static void contra_rom_reverse_enemy_x_direction(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -7816,6 +7877,7 @@ static void contra_rom_reverse_enemy_x_direction(ContraCore *core, uint8_t x)
 }
 
 /* find_far_segment_for_a (bank7): 6 (far left) .. 0 (far right) for X position. */
+/* find_far_segment (bank7:8931-8948): X position to far-segment code 6..0. */
 static uint8_t contra_rom_find_far_segment(uint8_t xpos)
 {
     int y;
@@ -7832,6 +7894,7 @@ static uint8_t contra_rom_find_far_segment(uint8_t xpos)
 
 /* init_indoor_enemy_pos_and_vel (bank0): fixed spawn position + table velocity;
    ENEMY_ATTRIBUTES bit0 set = arrives from the left (reverse direction, X=0x58). */
+/* init_indoor_enemy_pos_and_vel (bank0:4073-4089): seed indoor enemy spawn X/Y and velocity. */
 static void contra_rom_init_indoor_enemy_pos_and_vel(ContraCore *core, uint8_t x, uint8_t kind)
 {
     uint8_t *const ram = core->ram;
@@ -7883,6 +7946,7 @@ static void contra_rom_init_sprite_from_frame(ContraCore *core, uint8_t x)
 /* apply_enemy_velocity_set_bg_priority (bank7): integrate X velocity, remove the
    enemy once it walks off the indoor screen (X>=0xB0 moving right, X<0x50 moving
    left), and set the sprite bg-priority bit by X. Returns true if removed. */
+/* apply_indoor_velocity (bank0:4104-4143): integrate X velocity, off-screen removal, bg priority. */
 static bool contra_rom_apply_indoor_velocity(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -7926,6 +7990,7 @@ static bool contra_rom_apply_indoor_velocity(ContraCore *core, uint8_t x)
 /* create_indoor_bullet (bank0): fire a regular bullet aimed by the firing
    soldier's horizontal segment (a type-0x01 enemy, VAR_1=3; the shared
    enemy-bullet routines then animate and move it). */
+/* create_indoor_bullet (bank0:4226-4257): spawn aimed indoor enemy bullet (type 1). */
 static void contra_rom_create_indoor_bullet(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -8013,6 +8078,7 @@ static void contra_rom_roller_routine_00(ContraCore *core, uint8_t x)
     contra_rom_advance_enemy_routine(core, x);
 }
 
+/* roller_routine_01 (bank0:2866-2900): roller sprite size, collision enable, Y removal. */
 static void contra_rom_roller_routine_01(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -8053,7 +8119,7 @@ static void contra_rom_roller_routine_01(ContraCore *core, uint8_t x)
    0xFD is the -3 upward throw, and routine_01 adding gravity to it is the arc.)
    (level-1 0x12 is the exploding bridge, a separate future port.) */
 
-/* set_enemy_falling_arc_pos (bank0:area): advance the height + ground, place the
+/* set_enemy_falling_arc_pos (bank7:8957-8980): advance the height + ground, place the
    sprite at VAR_1+VAR_3, and remove the grenade if it falls off the bottom/left. */
 static void contra_rom_set_enemy_falling_arc_pos(ContraCore *core, uint8_t x)
 {
@@ -8282,6 +8348,7 @@ static void contra_rom_grenade_launcher_apply_vel_aim(ContraCore *core, uint8_t 
     }
 }
 
+/* grenade_launcher_routine_00 (bank0:3680-3688): spawn grenade launcher, set flag/vel/delay. */
 static void contra_rom_grenade_launcher_routine_00(ContraCore *core, uint8_t x)
 {
     core->ram[CONTRA_RAM_GRENADE_LAUNCHER_FLAG] = 0x01u;
@@ -8290,6 +8357,7 @@ static void contra_rom_grenade_launcher_routine_00(ContraCore *core, uint8_t x)
     contra_rom_set_enemy_delay_adv_routine(core, x, 0x20u);
 }
 
+/* grenade_launcher_routine_01 (bank0:3689-3731): grenade launcher posed firing / seek-turn logic. */
 static void contra_rom_grenade_launcher_routine_01(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -8501,6 +8569,7 @@ static uint8_t contra_rom_four_soldiers_delay_offset(const ContraCore *core, uin
                       core->ram[CONTRA_RAM_ENEMY_VAR_1 + x]) % 12u);
 }
 
+/* four_soldiers_set_firing_delay (bank0:3874-3883): set group-of-4 firing animation delay from table. */
 static void contra_rom_four_soldiers_set_firing_delay(ContraCore *core, uint8_t x)
 {
     core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
@@ -8518,6 +8587,7 @@ static void contra_rom_four_soldiers_routine_00(ContraCore *core, uint8_t x)
     contra_rom_advance_enemy_routine(core, x);
 }
 
+/* four_soldiers_routine_01 (bank0:3827-3849): wait delay, fire on beat, split rear pair. */
 static void contra_rom_four_soldiers_routine_01(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -8542,6 +8612,7 @@ static void contra_rom_four_soldiers_routine_01(ContraCore *core, uint8_t x)
     contra_rom_advance_enemy_routine(core, x); /* -> routine_02 (run) */
 }
 
+/* four_soldiers_routine_02 (bank0:3862-3873): run, then stop into firing pose, reset. */
 static void contra_rom_four_soldiers_routine_02(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -8620,6 +8691,7 @@ static void contra_rom_indoor_soldier_gen_routine_00(ContraCore *core, uint8_t x
     contra_rom_advance_enemy_routine(core, x);
 }
 
+/* indoor_soldier_gen_routine_01 (bank0:2422-2501): per-room soldier generator reads spawn script. */
 static void contra_rom_indoor_soldier_gen_routine_01(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -8700,12 +8772,14 @@ static const uint8_t *const contra_roller_gen_init_tbl[2] = {
 static const size_t contra_roller_gen_init_len[2] = {
     sizeof(contra_roller_gen_init_00), sizeof(contra_roller_gen_init_01)};
 
+/* indoor_roller_gen_routine_00 (bank0:3910-3913): roller generator init, set 0x60 delay. */
 static void contra_rom_indoor_roller_gen_routine_00(ContraCore *core, uint8_t x)
 {
     core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x60u;
     contra_rom_advance_enemy_routine(core, x);
 }
 
+/* indoor_roller_gen_routine_01 (bank0:3914-3973): roller generator spawns pattern bursts per delay. */
 static void contra_rom_indoor_roller_gen_routine_01(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -8814,6 +8888,7 @@ static void contra_rom_wall_cannon_routine_00(ContraCore *core, uint8_t x)
     contra_rom_set_enemy_delay_adv_routine(core, x, 0x50u);
 }
 
+/* wall_cannon_routine_01 (bank7:9295-9317): open cannon: animate, become hittable + arm attack. */
 static void contra_rom_wall_cannon_routine_01(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -8843,6 +8918,7 @@ static void contra_rom_wall_cannon_routine_01(ContraCore *core, uint8_t x)
 static const uint8_t contra_wall_cannon_bullet_x_offset[3] = {0xF8u, 0x00u, 0x08u};
 static const uint8_t contra_wall_cannon_bullet_type_angle[3] = {0x48u, 0x46u, 0x44u};
 
+/* wall_cannon_routine_02 (bank7:9325-9353): fire 3-bullet downward spread, then start closing. */
 static void contra_rom_wall_cannon_routine_02(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -8875,6 +8951,7 @@ static void contra_rom_wall_cannon_routine_02(ContraCore *core, uint8_t x)
     contra_rom_set_enemy_delay_adv_routine(core, x, 0x06u);
 }
 
+/* wall_cannon_routine_03 (bank7:9363-9385): animate closing, weapon-scaled reopen delay. */
 static void contra_rom_wall_cannon_routine_03(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -8897,17 +8974,20 @@ static void contra_rom_wall_cannon_routine_03(ContraCore *core, uint8_t x)
     contra_rom_set_enemy_routine_to_a(core, x, 0x02u); /* -> wall_cannon_routine_01 */
 }
 
+/* wall_cannon_routine_04 (bank7:9387-9391): draw destroyed super-tile 0x05, then explode. */
 static void contra_rom_wall_cannon_routine_04(ContraCore *core, uint8_t x)
 {
     core->l2_supertile[x] = 0x05u; /* destroyed super-tile, then explode */
     contra_rom_begin_enemy_explosion(core, x);
 }
 
+/* wall_plating_routine_00 (bank7:9407-9409): set 0x80 deploy delay and advance routine. */
 static void contra_rom_wall_plating_routine_00(ContraCore *core, uint8_t x)
 {
     contra_rom_set_enemy_delay_adv_routine(core, x, 0x80u);
 }
 
+/* wall_plating_routine_01 (bank7:9412-9428): deploy plating frames, then HP=0x0A target. */
 static void contra_rom_wall_plating_routine_01(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -8929,6 +9009,7 @@ static void contra_rom_wall_plating_routine_01(ContraCore *core, uint8_t x)
     contra_rom_advance_enemy_routine(core, x); /* -> routine_02 (idle target) */
 }
 
+/* wall_plating_routine_03 (bank7:9436-9443): destroyed super-tile, bump destroyed count, explode. */
 static void contra_rom_wall_plating_routine_03(ContraCore *core, uint8_t x)
 {
     core->l2_supertile[x] = 0x05u; /* destroyed super-tile, then explode */
@@ -8963,17 +9044,26 @@ static void contra_rom_set_bullet_velocities(
 /* get_quadrant_aim_dir_for_player (bank7): aim-direction nibble from (sx,sy)
    toward the closest normal-state player (indoor Y fixed at 0xB0; screen-center
    if neither is normal); *quadrant gets $07. */
+/* aim_at_player (bank7:10425-10455): quadrant aim nibble toward closest normal player. */
 static uint8_t contra_rom_aim_at_player(
     ContraCore *core, uint8_t sx, uint8_t sy, const uint8_t *tbl, uint8_t *quadrant)
 {
     uint8_t *const ram = core->ram;
     const uint8_t p0 = ram[CONTRA_RAM_SPRITE_X_POS + 0u];
     const uint8_t p1 = ram[CONTRA_RAM_SPRITE_X_POS + 1u];
-    const uint8_t d0 = (p0 >= sx) ? (uint8_t)(p0 - sx) : (uint8_t)(sx - p0);
-    const uint8_t d1 = (p1 >= sx) ? (uint8_t)(p1 - sx) : (uint8_t)(sx - p1);
-    uint8_t idx = ((p1 != 0u) && ((p0 == 0u) || (d1 < d0))) ? 1u : 0u;
+    /* player_enemy_x_dist (bank7:8844): closest player by |X dist| from the source,
+       with non-normal players forced to max distance (0xFE/0xFF) via PLAYER_STATE so
+       they're never chosen -- NOT an x==0 "absent" proxy, which mis-picked a normal
+       player legitimately standing at screen x==0. */
+    uint8_t d0 = (p0 >= sx) ? (uint8_t)(p0 - sx) : (uint8_t)(sx - p0);
+    uint8_t d1 = (p1 >= sx) ? (uint8_t)(p1 - sx) : (uint8_t)(sx - p1);
+    uint8_t idx;
     uint8_t tx;
     uint8_t ty;
+
+    if (ram[CONTRA_RAM_PLAYER_STATE + 0u] != 0x01u) { d0 = 0xFEu; }
+    if (ram[CONTRA_RAM_PLAYER_STATE + 1u] != 0x01u) { d1 = 0xFFu; }
+    idx = (d1 < d0) ? 1u : 0u;
 
     if (ram[CONTRA_RAM_PLAYER_STATE + idx] != 0x01u) { idx ^= 0x01u; }
     if (ram[CONTRA_RAM_PLAYER_STATE + idx] != 0x01u)
@@ -9010,11 +9100,13 @@ static const uint8_t contra_boss_eye_sprite_code_tbl[8] = {
     0x5Du, 0x5Eu, 0x5Fu, 0x5Eu, 0x60u, 0x61u, 0x62u, 0x61u};
 static const uint8_t contra_boss_eye_attack_delay_tbl[4] = {0x70u, 0x50u, 0x40u, 0x28u};
 
+/* boss_eye_routine_00 (bank0:2678-2690): set animation delay 0x40, advance routine. */
 static void contra_rom_boss_eye_routine_00(ContraCore *core, uint8_t x)
 {
     contra_rom_set_enemy_delay_adv_routine(core, x, 0x40u);
 }
 
+/* boss_eye_routine_01 (bank0:2691-2710): after platings destroyed, init boss vel/HP/collision. */
 static void contra_rom_boss_eye_routine_01(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -9038,6 +9130,7 @@ static void contra_rom_boss_eye_routine_01(ContraCore *core, uint8_t x)
     contra_rom_set_enemy_delay_adv_routine(core, x, 0xC0u);
 }
 
+/* boss_eye_routine_02 (bank0:2712-2761): animate sprite, drift/bounce, fire eye projectile. */
 static void contra_rom_boss_eye_routine_02(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -9122,6 +9215,7 @@ static void contra_rom_boss_eye_routine_03(ContraCore *core, uint8_t x)
 
 static const uint8_t contra_eye_projectile_sprite_attr_tbl[4] = {0x00u, 0x40u, 0xC0u, 0x80u};
 
+/* eye_projectile_routine_00 (bank0:2811-2824): aim ring projectile at player, advance routine. */
 static void contra_rom_eye_projectile_routine_00(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -9134,6 +9228,7 @@ static void contra_rom_eye_projectile_routine_00(ContraCore *core, uint8_t x)
     contra_rom_advance_enemy_routine(core, x);
 }
 
+/* eye_projectile_routine_01 (bank0:2826-2845): grow/enable collision, mirror sprite attr, move. */
 static void contra_rom_eye_projectile_routine_01(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -9162,6 +9257,7 @@ static const uint8_t contra_boss_bomb_turret_supertile_tbl[6] = {
     0x29u, 0x26u, 0x2Au, 0x27u, 0x2Bu, 0x28u};
 static const uint8_t contra_boss_bomb_turret_bomb_velocity_tbl[4] = {0x01u, 0x03u, 0x05u, 0x07u};
 
+/* draw_boss_bomb_turret (bank0:2134-2169): draw bomb-turret super-tile, jungle bg variant. */
 static void contra_rom_draw_boss_bomb_turret(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -9181,12 +9277,14 @@ static void contra_rom_draw_boss_bomb_turret(ContraCore *core, uint8_t x)
 /* boss_bomb_turret_routine_00/01 (bank0): after a startup delay, alternate
    idle/recoil super-tiles and lob a bomb (a regular type-0 enemy bullet at a
    fixed up-left angle with a random speed) on each firing beat. */
+/* boss_bomb_turret_routine_00 (bank0:2093-2096): set attack delay 0x20, advance routine. */
 static void contra_rom_boss_bomb_turret_routine_00(ContraCore *core, uint8_t x)
 {
     core->ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x20u;
     contra_rom_advance_enemy_routine(core, x);
 }
 
+/* boss_bomb_turret_routine_01 (bank0:2101-2128): recoil-animate and lob bomb on firing beat. */
 static void contra_rom_boss_bomb_turret_routine_01(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -9258,6 +9356,7 @@ static bool contra_rom_red_turret_load_supertile(ContraCore *core, uint8_t x)
    then emerge (super-tile animation) and become collidable. The active rotating
    aim + firing + retract (routine_03..05) are DEFERRED: the turret emerges,
    renders, and can be shot/destroyed (via the kill path -> explosion). */
+/* red_turret_routine_00 (bank0:987-991): set aim direction left, advance routine. */
 static void contra_rom_red_turret_routine_00(ContraCore *core, uint8_t x)
 {
     contra_rom_add_scroll_to_enemy_pos(core, x);
@@ -9269,6 +9368,7 @@ static void contra_rom_red_turret_routine_00(ContraCore *core, uint8_t x)
     contra_rom_advance_enemy_routine(core, x);
 }
 
+/* red_turret_routine_01 (bank0:995-1009): wait for player to approach, then advance. */
 static void contra_rom_red_turret_routine_01(ContraCore *core, uint8_t x)
 {
     if (!contra_rom_past_trigger_x(core, x, 0xF0u))
@@ -9280,6 +9380,7 @@ static void contra_rom_red_turret_routine_01(ContraCore *core, uint8_t x)
     contra_rom_advance_enemy_routine(core, x);
 }
 
+/* red_turret_routine_02 (bank0:1012-1050): emerge super-tile animation, enable collision. */
 static void contra_rom_red_turret_routine_02(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -10724,6 +10825,7 @@ static void contra_rom_boss_door_routine_02(ContraCore *core, uint8_t x)
 }
 
 /* shared_enemy_routine_clear_sprite (bank7): blank the sprite, advance. */
+/* boss_door_routine_clear_sprite (bank7:7691-7693): blank sprite code, advance routine. */
 static void contra_rom_boss_door_routine_clear_sprite(ContraCore *core, uint8_t x)
 {
     core->ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0u; /* set_sprite_0 */
@@ -12072,6 +12174,7 @@ static void contra_rom_dragon_arm_orb_routine_04(ContraCore *core, uint8_t x)
     contra_rom_begin_enemy_explosion(core, x);
 }
 
+/* exe_enemy_type (bank7:7360-7474): dispatch enemy type/routine to handler. */
 static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
 {
     const uint8_t type = core->ram[CONTRA_RAM_ENEMY_TYPE + x];
