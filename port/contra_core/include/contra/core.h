@@ -79,6 +79,14 @@ typedef struct ContraCore
        at FIXED back-wall positions (not the enemy slot), so they live here rather
        than in l2_supertile; reset on room load. */
     uint8_t l2_blowopen_quadrants;
+    /* Boss-room cannon/plating housings that have been destroyed: their fixed wall
+       positions, redrawn as the destroyed super-tile (index 5) every frame so the
+       destroyed housing persists after the enemy explodes and its slot is reused.
+       The ROM writes the destroyed tile to the nametable once; the port re-composes
+       the wall each frame, so it must remember them. Reset on room/level load. */
+    uint8_t l2_destroyed_struct_count;
+    uint8_t l2_destroyed_struct_x[8];
+    uint8_t l2_destroyed_struct_y[8];
     /* Faithful level-1 exploding bridge: world positions of the background
        super-tiles whose collision the bridge has cleared (clear_supertile_bg_
        collision) so the player falls through. The native background composes from

@@ -9014,10 +9014,13 @@ static void contra_rom_wall_cannon_routine_03(ContraCore *core, uint8_t x)
     contra_rom_set_enemy_routine_to_a(core, x, 0x02u); /* -> wall_cannon_routine_01 */
 }
 
+static void contra_rom_record_destroyed_structure(ContraCore *core, uint8_t x);
+
 /* wall_cannon_routine_04 (bank7:9387-9391): draw destroyed super-tile 0x05, then explode. */
 static void contra_rom_wall_cannon_routine_04(ContraCore *core, uint8_t x)
 {
     core->l2_supertile[x] = 0x05u; /* destroyed super-tile, then explode */
+    contra_rom_record_destroyed_structure(core, x);
     contra_rom_begin_enemy_explosion(core, x);
 }
 
@@ -9050,9 +9053,26 @@ static void contra_rom_wall_plating_routine_01(ContraCore *core, uint8_t x)
 }
 
 /* wall_plating_routine_03 (bank7:9436-9443): destroyed super-tile, bump destroyed count, explode. */
+/* Remember a destroyed boss-room housing's wall position so the destroyed super-tile
+   (index 5) keeps being drawn after the enemy explodes and its slot is freed -- the ROM
+   leaves the destroyed tile on the nametable, but the port re-composes the wall each
+   frame, so it must redraw it from this record. */
+static void contra_rom_record_destroyed_structure(ContraCore *core, uint8_t x)
+{
+    if (core->l2_destroyed_struct_count < 8u)
+    {
+        core->l2_destroyed_struct_x[core->l2_destroyed_struct_count] =
+            core->ram[CONTRA_RAM_ENEMY_X_POS + x];
+        core->l2_destroyed_struct_y[core->l2_destroyed_struct_count] =
+            core->ram[CONTRA_RAM_ENEMY_Y_POS + x];
+        core->l2_destroyed_struct_count = (uint8_t)(core->l2_destroyed_struct_count + 1u);
+    }
+}
+
 static void contra_rom_wall_plating_routine_03(ContraCore *core, uint8_t x)
 {
     core->l2_supertile[x] = 0x05u; /* destroyed super-tile, then explode */
+    contra_rom_record_destroyed_structure(core, x);
     core->ram[CONTRA_RAM_WALL_PLATING_DESTROYED_COUNT] =
         (uint8_t)(core->ram[CONTRA_RAM_WALL_PLATING_DESTROYED_COUNT] + 1u);
     contra_rom_begin_enemy_explosion(core, x);
@@ -13002,6 +13022,7 @@ static void contra_rom_load_indoor_enemy_data(ContraCore *core)
     ram[CONTRA_RAM_INDOOR_ENEMY_ATTACK_COUNT] = 0u;
     ram[CONTRA_RAM_WALL_PLATING_DESTROYED_COUNT] = 0u;
     core->l2_blowopen_quadrants = 0u;
+    core->l2_destroyed_struct_count = 0u;
     ram[CONTRA_RAM_INDOOR_RED_SOLDIER_CREATED] = 0u;
     ram[CONTRA_RAM_GRENADE_LAUNCHER_FLAG] = 0u;
     for (slot = 0x0F; slot >= 0; --slot)
@@ -14176,6 +14197,22 @@ static void contra_render_level_2_wall_structures(ContraCore *core)
                     (int)contra_level_2_wall_core_update_y_tbl[q],
                     contra_level_2_wall_core_update_supertile_tbl[q]);
             }
+        }
+    }
+
+    /* destroyed boss-room cannon/plating housings: redraw the destroyed super-tile
+       (index 5) at each recorded position so it persists after the enemy explodes and
+       its slot is freed (the ROM's nametable write persists; the port re-composes). */
+    {
+        unsigned d;
+
+        for (d = 0u; d < core->l2_destroyed_struct_count; ++d)
+        {
+            const int ex = (int)core->l2_destroyed_struct_x[d];
+            const int ey = (int)core->l2_destroyed_struct_y[d];
+
+            contra_render_level_2_overlay_supertile(
+                core, (ex - 12) & ~7, (ey - 12) & ~7, 0x05u);
         }
     }
 }
