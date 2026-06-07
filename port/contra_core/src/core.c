@@ -14516,6 +14516,109 @@ void contra_core_step_frame(ContraCore *core)
     contra_render_frame(core, core->level_graphics_wait_frames == 0u);
 }
 
+/* DEBUG (NOT part of the faithful port): warp an initialized core straight to the
+   Level 2 boss room so the front-end can launch "just the L2 boss fight". Sets up a
+   single-player L2 game, runs it to gameplay, then replays the room-advance loop --
+   shoot down each room's wall cores (enemy type 0x14) by injecting a player bullet at
+   them, then hold Up to walk into the next room -- until LEVEL_LOCATION_TYPE bit 7
+   (boss room) is set. Mirrors the reach_level2_boss_room behavior test. */
+void contra_core_debug_warp_level2_boss(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+    ContraInputSnapshot none = {{0u, 0u}};
+    ContraInputSnapshot up = {{0u, 0u}};
+    unsigned room;
+    unsigned frame;
+
+    up.player[0] = CONTRA_BUTTON_UP;
+
+    /* force a single-player Level 2 game and run it to gameplay (level_routine 4) */
+    ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
+    ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x00u;
+    ram[CONTRA_RAM_CURRENT_LEVEL] = 0x01u;
+    ram[CONTRA_RAM_PLAYER_MODE_1D] = 0x01u;
+    ram[CONTRA_RAM_P1_GAME_OVER_STATUS] = 0x00u;
+    ram[CONTRA_RAM_P2_GAME_OVER_STATUS] = 0x01u;
+    ram[CONTRA_RAM_P1_NUM_LIVES] = 0x02u;
+    ram[CONTRA_RAM_P2_NUM_LIVES] = 0x00u;
+    for (frame = 0u; frame < 600u; ++frame)
+    {
+        contra_core_set_input(core, &none);
+        contra_core_step_frame(core);
+        if ((ram[CONTRA_RAM_GAME_ROUTINE_INDEX] == 0x05u) &&
+            (ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x04u))
+        {
+            break;
+        }
+    }
+
+    for (room = 0u; room < 24u; ++room)
+    {
+        const uint8_t initial_screen = ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER];
+        size_t i;
+        int found;
+
+        if ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] & 0x80u) != 0u)
+        {
+            break; /* boss room reached */
+        }
+
+        /* settle until grounded after the previous room transition */
+        ram[CONTRA_RAM_INVINCIBILITY_TIMER] = 0xFFu;
+        for (frame = 0u; frame < 180u; ++frame)
+        {
+            contra_core_set_input(core, &none);
+            contra_core_step_frame(core);
+            if ((ram[CONTRA_RAM_PLAYER_JUMP_STATUS] == 0u) &&
+                (ram[CONTRA_RAM_EDGE_FALL_CODE] == 0u))
+            {
+                break;
+            }
+        }
+
+        /* shoot down every wall core in this room, then wait for the room to clear */
+        for (frame = 0u; frame < 600u; ++frame)
+        {
+            found = 0;
+            for (i = 0u; i < 16u; ++i)
+            {
+                if ((ram[CONTRA_RAM_ENEMY_ROUTINE + i] != 0u) &&
+                    (ram[CONTRA_RAM_ENEMY_TYPE + i] == 0x14u))
+                {
+                    ram[CONTRA_RAM_PLAYER_BULLET_SPRITE_CODE] = 0x01u;
+                    ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE] = 0x01u;
+                    ram[CONTRA_RAM_PLAYER_BULLET_X_POS] = ram[CONTRA_RAM_ENEMY_X_POS + i];
+                    ram[CONTRA_RAM_PLAYER_BULLET_Y_POS] = ram[CONTRA_RAM_ENEMY_Y_POS + i];
+                    found = 1;
+                }
+            }
+            ram[CONTRA_RAM_INVINCIBILITY_TIMER] = 0xFFu;
+            contra_core_set_input(core, &none);
+            contra_core_step_frame(core);
+            if ((found == 0) && (ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] != 0u))
+            {
+                break;
+            }
+        }
+
+        /* hold Up to walk into the next room */
+        for (frame = 0u; frame < 420u; ++frame)
+        {
+            ram[CONTRA_RAM_INVINCIBILITY_TIMER] = 0xFFu;
+            contra_core_set_input(core, &up);
+            contra_core_step_frame(core);
+            if ((ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] != initial_screen) ||
+                ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] & 0x80u) != 0u))
+            {
+                break;
+            }
+        }
+    }
+
+    /* leave the player alive and not mid-jump for the handover to live input */
+    ram[CONTRA_RAM_INVINCIBILITY_TIMER] = 0x00u;
+}
+
 const uint32_t *contra_core_framebuffer(const ContraCore *core)
 {
     return core->framebuffer;

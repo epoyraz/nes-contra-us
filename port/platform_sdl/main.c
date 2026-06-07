@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include <SDL.h>
 
@@ -131,6 +132,12 @@ int main(int argc, char **argv)
     }
 
     contra_core_init(&core);
+
+    /* DEBUG: CONTRA_START_LEVEL2_BOSS=1 warps straight to the Level 2 boss fight. */
+    if (getenv("CONTRA_START_LEVEL2_BOSS") != NULL)
+    {
+        contra_core_debug_warp_level2_boss(&core);
+    }
 
     previous_counter = (uint64_t)SDL_GetPerformanceCounter();
     counter_frequency = (double)SDL_GetPerformanceFrequency();

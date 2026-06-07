@@ -112,4 +112,8 @@ void contra_core_step_frame(ContraCore *core);
 const uint32_t *contra_core_framebuffer(const ContraCore *core);
 const uint8_t *contra_core_ram(const ContraCore *core);
 
+/* DEBUG (not part of the faithful port): fast-forward an initialized core straight to
+   the Level 2 boss room so a front-end can launch "just the L2 boss fight". */
+void contra_core_debug_warp_level2_boss(ContraCore *core);
+
 #endif
