@@ -1630,6 +1630,266 @@ static bool test_broad_player_ui_and_end_level_matrix(void)
     return true;
 }
 
+/* screen-0 wall core: ROM enemy data pos byte 0x68 (Y base 0x60, X base 0x80)
+   with the +Y pos-adjust flag set. The ROM tests that flag with `asl`, which
+   leaves carry=1, so the subsequent `adc #$07` adds 8 -- the spawn Y must be 0x68
+   (104), not 0x67 (the off-by-one the port had). */
+static bool test_level2_indoor_enemy_spawn_y_pos_adjust(void)
+{
+    ContraCore core;
+    size_t idx = 0u;
+    unsigned frame;
+
+    force_level2_gameplay(&core);
+    for (frame = 0u; frame < 8u; ++frame)
+    {
+        step_no_input(&core);
+        if (find_first_active_wall_core(&core, &idx))
+        {
+            break;
+        }
+    }
+    CHECK(find_first_active_wall_core(&core, &idx));
+    CHECK(l2_enemy_y(&core, idx) == 0x68u); /* 0x60 + 8 (the +8, not +7) */
+    CHECK(l2_enemy_x(&core, idx) == 0x80u); /* 0x80, no X adjust */
+    return true;
+}
+
+/* Fire one standard P1 bullet on the indoor level once the player has landed, and
+   return its bullet slot (or -1). B is pressed for a single frame so it registers
+   as a newly-pressed shot. */
+static int l2_fire_one_player_bullet(ContraCore *core)
+{
+    unsigned frame;
+    int slot;
+
+    for (frame = 0u; frame < 120u; ++frame)
+    {
+        if ((core->ram[CONTRA_RAM_PLAYER_STATE] == 0x01u) &&
+            (core->ram[CONTRA_RAM_PLAYER_JUMP_STATUS] == 0x00u) &&
+            (core->ram[CONTRA_RAM_EDGE_FALL_CODE] == 0x00u) &&
+            (core->ram[CONTRA_RAM_PLAYER_RECOIL_TIMER] == 0x00u))
+        {
+            break;
+        }
+        step_no_input(core);
+    }
+    step_no_input(core);                       /* B released the prior frame */
+    step_with_input(core, CONTRA_BUTTON_B);    /* newly-pressed fire */
+
+    for (slot = 0; slot < 16; ++slot)
+    {
+        if (core->ram[CONTRA_RAM_PLAYER_BULLET_SPRITE_CODE + (size_t)slot] != 0u)
+        {
+            return slot;
+        }
+    }
+    return -1;
+}
+
+/* Indoor (pseudo-3D) player bullets spawn from set_indoor_bullet_pos_and_slot, NOT
+   the outdoor aim-offset table: y is -24 (forward into the screen) or -12 (aiming
+   down), and x is +/-1 -- never the outdoor +16/-5 geometry. */
+static bool test_level2_indoor_player_bullet_spawn_geometry(void)
+{
+    ContraCore core;
+    int slot;
+    int dy;
+    int dx;
+
+    force_level2_gameplay(&core);
+    slot = l2_fire_one_player_bullet(&core);
+    CHECK(slot >= 0);
+
+    dy = (int)core.ram[CONTRA_RAM_SPRITE_Y_POS] - (int)core.ram[CONTRA_RAM_PLAYER_BULLET_Y_POS + (size_t)slot];
+    dx = (int)core.ram[CONTRA_RAM_PLAYER_BULLET_X_POS + (size_t)slot] - (int)core.ram[CONTRA_RAM_SPRITE_X_POS];
+    if (dx < 0)
+    {
+        dx = -dx;
+    }
+    CHECK((dy == 12) || (dy == 24)); /* indoor forward/down, never outdoor -5 */
+    CHECK(dx == 1);                  /* indoor +/-1, never outdoor +16 */
+    return true;
+}
+
+/* Indoor player bullets despawn on PLAYER_BULLET_TIMER (0x2a frames, then a 6-frame
+   routine-2 ring), not by flying off-screen. A bullet that still moved at the
+   outdoor velocity would remain on-screen well past frame 50; the indoor bullet
+   must be gone, having reached routine 2 while still on the visible playfield. */
+static bool test_level2_indoor_player_bullet_despawns_on_timer(void)
+{
+    ContraCore core;
+    int slot;
+    unsigned frame;
+    bool reached_routine_2 = false;
+    bool despawned = false;
+
+    force_level2_gameplay(&core);
+    slot = l2_fire_one_player_bullet(&core);
+    CHECK(slot >= 0);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE + (size_t)slot] <= 0x01u);
+
+    for (frame = 0u; frame < 60u; ++frame)
+    {
+        step_no_input(&core);
+        if (core.ram[CONTRA_RAM_PLAYER_BULLET_SPRITE_CODE + (size_t)slot] == 0u)
+        {
+            despawned = true;
+            break;
+        }
+        if (core.ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE + (size_t)slot] >= 0x02u)
+        {
+            reached_routine_2 = true;
+            /* still on the visible playfield -- so this is the timer, not off-screen */
+            CHECK(core.ram[CONTRA_RAM_PLAYER_BULLET_Y_POS + (size_t)slot] >= 0x40u);
+        }
+    }
+
+    CHECK(reached_routine_2);
+    CHECK(despawned);
+    return true;
+}
+
+/* The indoor electric fence is drawn by animating the CHR pattern tiles at PPU
+   $1FC0 (animate_indoor_fence); the port never did this, so the fence was
+   invisible. On the indoor base level with the screen not yet cleared, those tiles
+   must be written non-blank and must change frame-to-frame as the electricity
+   animates. */
+static bool test_level2_indoor_fence_animates_chr(void)
+{
+    ContraCore core;
+    unsigned frame;
+    bool nonblank = false;
+    bool changed = false;
+    uint8_t first[0x40];
+    size_t i;
+
+    force_level2_gameplay(&core);
+    CHECK(core.ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] == 0x00u); /* fence active */
+
+    for (frame = 0u; frame < 16u; ++frame)
+    {
+        step_no_input(&core);
+        for (i = 0u; i < 0x40u; ++i)
+        {
+            if (core.ppu_pattern[0x1FC0u + i] != 0u)
+            {
+                nonblank = true;
+                break;
+            }
+        }
+        if (nonblank)
+        {
+            break;
+        }
+    }
+    CHECK(nonblank);
+    memcpy(first, &core.ppu_pattern[0x1FC0u], 0x40u);
+
+    for (frame = 0u; frame < 20u; ++frame)
+    {
+        step_no_input(&core);
+        if (memcmp(first, &core.ppu_pattern[0x1FC0u], 0x40u) != 0)
+        {
+            changed = true;
+            break;
+        }
+    }
+    CHECK(changed);
+    return true;
+}
+
+/* A killed level-2 indoor running soldier (type 0x15) must die via the shared
+   explosion actor (0xFE) and clear, NOT get routed to routine 5 -- on L2 the type
+   has no routine-5 handler, so it would freeze in place (still collidable) in front
+   of the core and block the room (a soft-lock). (Routine 5 is correct only for the
+   level-3 dragon arm orb, which also uses type 0x15.) */
+static bool test_level2_killed_indoor_soldier_explodes_not_freezes(void)
+{
+    ContraCore core;
+    const size_t slot = 10u;
+    unsigned frame;
+    bool frozen = false;
+    bool cleared = false;
+
+    force_level2_gameplay(&core);
+    core.ram[CONTRA_RAM_ENEMY_TYPE + slot] = 0x15u;        /* indoor running soldier */
+    core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] = 0x02u;     /* running */
+    core.ram[CONTRA_RAM_ENEMY_HP + slot] = 0x01u;
+    core.ram[CONTRA_RAM_ENEMY_STATE_WIDTH + slot] = 0x00u; /* collidable */
+    core.ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + slot] = 0x01u; /* small centered box */
+    core.ram[CONTRA_RAM_ENEMY_X_POS + slot] = 0x80u;
+    core.ram[CONTRA_RAM_ENEMY_Y_POS + slot] = 0x6Du;
+    core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + slot] = 0x00u;
+    core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + slot] = 0x00u;
+
+    l2_inject_player_bullet(&core, 0x80u, 0x6Du);
+
+    for (frame = 0u; frame < 48u; ++frame)
+    {
+        step_no_input(&core);
+        if ((core.ram[CONTRA_RAM_ENEMY_TYPE + slot] == 0x15u) &&
+            (core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x05u))
+        {
+            frozen = true;
+        }
+        if (core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x00u)
+        {
+            cleared = true;
+        }
+    }
+    CHECK(!frozen);
+    CHECK(cleared);
+    return true;
+}
+
+/* Walking sideways on the indoor (base) level must animate the player's legs
+   (PLAYER_SPRITE_SEQUENCE 0x03 -> player_sprite_indoor_walking_animation), cycling
+   the walk frames -- the indoor sprite branch previously left it on a static
+   sprite. */
+static bool test_level2_indoor_player_walk_animates(void)
+{
+    ContraCore core;
+    unsigned frame;
+    uint8_t seen[8];
+    unsigned seen_count = 0u;
+
+    force_level2_gameplay(&core);
+    for (frame = 0u; frame < 90u; ++frame)
+    {
+        if ((core.ram[CONTRA_RAM_PLAYER_STATE] == 0x01u) &&
+            (core.ram[CONTRA_RAM_PLAYER_JUMP_STATUS] == 0x00u) &&
+            (core.ram[CONTRA_RAM_EDGE_FALL_CODE] == 0x00u))
+        {
+            break;
+        }
+        step_no_input(&core);
+    }
+
+    for (frame = 0u; frame < 48u; ++frame)
+    {
+        uint8_t sprite;
+        unsigned i;
+        bool known = false;
+
+        step_with_input(&core, CONTRA_BUTTON_RIGHT);
+        sprite = core.ram[CONTRA_RAM_PLAYER_SPRITE_CODE];
+        for (i = 0u; i < seen_count; ++i)
+        {
+            if (seen[i] == sprite)
+            {
+                known = true;
+            }
+        }
+        if (!known && (seen_count < (sizeof(seen) / sizeof(seen[0]))))
+        {
+            seen[seen_count++] = sprite;
+        }
+    }
+    CHECK(seen_count >= 2u); /* the walk cycles through multiple frames */
+    return true;
+}
+
 int main(void)
 {
     const TestCase tests[] = {
@@ -1659,6 +1919,12 @@ int main(void)
         {"level2_repeated_room_advances_reach_boss_state", test_level2_repeated_room_advances_reach_boss_state},
         {"level2_boss_room_loads_rom_enemy_data", test_level2_boss_room_loads_rom_enemy_data},
         {"level2_boss_room_wall_cannons_fire_projectiles", test_level2_boss_room_wall_cannons_fire_projectiles},
+        {"level2_indoor_enemy_spawn_y_pos_adjust", test_level2_indoor_enemy_spawn_y_pos_adjust},
+        {"level2_indoor_player_bullet_spawn_geometry", test_level2_indoor_player_bullet_spawn_geometry},
+        {"level2_indoor_player_bullet_despawns_on_timer", test_level2_indoor_player_bullet_despawns_on_timer},
+        {"level2_indoor_fence_animates_chr", test_level2_indoor_fence_animates_chr},
+        {"level2_killed_indoor_soldier_explodes_not_freezes", test_level2_killed_indoor_soldier_explodes_not_freezes},
+        {"level2_indoor_player_walk_animates", test_level2_indoor_player_walk_animates},
         {"broad_weapon_gameover_and_alt_graphics_matrix", test_broad_weapon_gameover_and_alt_graphics_matrix},
         {"broad_player_ui_and_end_level_matrix", test_broad_player_ui_and_end_level_matrix}
     };

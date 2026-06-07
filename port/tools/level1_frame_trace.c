@@ -47,8 +47,53 @@ int main(void)
     for (frame = 1u; frame <= max_frame; ++frame)
     {
         const uint8_t *const ram = core.ram;
+        char enemies[1024];
+        size_t enemies_len = 0u;
+        char pbullets[512];
+        size_t pbullets_len = 0u;
+        unsigned slot;
 
         step_no_input(&core);
+
+        /* Compact per-frame enemy digest: one "slot:type:routine:x:y:hp:sw|" group
+           per active enemy slot (type != 0). Lets the frame diff localize the first
+           ENEMY divergence (aim/fire/movement) that scalar player fields can't see.
+           Must match mesen_l2_demo_trace.lua byte-for-byte. */
+        for (slot = 0u; slot < 24u; ++slot)
+        {
+            if (ram[CONTRA_RAM_ENEMY_TYPE + slot] != 0u)
+            {
+                enemies_len += (size_t)snprintf(
+                    enemies + enemies_len, sizeof(enemies) - enemies_len,
+                    "%u:%02X:%02X:%u:%u:%02X:%02X|",
+                    slot,
+                    (unsigned)ram[CONTRA_RAM_ENEMY_TYPE + slot],
+                    (unsigned)ram[CONTRA_RAM_ENEMY_ROUTINE + slot],
+                    (unsigned)ram[CONTRA_RAM_ENEMY_X_POS + slot],
+                    (unsigned)ram[CONTRA_RAM_ENEMY_Y_POS + slot],
+                    (unsigned)ram[CONTRA_RAM_ENEMY_HP + slot],
+                    (unsigned)ram[CONTRA_RAM_ENEMY_STATE_WIDTH + slot]);
+            }
+        }
+
+        /* Player-bullet digest: "slot:x:y:aim:xvf:yvf:routine|" per active bullet
+           (sprite code != 0). Catches mis-aimed/mis-positioned player fire. */
+        for (slot = 0u; slot < 16u; ++slot)
+        {
+            if (ram[CONTRA_RAM_PLAYER_BULLET_SPRITE_CODE + slot] != 0u)
+            {
+                pbullets_len += (size_t)snprintf(
+                    pbullets + pbullets_len, sizeof(pbullets) - pbullets_len,
+                    "%u:%u:%u:%X:%02X:%02X:%X|",
+                    slot,
+                    (unsigned)ram[CONTRA_RAM_PLAYER_BULLET_X_POS + slot],
+                    (unsigned)ram[CONTRA_RAM_PLAYER_BULLET_Y_POS + slot],
+                    (unsigned)ram[CONTRA_RAM_PLAYER_BULLET_AIM_DIR + slot],
+                    (unsigned)ram[CONTRA_RAM_PLAYER_BULLET_X_VEL_FAST + slot],
+                    (unsigned)ram[CONTRA_RAM_PLAYER_BULLET_Y_VEL_FAST + slot],
+                    (unsigned)ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE + slot]);
+            }
+        }
         if ((dump_frame != 0u) && (frame == dump_frame) && (dump_path != NULL))
         {
             FILE *const dump = fopen(dump_path, "wb");
@@ -126,7 +171,7 @@ int main(void)
             "\"y_fast\":%u,\"p2_y_fast\":%u,\"y_fract\":%u,\"p2_y_fract\":%u,"
             "\"fall_freeze\":%u,\"p2_fall_freeze\":%u,"
             "\"lives\":%u,\"game_over\":%u,\"p2_game_over\":%u,\"demo_end\":%u,"
-            "\"oam_offset\":%u,"
+            "\"oam_offset\":%u,\"enemies\":\"%s\",\"pbul\":\"%s\","
             "\"ram_hash\":\"%08X\",\"pattern_hash\":\"%08X\",\"nametable_hash\":\"%08X\","
             "\"palette_hash\":\"%08X\",\"framebuffer_hash\":\"%08X\"}\n",
             frame,
@@ -181,6 +226,8 @@ int main(void)
             (unsigned)ram[CONTRA_RAM_P2_GAME_OVER_STATUS],
             (unsigned)ram[CONTRA_RAM_DEMO_LEVEL_END_FLAG],
             (unsigned)ram[CONTRA_RAM_OAMDMA_CPU_BUFFER_OFFSET],
+            enemies,
+            pbullets,
             fnv1a_bytes(core.ram, sizeof(core.ram)),
             fnv1a_bytes(core.ppu_pattern, sizeof(core.ppu_pattern)),
             fnv1a_bytes(core.ppu_nametable, sizeof(core.ppu_nametable)),
