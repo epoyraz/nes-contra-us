@@ -9261,7 +9261,16 @@ static void contra_rom_boss_eye_routine_03(ContraCore *core, uint8_t x)
         contra_rom_set_enemy_routine_to_a(core, x, 0x03u); /* -> routine_02 (drift) */
         return;
     }
-    /* boss_defeated_routine (bank7): mark defeated, wipe the other enemies, explode. */
+    /* boss_defeated_routine (bank7:7536): init the APU and play sound_57 (boss
+       destroyed), then mark defeated, wipe the other enemies, and explode the eye.
+       NOTE: the faithful level_boss_defeated (bank7:8330) also sets DELAY_TIME_LOW=0xFF
+       (the post-boss "auto-move" delay), but the port's indoor end-of-level path
+       (level_routine_08) waits while DELAY==0xFF and nothing decrements it (the ROM
+       does so during a post-boss auto-move phase the port doesn't run for the static
+       boss room), so setting it here STALLS the level. Left out until that auto-move /
+       delay-decrement phase is ported; the level still advances to the next stage. */
+    contra_init_apu_channels(core);
+    contra_play_sound(core, 0x57u);                    /* sound_57: boss destroyed */
     ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] = 0x01u;
     for (slot = 0x0F; slot >= 0; --slot)
     {
