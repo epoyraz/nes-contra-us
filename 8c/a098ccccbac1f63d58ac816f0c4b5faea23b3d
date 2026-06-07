@@ -1,0 +1,24 @@
+port/contra_core/src/core.c
+  s_613cc88c061869::t_a52ab4cfac2d00 14519-14621
+port/contra_core/include/contra/core.h
+  s_613cc88c061869::t_5b7dfafd0fbee5 115-118
+port/platform_sdl/main.c
+  s_613cc88c061869::t_ec93afb267a76b 6
+  s_613cc88c061869::t_0e1ff96eb2ce0e 136-141
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "8ca098ccccbac1f63d58ac816f0c4b5faea23b3d",
+  "prompts": {},
+  "sessions": {
+    "s_613cc88c061869": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cc32df33-e503-4de3-99cb-5cfbe54eb58b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
