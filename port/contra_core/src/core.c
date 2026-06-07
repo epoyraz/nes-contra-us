@@ -1701,6 +1701,19 @@ static void contra_render_level_background(ContraCore *core)
         return;
     }
 
+    /* Boss room: recompose the flat mechanical-wall super-tile layout each frame.
+       At boss entry the 3 super-tile pointers are repointed to the boss tables
+       ($9013/$b57a/$bd7a) and the wall layout decoded, but the indoor column-advance
+       (advance_horizontal_level_ppu_column, LEVEL_SCREEN_NUMBER+2 = out of range for
+       the 2-entry boss screen table) clears level_screen_supertiles afterward, so we
+       re-decode it here while the boss room is static. */
+    if ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] & 0x80u) != 0u)
+    {
+        contra_decode_level_screen_supertiles(
+            core, (uint8_t)(ram[CONTRA_RAM_CURRENT_LEVEL] >> 1u),
+            core->level_screen_supertiles, 0u);
+    }
+
     if ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0u) &&
         (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] == 0u) &&
         (ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] >= 0x04u))
@@ -4971,6 +4984,21 @@ static void contra_load_bank_3_handle_scroll(ContraCore *core)
                    this the cannon/plating/wall tiles render from the wrong CHR. */
                 contra_load_graphic_data_list(
                     core, (uint8_t)(0x08u | (ram[CONTRA_RAM_CURRENT_LEVEL] >> 1u)));
+                /* Compose the flat mechanical boss wall: repoint the super-tile /
+                   tile-data / palette pointers to the boss tables (handle_indoor_scroll
+                   pointer swap, bank7:5772-5787, source level_2_4_boss_graphics_data
+                   bank7:5870) and reload the boss-wall layout. Screen index 0 = L2 wall,
+                   1 = L4 wall (CURRENT_LEVEL>>1). Without this the boss room composes the
+                   generic corridor layout (now drawn with boss CHR -> garbled). */
+                ram[CONTRA_RAM_LEVEL_SCREEN_SUPERTILES_PTR] = 0x13u; /* $9013 boss screen ptr tbl */
+                ram[CONTRA_RAM_LEVEL_SCREEN_SUPERTILES_PTR + 1u] = 0x90u;
+                ram[CONTRA_RAM_LEVEL_SUPERTILE_DATA_PTR] = 0x7Au; /* $b57a boss super-tile data */
+                ram[CONTRA_RAM_LEVEL_SUPERTILE_DATA_PTR + 1u] = 0xB5u;
+                ram[CONTRA_RAM_LEVEL_SUPERTILE_PALETTE_DATA] = 0x7Au; /* $bd7a boss palette data */
+                ram[CONTRA_RAM_LEVEL_SUPERTILE_PALETTE_DATA + 1u] = 0xBDu;
+                contra_decode_level_screen_supertiles(
+                    core, (uint8_t)(ram[CONTRA_RAM_CURRENT_LEVEL] >> 1u),
+                    core->level_screen_supertiles, 0u);
                 contra_play_sound(core, 0x42u);
             }
         }
