@@ -106,6 +106,8 @@ static void contra_render_level_1_nametable_update_supertile(
 static void contra_rom_update_enemy_pos(ContraCore *core, uint8_t x);
 static void contra_rom_bullet_generation(
     ContraCore *core, uint8_t aim, uint8_t speed, uint8_t px, uint8_t py);
+static void contra_rom_destroy_all_enemies(ContraCore *core, int keep_slot);
+static void contra_rom_add_10_to_enemy_y_fract_vel(ContraCore *core, uint8_t x);
 
 /* Faithful enemy types that render as background super-tiles (nametable writes)
    rather than OAM sprites: pill box, rotating gun, red turret, bomb turret,
@@ -2215,6 +2217,66 @@ static uint8_t contra_get_player_weapon_type(const uint8_t *ram, uint8_t player_
 static bool contra_player_weapon_has_rapid_fire(const uint8_t *ram, uint8_t player_index)
 {
     return (ram[CONTRA_RAM_P1_CURRENT_WEAPON + player_index] & 0x10u) != 0u;
+}
+
+static char contra_ascii_upper(char ch)
+{
+    if ((ch >= 'a') && (ch <= 'z'))
+    {
+        return (char)(ch - ('a' - 'A'));
+    }
+    return ch;
+}
+
+static bool contra_parse_start_weapon(const char *value, uint8_t *weapon)
+{
+    char first;
+    char second;
+
+    if ((value == NULL) || (value[0] == '\0'))
+    {
+        return false;
+    }
+
+    if ((value[0] >= '0') && (value[0] <= '4') && (value[1] == '\0'))
+    {
+        *weapon = (uint8_t)(value[0] - '0');
+        return true;
+    }
+
+    first = contra_ascii_upper(value[0]);
+    second = contra_ascii_upper(value[1]);
+    if ((first == 'S') && ((second == 'T') || (second == 'D')))
+    {
+        *weapon = 0x00u; /* standard rifle */
+        return true;
+    }
+
+    switch (first)
+    {
+        case 'N': *weapon = 0x00u; return true; /* normal */
+        case 'M': *weapon = 0x01u; return true;
+        case 'F': *weapon = 0x02u; return true;
+        case 'S': *weapon = 0x03u; return true; /* spread */
+        case 'L': *weapon = 0x04u; return true;
+        default: return false;
+    }
+}
+
+static bool contra_env_flag_enabled(const char *name)
+{
+    const char *const value = getenv(name);
+    char first;
+
+    if ((value == NULL) || (value[0] == '\0'))
+    {
+        return false;
+    }
+
+    first = contra_ascii_upper(value[0]);
+    return !(((first == '0') && (value[1] == '\0')) ||
+             (first == 'N') ||
+             (first == 'F'));
 }
 
 static int contra_find_player_bullet_slot(
@@ -4344,6 +4406,15 @@ static void contra_handle_player_fall_out(ContraCore *core, uint8_t player_index
     /* init_player_and_weapon (bank7:5314): reset current weapon to the default
        rifle on death, then fall through to init_player_attributes. */
     ram[CONTRA_RAM_P1_CURRENT_WEAPON + player_index] = 0x00u;
+    if ((player_index == 0u) && contra_env_flag_enabled("CONTRA_KEEP_START_WEAPON"))
+    {
+        uint8_t start_weapon;
+
+        if (contra_parse_start_weapon(getenv("CONTRA_START_WEAPON"), &start_weapon))
+        {
+            ram[CONTRA_RAM_P1_CURRENT_WEAPON] = start_weapon;
+        }
+    }
 
     contra_init_player_attributes(core, player_index);
     ram[CONTRA_RAM_PLAYER_STATE + player_index] = 0x00u;
@@ -4765,11 +4836,12 @@ static bool contra_is_native_level_1_active(const ContraCore *core)
 static bool contra_is_native_level_2_active(const ContraCore *core)
 {
     const uint8_t game_routine = core->ram[CONTRA_RAM_GAME_ROUTINE_INDEX];
+    const uint8_t level = core->ram[CONTRA_RAM_CURRENT_LEVEL];
 
     return ((game_routine == 0x05u) ||
             ((game_routine == 0x02u) && (core->ram[CONTRA_RAM_DEMO_MODE] != 0u))) &&
         (core->ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] >= 0x04u) &&
-        (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u) &&
+        ((level == 0x01u) || (level == 0x03u)) &&
         ((core->ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0x01u) ||
          (core->ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0x80u));
 }
@@ -5717,6 +5789,32 @@ static void contra_set_next_demo_level(ContraCore *core)
     }
 }
 
+static void contra_apply_start_player_env(ContraCore *core)
+{
+    const char *const lives_env = getenv("CONTRA_START_LIVES");
+    const char *const weapon_env = getenv("CONTRA_START_WEAPON");
+    uint8_t weapon;
+
+    if (lives_env != NULL)
+    {
+        char *end = NULL;
+        const long total_lives = strtol(lives_env, &end, 10);
+
+        if ((end != lives_env) && (end != NULL) && (*end == '\0') &&
+            (total_lives >= 1) && (total_lives <= 256))
+        {
+            /* P1_NUM_LIVES stores lives remaining after the current life.
+               CONTRA_START_LIVES is user-facing total lives, so 30 -> 0x1d. */
+            core->ram[CONTRA_RAM_P1_NUM_LIVES] = (uint8_t)(total_lives - 1);
+        }
+    }
+
+    if (contra_parse_start_weapon(weapon_env, &weapon))
+    {
+        core->ram[CONTRA_RAM_P1_CURRENT_WEAPON] = weapon;
+    }
+}
+
 static void contra_init_player_lives(ContraCore *core)
 {
     uint8_t player_index;
@@ -5777,6 +5875,7 @@ static void contra_init_score_player_lives(ContraCore *core)
             }
         }
     }
+    contra_apply_start_player_env(core);
 }
 
 static void contra_game_routine_00(ContraCore *core)
@@ -6120,6 +6219,11 @@ static const uint8_t contra_enemy_prop_level2[][4] = {
     {0x89u, 0x00u, 0xF1u, 0x00u}, /* 0x19 indoor soldier generator */
     {0x81u, 0x00u, 0xF1u, 0x00u}, /* 0x1A roller generator */
     {0x8Fu, 0x13u, 0x02u, 0x01u}, /* 0x1B boss eye sphere projectile */
+    {0x8Fu, 0x02u, 0x01u, 0x00u}, /* 0x1C boss gemini */
+    {0x0Au, 0x15u, 0x01u, 0x00u}, /* 0x1D boss gemini spinning bubbles */
+    {0x03u, 0x30u, 0x01u, 0x00u}, /* 0x1E blue jumping guy */
+    {0x03u, 0x30u, 0x01u, 0x00u}, /* 0x1F red shooting guy */
+    {0x81u, 0x00u, 0xF1u, 0x00u}, /* 0x20 red/blue guys generator */
 };
 
 /* enemy_prop level-3 entries (bank7:9221), indexed by type-0x10. Note the floating
@@ -6132,6 +6236,26 @@ static const uint8_t contra_enemy_prop_level3[6][4] = {
     {0x8Fu, 0x31u, 0x05u, 0x00u}, /* 0x13 falling rock */
     {0x8Du, 0x83u, 0xF1u, 0x02u}, /* 0x14 boss mouth */
     {0x0Eu, 0x52u, 0xF1u, 0x00u}, /* 0x15 dragon arm orb */
+};
+
+/* enemy_prop level-5 entries (bank7:9230), indexed by type-0x10. */
+static const uint8_t contra_enemy_prop_level5[7][4] = {
+    {0x81u, 0x00u, 0xF0u, 0x00u}, /* 0x10 ice grenade generator */
+    {0x81u, 0x02u, 0xF1u, 0x00u}, /* 0x11 ice grenade */
+    {0x85u, 0x79u, 0xF0u, 0x00u}, /* 0x12 tank */
+    {0x81u, 0x00u, 0xF0u, 0x00u}, /* 0x13 pipe joint */
+    {0x8Du, 0x93u, 0x20u, 0x00u}, /* 0x14 alien carrier */
+    {0x02u, 0x20u, 0x01u, 0x00u}, /* 0x15 flying saucer */
+    {0x0Au, 0x12u, 0x01u, 0x00u}, /* 0x16 drop bomb */
+};
+
+/* enemy_prop level-6 entries (bank7:9241), indexed by type-0x10. */
+static const uint8_t contra_enemy_prop_level6[5][4] = {
+    {0x81u, 0x0Fu, 0xF0u, 0x00u}, /* 0x10 fire beam down */
+    {0x81u, 0x0Fu, 0xF0u, 0x00u}, /* 0x11 fire beam left */
+    {0x81u, 0x0Fu, 0xF0u, 0x00u}, /* 0x12 fire beam right */
+    {0x04u, 0x9Du, 0x01u, 0x02u}, /* 0x13 boss robot */
+    {0x80u, 0x05u, 0x01u, 0x00u}, /* 0x14 spiked disk projectile */
 };
 
 /* find_next_enemy_slot (bank7.asm:9024): first free slot scanning 15->0, or -1. */
@@ -6214,7 +6338,8 @@ static void contra_rom_initialize_enemy(ContraCore *core, uint8_t x)
 
     /* enemy_prop_ptr_tbl (bank7:9152): shared types (< 0x10) use the common
        table; level-specific types (>= 0x10) use the per-level table. */
-    if ((type >= 0x10u) && (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u))
+    if ((type >= 0x10u) &&
+        ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u) || (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x03u)))
     {
         const size_t i = (size_t)(type - 0x10u);
 
@@ -6236,6 +6361,30 @@ static void contra_rom_initialize_enemy(ContraCore *core, uint8_t x)
             ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = contra_enemy_prop_level3[i][1];
             ram[CONTRA_RAM_ENEMY_HP + x] = contra_enemy_prop_level3[i][2];
             ram[CONTRA_RAM_ENEMY_VAR_A + x] = contra_enemy_prop_level3[i][3];
+        }
+    }
+    else if ((type >= 0x10u) && (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u))
+    {
+        const size_t i = (size_t)(type - 0x10u);
+
+        if (i < (sizeof(contra_enemy_prop_level5) / sizeof(contra_enemy_prop_level5[0])))
+        {
+            ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = contra_enemy_prop_level5[i][0];
+            ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = contra_enemy_prop_level5[i][1];
+            ram[CONTRA_RAM_ENEMY_HP + x] = contra_enemy_prop_level5[i][2];
+            ram[CONTRA_RAM_ENEMY_VAR_A + x] = contra_enemy_prop_level5[i][3];
+        }
+    }
+    else if ((type >= 0x10u) && (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x05u))
+    {
+        const size_t i = (size_t)(type - 0x10u);
+
+        if (i < (sizeof(contra_enemy_prop_level6) / sizeof(contra_enemy_prop_level6[0])))
+        {
+            ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = contra_enemy_prop_level6[i][0];
+            ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = contra_enemy_prop_level6[i][1];
+            ram[CONTRA_RAM_ENEMY_HP + x] = contra_enemy_prop_level6[i][2];
+            ram[CONTRA_RAM_ENEMY_VAR_A + x] = contra_enemy_prop_level6[i][3];
         }
     }
     else if (type < (sizeof(contra_enemy_prop_00) / sizeof(contra_enemy_prop_00[0])))
@@ -7903,6 +8052,30 @@ static const uint8_t *const contra_l2_enemy_gen_screen_tbl[5] = {
     contra_l2_enemy_gen_screen_03, contra_l2_enemy_gen_screen_04};
 static const size_t contra_l2_enemy_gen_screen_len[5] = {6u, 12u, 4u, 6u, 16u};
 
+/* lvl_4_enemy_gen_screen_* (bank0:2632-2677): Level 4's indoor soldier cycles,
+   selected by indoor_enemy_gen_tbl using the generator attributes' level bit. */
+static const uint8_t contra_l4_enemy_gen_screen_00[] = {
+    0x04u, 0x30u, 0x05u, 0x60u, 0x41u, 0x60u, 0x02u, 0x30u, 0x03u, 0x60u, 0x80u, 0xE0u};
+static const uint8_t contra_l4_enemy_gen_screen_01[] = {
+    0x4Au, 0x50u, 0xC3u, 0x20u, 0xC2u, 0x20u, 0x04u, 0x20u, 0x05u, 0x50u, 0x47u, 0x50u, 0xC2u, 0xB0u};
+static const uint8_t contra_l4_enemy_gen_screen_02[] = {
+    0x05u, 0x40u, 0x80u, 0x60u, 0x53u, 0x60u, 0x80u, 0xE0u};
+static const uint8_t contra_l4_enemy_gen_screen_03[] = {
+    0x57u, 0x60u, 0x40u, 0x60u, 0x41u, 0x60u, 0x40u, 0xE0u};
+static const uint8_t contra_l4_enemy_gen_screen_04[] = {
+    0x05u, 0x30u, 0x04u, 0x60u, 0x42u, 0xE0u};
+static const uint8_t contra_l4_enemy_gen_screen_05[] = {
+    0x4Eu, 0x40u, 0x81u, 0x60u, 0x41u, 0x60u, 0x40u, 0xE0u};
+static const uint8_t contra_l4_enemy_gen_screen_06[] = {
+    0x04u, 0x20u, 0x03u, 0x40u, 0x4Bu, 0x60u, 0x07u, 0x20u, 0x02u, 0x40u, 0x4Bu, 0xE0u};
+static const uint8_t contra_l4_enemy_gen_screen_07[] = {
+    0x02u, 0x30u, 0x47u, 0x40u, 0x80u, 0x60u, 0x03u, 0x20u, 0x04u, 0xD0u};
+static const uint8_t *const contra_l4_enemy_gen_screen_tbl[8] = {
+    contra_l4_enemy_gen_screen_00, contra_l4_enemy_gen_screen_01, contra_l4_enemy_gen_screen_02,
+    contra_l4_enemy_gen_screen_03, contra_l4_enemy_gen_screen_04, contra_l4_enemy_gen_screen_05,
+    contra_l4_enemy_gen_screen_06, contra_l4_enemy_gen_screen_07};
+static const size_t contra_l4_enemy_gen_screen_len[8] = {12u, 14u, 8u, 8u, 6u, 8u, 12u, 10u};
+
 /* reverse_enemy_x_direction (bank7): negate the 16-bit X velocity. */
 /* reverse_enemy_x_direction (bank7:7919-7927): negate 16-bit enemy X velocity. */
 static void contra_rom_reverse_enemy_x_direction(ContraCore *core, uint8_t x)
@@ -8758,12 +8931,24 @@ static void contra_rom_indoor_soldier_gen_routine_01(ContraCore *core, uint8_t x
     {
         return;
     }
-    if (screen >= 5u)
+    if ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x01u) != 0u)
+    {
+        if (screen >= (sizeof(contra_l4_enemy_gen_screen_tbl) / sizeof(contra_l4_enemy_gen_screen_tbl[0])))
+        {
+            return;
+        }
+        data = contra_l4_enemy_gen_screen_tbl[screen];
+        data_len = contra_l4_enemy_gen_screen_len[screen];
+    }
+    else if (screen < (sizeof(contra_l2_enemy_gen_screen_tbl) / sizeof(contra_l2_enemy_gen_screen_tbl[0])))
+    {
+        data = contra_l2_enemy_gen_screen_tbl[screen];
+        data_len = contra_l2_enemy_gen_screen_len[screen];
+    }
+    else
     {
         return; /* no generation script for this room */
     }
-    data = contra_l2_enemy_gen_screen_tbl[screen];
-    data_len = contra_l2_enemy_gen_screen_len[screen];
 
     offset = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
     if ((size_t)(offset + 1u) >= data_len)
@@ -9280,6 +9465,569 @@ static void contra_rom_boss_eye_routine_03(ContraCore *core, uint8_t x)
         }
     }
     contra_rom_begin_enemy_explosion(core, x);
+}
+
+static const uint8_t contra_boss_gemini_sprite_tbl[6] = {0x68u, 0x69u, 0x6Au, 0x68u, 0x6Bu, 0x6Cu};
+static const uint8_t contra_boss_gemini_attack_delay_tbl[4] = {0x8Au, 0xA9u, 0x63u, 0xD7u};
+
+/* boss_gemini_routine_00 (bank0:5448-5470): seed real HP, base X, movement
+   fraction, initial attack delay, and the pre-appearance delay. */
+static void contra_rom_boss_gemini_routine_00(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_VAR_4 + x] = 0x0Au;
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = ram[CONTRA_RAM_ENEMY_X_POS + x];
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x] = 0x80u;
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] = 0x00u;
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x80u;
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x40u);
+}
+
+/* boss_gemini_routine_01 (bank0:5472-5486): wait for all three Level 4 boss
+   platings, count down the startup delay, enable collision, and start moving. */
+static void contra_rom_boss_gemini_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    if (ram[CONTRA_RAM_WALL_PLATING_DESTROYED_COUNT] < 0x03u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0xA0u;
+    ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x7Eu);
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x20u);
+}
+
+/* boss_gemini_routine_02 (bank0:5488-5614): animate the helmets, fire spinning
+   bubbles when the attack delay elapses, move the paired helmets away/together,
+   and pause at the endpoints with collision state matching the ROM. */
+static void contra_rom_boss_gemini_routine_02(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t sprite_offset_flag;
+
+    if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x07u) == 0u)
+    {
+        uint8_t frame = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+
+        if (frame >= 0x03u)
+        {
+            frame = 0u;
+        }
+        ram[CONTRA_RAM_ENEMY_FRAME + x] = frame;
+    }
+
+    sprite_offset_flag = ram[CONTRA_RAM_ENEMY_VAR_3 + x];
+    if (ram[CONTRA_RAM_ENEMY_VAR_2 + x] != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_VAR_2 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_2 + x] - 1u);
+        if ((ram[CONTRA_RAM_ENEMY_VAR_2 + x] & 0x01u) != 0u)
+        {
+            sprite_offset_flag ^= 0x01u;
+        }
+    }
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = contra_boss_gemini_sprite_tbl[
+        (ram[CONTRA_RAM_ENEMY_FRAME + x] + ((sprite_offset_flag != 0u) ? 3u : 0u)) % 6u];
+
+    if (ram[CONTRA_RAM_ENEMY_ATTACK_FLAG] != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] - 1u);
+        if (ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] == 0u)
+        {
+            uint8_t delay = contra_boss_gemini_attack_delay_tbl[
+                (uint8_t)((ram[CONTRA_RAM_RANDOM_NUM] + ram[CONTRA_RAM_FRAME_COUNTER]) & 0x03u)];
+            const uint8_t strength_delta = (uint8_t)(ram[CONTRA_RAM_PLAYER_WEAPON_STRENGTH] << 3u);
+
+            ram[CONTRA_RAM_RANDOM_NUM] =
+                (uint8_t)(ram[CONTRA_RAM_RANDOM_NUM] + ram[CONTRA_RAM_FRAME_COUNTER]);
+            delay = (uint8_t)(delay - strength_delta);
+            ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = delay;
+            contra_rom_generate_enemy_at_pos(core, x, 0x1Du);
+        }
+    }
+
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+        if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+        {
+            goto set_x_pos;
+        }
+        ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] | 0x81u);
+    }
+
+    {
+        const unsigned frac =
+            (unsigned)ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] +
+            ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x];
+        uint8_t offset;
+
+        ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = (uint8_t)frac;
+        offset = (uint8_t)(
+            ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] +
+            ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] +
+            (frac >> 8u));
+        ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] = offset;
+        if ((ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] & 0x80u) == 0u)
+        {
+            if (offset >= 0x30u)
+            {
+                ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x20u;
+                contra_rom_reverse_enemy_x_direction(core, x);
+            }
+        }
+        else if ((offset & 0x80u) != 0u)
+        {
+            ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] = 0x00u;
+            ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = 0x00u;
+            ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
+                (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x7Eu);
+            ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x30u;
+            contra_rom_reverse_enemy_x_direction(core, x);
+        }
+    }
+
+set_x_pos:
+    if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x01u) == 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_X_POS + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] + ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x]);
+    }
+    else
+    {
+        ram[CONTRA_RAM_ENEMY_X_POS + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] - ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x]);
+    }
+}
+
+/* boss_gemini_routine_03 (bank0:5631-5660): each hit decrements VAR_4 real HP;
+   nonfinal hits reset HP to 1, flash/low-HP state, play metal hit, and resume. */
+static void contra_rom_boss_gemini_routine_03(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_4 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_4 + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_VAR_4 + x] == 0u)
+    {
+        contra_rom_advance_enemy_routine(core, x);
+        return;
+    }
+    if (ram[CONTRA_RAM_ENEMY_VAR_4 + x] < 0x07u)
+    {
+        if (ram[CONTRA_RAM_ENEMY_VAR_4 + x] == 0x01u)
+        {
+            ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = 0x52u;
+        }
+        ram[CONTRA_RAM_ENEMY_VAR_3 + x] = 0x01u;
+    }
+    ram[CONTRA_RAM_ENEMY_HP + x] = 0x01u;
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = 0x10u;
+    contra_play_sound(core, 0x16u);
+    contra_rom_set_enemy_routine_to_a(core, x, 0x03u);
+}
+
+/* boss_gemini_routine_04/06 (bank0:5665-5683): decrement the two-helmet count;
+   the last helmet runs the boss-defeated path, otherwise it explodes/removes. */
+static void contra_rom_boss_gemini_routine_04(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_WALL_CORE_REMAINING] = (uint8_t)(ram[CONTRA_RAM_WALL_CORE_REMAINING] - 1u);
+    if (ram[CONTRA_RAM_WALL_CORE_REMAINING] == 0u)
+    {
+        contra_init_apu_channels(core);
+        contra_play_sound(core, 0x57u);
+        ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] = 0x01u;
+        contra_rom_destroy_all_enemies(core, (int)x);
+        contra_rom_begin_enemy_explosion(core, x);
+        return;
+    }
+    contra_rom_begin_enemy_explosion(core, x);
+}
+
+static const uint8_t contra_spinning_bubbles_speed_tbl[4] = {0x01u, 0x03u, 0x04u, 0x05u};
+static const uint8_t contra_spinning_bullet_spin_tbl[4] = {0x08u, 0x06u, 0x04u, 0x02u};
+static const uint8_t contra_spinning_bullet_vel_tbl[60] = {
+    0x00u, 0x00u, 0x63u, 0x00u, 0xC0u, 0x00u, 0x0Fu, 0x01u, 0x4Bu, 0x01u, 0x72u, 0x01u,
+    0x7Eu, 0x01u, 0x72u, 0x01u, 0x4Bu, 0x01u, 0x0Fu, 0x01u, 0xC0u, 0x00u, 0x63u, 0x00u,
+    0x00u, 0x00u, 0x9Du, 0xFFu, 0x40u, 0xFFu, 0xF1u, 0xFEu, 0xB5u, 0xFEu, 0x8Eu, 0xFEu,
+    0x82u, 0xFEu, 0x8Eu, 0xFEu, 0xB5u, 0xFEu, 0xF1u, 0xFEu, 0x40u, 0xFFu, 0x9Du, 0xFFu,
+    0x00u, 0x00u, 0x63u, 0x00u, 0xC0u, 0x00u, 0x0Fu, 0x01u, 0x4Bu, 0x01u, 0x72u, 0x01u};
+
+static uint8_t contra_rom_spinning_bubble_aim_dir(ContraCore *core, uint8_t x)
+{
+    uint8_t quadrant;
+    uint8_t aim = contra_rom_aim_at_player(
+        core,
+        core->ram[CONTRA_RAM_ENEMY_X_POS + x],
+        core->ram[CONTRA_RAM_ENEMY_Y_POS + x],
+        contra_quadrant_aim_dir_01,
+        &quadrant);
+
+    aim = (uint8_t)(aim % 12u);
+    if ((quadrant & 0x02u) != 0u)
+    {
+        aim = (uint8_t)((12u - aim) % 12u);
+    }
+    return aim;
+}
+
+static void contra_rom_set_spinning_bubble_velocity_from_var1(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t dir = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] % 12u);
+    const size_t y = (size_t)dir * 2u;
+    const size_t xoff = y + 12u;
+
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = contra_spinning_bullet_vel_tbl[y];
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] = contra_spinning_bullet_vel_tbl[y + 1u];
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x] = contra_spinning_bullet_vel_tbl[xoff];
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] = contra_spinning_bullet_vel_tbl[xoff + 1u];
+}
+
+/* spinning_bubbles_routine_00 (bank0:5693-5720): choose spin cadence from frame
+   low bits, aim at the closest player, seed velocity, and start adjustment delay. */
+static void contra_rom_spinning_bubbles_routine_00(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] =
+        (ram[CONTRA_RAM_SPRITE_X_POS] <= ram[CONTRA_RAM_ENEMY_X_POS + x]) ? 0u : 1u;
+    ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] = (uint8_t)(ram[CONTRA_RAM_FRAME_COUNTER] & 0x03u);
+    ram[CONTRA_RAM_ENEMY_VAR_A + x] =
+        contra_spinning_bubbles_speed_tbl[ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x03u];
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = contra_rom_spinning_bubble_aim_dir(core, x);
+    contra_rom_set_spinning_bubble_velocity_from_var1(core, x);
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x20u;
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+/* spinning_bubbles_routine_01 (bank0:5726-5781): spin sprite 0x6D..0x72, move,
+   and periodically nudge aim toward the originally selected player. */
+static void contra_rom_spinning_bubbles_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t spin_idx = (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x03u);
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] + 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] >= contra_spinning_bullet_spin_tbl[spin_idx])
+    {
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0u;
+        ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)((ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u) % 6u);
+    }
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = (uint8_t)(0x6Du + ram[CONTRA_RAM_ENEMY_FRAME + x]);
+    contra_rom_update_enemy_pos(core, x);
+    if ((ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u) || (ram[CONTRA_RAM_ENEMY_VAR_3 + x] >= 0x14u))
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x08u;
+    ram[CONTRA_RAM_ENEMY_VAR_3 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_3 + x] + 1u);
+    {
+        const uint8_t target = contra_rom_spinning_bubble_aim_dir(core, x);
+
+        if (target != ram[CONTRA_RAM_ENEMY_VAR_1 + x])
+        {
+            ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] =
+                (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] | 0x03u);
+            if (((target - ram[CONTRA_RAM_ENEMY_VAR_1 + x]) & 0x0Fu) < 6u)
+            {
+                ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)((ram[CONTRA_RAM_ENEMY_VAR_1 + x] + 1u) % 12u);
+            }
+            else
+            {
+                ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)((ram[CONTRA_RAM_ENEMY_VAR_1 + x] + 11u) % 12u);
+            }
+            contra_rom_set_spinning_bubble_velocity_from_var1(core, x);
+        }
+    }
+}
+
+static const uint8_t contra_red_blue_soldier_init_pos_tbl[8] = {
+    0x9Cu, 0xF0u, 0x9Cu, 0x10u, 0x61u, 0xF0u, 0x61u, 0x10u};
+static const uint8_t contra_red_blue_soldier_init_vel_tbl[4] = {0x00u, 0xFFu, 0x00u, 0x01u};
+static const uint8_t contra_blue_soldier_jmp_x_vel_tbl[4] = {0xC0u, 0xFFu, 0x40u, 0x00u};
+static const uint8_t contra_red_blue_soldier_data_tbl[28] = {
+    0x00u, 0x01u, 0x02u, 0x03u, 0xD0u, 0x06u, 0x07u, 0xA0u,
+    0x04u, 0x05u, 0xC0u, 0x00u, 0x01u, 0xB0u, 0x02u, 0x03u,
+    0xD0u, 0x04u, 0x05u, 0x06u, 0x07u, 0xD0u, 0x00u, 0x01u,
+    0x02u, 0x03u, 0xFEu, 0xFFu};
+
+static uint8_t contra_rom_player_enemy_x_distance(const ContraCore *core, uint8_t x, uint8_t *player_index)
+{
+    const uint8_t ex = core->ram[CONTRA_RAM_ENEMY_X_POS + x];
+    uint8_t best = 0xFFu;
+    uint8_t best_index = 0u;
+    uint8_t p;
+
+    for (p = 0u; p < 2u; ++p)
+    {
+        if (core->ram[CONTRA_RAM_PLAYER_STATE + p] == 0x01u)
+        {
+            const uint8_t px = core->ram[CONTRA_RAM_SPRITE_X_POS + p];
+            const uint8_t dist = (px >= ex) ? (uint8_t)(px - ex) : (uint8_t)(ex - px);
+
+            if (dist < best)
+            {
+                best = dist;
+                best_index = p;
+            }
+        }
+    }
+    *player_index = best_index;
+    return best;
+}
+
+static void contra_rom_red_blue_soldier_routine_00(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t attr = (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x03u);
+    const uint8_t pos_idx = (uint8_t)(attr * 2u);
+    const uint8_t vel_idx = (uint8_t)((attr & 0x01u) * 2u);
+
+    ram[CONTRA_RAM_ENEMY_Y_POS + x] = contra_red_blue_soldier_init_pos_tbl[pos_idx];
+    ram[CONTRA_RAM_ENEMY_X_POS + x] = contra_red_blue_soldier_init_pos_tbl[pos_idx + 1u];
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x] = contra_red_blue_soldier_init_vel_tbl[vel_idx];
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] = contra_red_blue_soldier_init_vel_tbl[vel_idx + 1u];
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+static void contra_rom_red_blue_soldier_set_run_frame(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x03u) == 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)((ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u) % 3u);
+    }
+}
+
+static void contra_rom_red_blue_soldier_set_bg_priority(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t attr = (uint8_t)(ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] & 0xDFu);
+
+    if ((ram[CONTRA_RAM_ENEMY_X_POS + x] >= 0xDCu) || (ram[CONTRA_RAM_ENEMY_X_POS + x] < 0x24u))
+    {
+        attr = (uint8_t)(attr | 0x20u);
+    }
+    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = attr;
+}
+
+static void contra_rom_blue_soldier_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t player_index;
+
+    contra_rom_red_blue_soldier_set_run_frame(core, x);
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = (uint8_t)(0x85u + ram[CONTRA_RAM_ENEMY_FRAME + x]);
+    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] =
+        ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x01u) != 0u) ? 0x07u : 0x47u;
+    contra_rom_red_blue_soldier_set_bg_priority(core, x);
+    contra_rom_update_enemy_pos(core, x);
+    if ((ram[CONTRA_RAM_ENEMY_X_POS + x] >= 0xD8u) || (ram[CONTRA_RAM_ENEMY_X_POS + x] < 0x28u))
+    {
+        return;
+    }
+    if (contra_rom_player_enemy_x_distance(core, x, &player_index) < 0x10u)
+    {
+        (void)player_index;
+        ram[CONTRA_RAM_ENEMY_FRAME + x] = 0x00u;
+        contra_rom_set_enemy_delay_adv_routine(core, x, 0x01u);
+    }
+}
+
+static void contra_rom_blue_soldier_routine_02(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x08u;
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = (uint8_t)(0x88u + ram[CONTRA_RAM_ENEMY_FRAME + x]);
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+    if (ram[CONTRA_RAM_ENEMY_FRAME + x] < 0x03u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] & 0xDFu);
+    ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x7Eu);
+    {
+        const uint8_t vel_idx = (uint8_t)((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x01u) * 2u);
+
+        ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x] = contra_blue_soldier_jmp_x_vel_tbl[vel_idx];
+        ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] = contra_blue_soldier_jmp_x_vel_tbl[vel_idx + 1u];
+    }
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = 0x00u;
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] = 0xFFu;
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x10u);
+}
+
+static void contra_rom_blue_soldier_routine_03(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+        ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x8Au;
+    }
+    else
+    {
+        ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x8Bu;
+    }
+    contra_rom_add_10_to_enemy_y_fract_vel(core, x);
+    contra_rom_update_enemy_pos(core, x);
+}
+
+static void contra_rom_red_soldier_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t player_index;
+    uint8_t attack_dist;
+
+    contra_rom_red_blue_soldier_set_run_frame(core, x);
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = (uint8_t)(0x8Cu + ram[CONTRA_RAM_ENEMY_FRAME + x]);
+    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] =
+        ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x01u) != 0u) ? 0x06u : 0x46u;
+    contra_rom_red_blue_soldier_set_bg_priority(core, x);
+    contra_rom_update_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_VAR_2 + x] != 0u)
+    {
+        return;
+    }
+    if ((ram[CONTRA_RAM_ENEMY_X_POS + x] >= 0xD8u) || (ram[CONTRA_RAM_ENEMY_X_POS + x] < 0x28u))
+    {
+        return;
+    }
+    attack_dist = ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x02u) != 0u) ? 0x30u : 0x10u;
+    if (contra_rom_player_enemy_x_distance(core, x, &player_index) < attack_dist)
+    {
+        (void)player_index;
+        ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x8Fu;
+        ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0x03u;
+        ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x10u;
+        contra_rom_advance_enemy_routine(core, x);
+    }
+}
+
+static void contra_rom_red_soldier_routine_02(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] != 0u)
+    {
+        if (ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] == 0x2Cu)
+        {
+            ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] =
+                (uint8_t)(ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] & 0xF7u);
+        }
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x90u;
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] - 1u);
+    if ((ram[CONTRA_RAM_ENEMY_VAR_1 + x] & 0x80u) != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_VAR_2 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_2 + x] + 1u);
+        contra_rom_set_enemy_routine_to_a(core, x, 0x02u);
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x30u;
+    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] | 0x08u);
+    contra_rom_aim_and_create_enemy_bullet(
+        core, ram[CONTRA_RAM_ENEMY_X_POS + x], ram[CONTRA_RAM_ENEMY_Y_POS + x],
+        0x00u, 0x04u, contra_quadrant_aim_dir_01);
+}
+
+static void contra_rom_red_blue_soldier_gen_routine_00(ContraCore *core, uint8_t x)
+{
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x80u);
+}
+
+static void contra_rom_spawn_red_blue_soldier(ContraCore *core, uint8_t data_byte)
+{
+    uint8_t *const ram = core->ram;
+    const int slot = contra_rom_find_next_enemy_slot(core);
+
+    if (slot < 0)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_TYPE + slot] = ((data_byte >> 2u) & 0x01u) != 0u ? 0x1Eu : 0x1Fu;
+    contra_rom_initialize_enemy(core, (uint8_t)slot);
+    ram[CONTRA_RAM_ENEMY_ATTRIBUTES + slot] = (uint8_t)(data_byte & 0x03u);
+}
+
+static void contra_rom_red_blue_soldier_gen_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    if (ram[CONTRA_RAM_WALL_PLATING_DESTROYED_COUNT] >= 0x03u)
+    {
+        contra_rom_clear_enemy(core, x);
+        return;
+    }
+    if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x01u) != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    for (;;)
+    {
+        uint8_t offset = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
+        uint8_t data = contra_red_blue_soldier_data_tbl[offset];
+
+        ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)(offset + 1u);
+        if (data == 0xFFu)
+        {
+            ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0x00u;
+            continue;
+        }
+        if ((data & 0x80u) != 0u)
+        {
+            ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = (uint8_t)(data << 1u);
+            return;
+        }
+        contra_rom_spawn_red_blue_soldier(core, data);
+    }
 }
 
 static const uint8_t contra_eye_projectile_sprite_attr_tbl[4] = {0x00u, 0x40u, 0xC0u, 0x80u};
@@ -12243,6 +12991,381 @@ static void contra_rom_dragon_arm_orb_routine_04(ContraCore *core, uint8_t x)
     contra_rom_begin_enemy_explosion(core, x);
 }
 
+static void contra_rom_add_to_enemy_y_fract_vel(ContraCore *core, uint8_t x, uint8_t a)
+{
+    uint8_t *const ram = core->ram;
+    const unsigned f = (unsigned)ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] + a;
+
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = (uint8_t)f;
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] + (f >> 8u));
+}
+
+/* ice_grenade_generator_routine_00/01 (bank0:6175-6190): scroll the generator
+   until it reaches X < #$c8, then spawn a grenade every #$80 frames. */
+static void contra_rom_ice_grenade_generator_routine_00(ContraCore *core, uint8_t x)
+{
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    if (core->ram[CONTRA_RAM_ENEMY_X_POS + x] >= 0xC8u)
+    {
+        return;
+    }
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x01u);
+}
+
+static void contra_rom_ice_grenade_generator_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x80u;
+    contra_rom_generate_enemy_at_pos(core, x, 0x11u);
+}
+
+static const uint8_t contra_ice_grenade_sprite_tbl[4] = {0x74u, 0x75u, 0x76u, 0x77u};
+
+/* ice_grenade_routine_00/01 (bank0:6201-6248): whistle in from the generator,
+   animate under gravity, and explode when the ground collision probe hits. */
+static void contra_rom_ice_grenade_routine_00(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_play_sound(core, 0x1Au);
+    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = 0x20u;
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x] = 0x80u;
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] = 0x00u;
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = 0x00u;
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] = 0xFEu;
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+static void contra_rom_ice_grenade_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x07u) == 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+    }
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] =
+        contra_ice_grenade_sprite_tbl[ram[CONTRA_RAM_ENEMY_FRAME + x] & 0x03u];
+    contra_rom_update_enemy_pos(core, x);
+    contra_rom_add_to_enemy_y_fract_vel(core, x, 0x0Au);
+    if (ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] < 0x80u)
+    {
+        ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = 0x00u;
+        if (contra_rom_add_y_to_y_pos_get_bg_collision(core, x, 0x04u) != 0u)
+        {
+            contra_play_sound(core, 0x24u);
+            contra_rom_advance_enemy_routine(core, x);
+        }
+    }
+}
+
+/* ice_separator_routine_00 (bank0:7143-7156): pipe joint sprite; when the tank's
+   scroll flag is set it moves left by the frame scroll, otherwise it is terrain-
+   anchored through add_scroll_to_enemy_pos. */
+static void contra_rom_ice_separator_routine_00(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0xC4u;
+    if (ram[CONTRA_RAM_TANK_AUTO_SCROLL] != 0u)
+    {
+        if (ram[CONTRA_RAM_FRAME_SCROLL] != 0u)
+        {
+            ram[CONTRA_RAM_ENEMY_X_POS + x] =
+                (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] - 1u);
+        }
+        return;
+    }
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+}
+
+static const uint8_t contra_fire_beam_anim_delay_tbl[4] = {0x00u, 0x20u, 0x40u, 0x60u};
+static const uint8_t contra_fire_beam_length_tbl[4] = {0x05u, 0x09u, 0x0Du, 0x0Fu};
+static const uint8_t contra_fire_beam_not_firing_sprite_tbl[8] = {
+    0x01u, 0xBFu, 0xC0u, 0xBFu, 0x01u, 0xC1u, 0xC2u, 0xC1u};
+
+static void contra_rom_fire_beam_add_pos_set_delay(ContraCore *core, uint8_t x, uint8_t attr_bits)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t attr;
+
+    ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] | attr_bits);
+    contra_rom_add_a_to_enemy_y_pos(core, x, 0x08u);
+    attr = ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x];
+    ram[CONTRA_RAM_ENEMY_VAR_A + x] = contra_fire_beam_anim_delay_tbl[(attr >> 2u) & 0x03u];
+    contra_rom_set_enemy_delay_adv_routine(core, x, ram[CONTRA_RAM_ENEMY_VAR_A + x]);
+}
+
+static void contra_rom_animate_small_flame(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t delay;
+
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] - 1u);
+    delay = ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x];
+    if ((delay & 0x07u) != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] =
+        contra_fire_beam_not_firing_sprite_tbl[((delay >> 3u) & 0x03u) |
+                                               ram[CONTRA_RAM_ENEMY_FRAME + x]];
+}
+
+static void contra_rom_begin_fire_beam_attack(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t player_index = 0u;
+
+    if (ram[CONTRA_RAM_ENEMY_X_POS + x] < 0x30u)
+    {
+        return;
+    }
+    (void)contra_rom_player_enemy_x_distance(core, x, &player_index);
+    contra_play_sound(core, 0x09u);
+    contra_rom_enable_enemy_collision(core, x);
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] =
+        contra_fire_beam_length_tbl[ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x03u];
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x01u;
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0x00u;
+    ram[CONTRA_RAM_ENEMY_VAR_3 + x] = 0x00u;
+    ram[CONTRA_RAM_ENEMY_VAR_4 + x] = 0x00u;
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x00u);
+}
+
+static bool contra_rom_fire_beam_step_anim(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+        return false;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (ram[CONTRA_RAM_ENEMY_X_POS + x] < 0x30u) ? 0x00u : 0x01u;
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_3 + x] | ram[CONTRA_RAM_ENEMY_VAR_4 + x]);
+    return true;
+}
+
+static void contra_rom_fire_beam_disable_collision_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = ram[CONTRA_RAM_ENEMY_VAR_A + x];
+    contra_rom_disable_enemy_collision(core, x);
+    contra_rom_set_enemy_routine_to_a(core, x, 0x02u);
+}
+
+static void contra_rom_fire_beam_set_delay_10_adv_routine(ContraCore *core, uint8_t x)
+{
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x10u);
+}
+
+static void contra_rom_fire_beam_down_routine_00(ContraCore *core, uint8_t x)
+{
+    core->ram[CONTRA_RAM_ENEMY_FRAME + x] = 0x04u;
+    contra_rom_fire_beam_add_pos_set_delay(core, x, 0x80u);
+}
+
+static void contra_rom_fire_beam_down_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t player_index = 0u;
+
+    contra_rom_animate_small_flame(core, x);
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    if (core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+            (uint8_t)(core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+        return;
+    }
+    if (contra_rom_player_enemy_x_distance(core, x, &player_index) < 0x20u)
+    {
+        contra_rom_begin_fire_beam_attack(core, x);
+    }
+}
+
+static void contra_rom_fire_beam_down_routine_02(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if ((ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u) ||
+        !contra_rom_fire_beam_step_anim(core, x))
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_2 + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_VAR_2 + x] == 0u)
+    {
+        contra_rom_fire_beam_set_delay_10_adv_routine(core, x);
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_4 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_4 + x] + 0x08u);
+}
+
+static void contra_rom_fire_beam_down_routine_03(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if ((ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u) ||
+        !contra_rom_fire_beam_step_anim(core, x))
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_4 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_4 + x] - 0x08u);
+    if ((ram[CONTRA_RAM_ENEMY_VAR_4 + x] & 0x80u) != 0u)
+    {
+        contra_rom_fire_beam_disable_collision_routine_01(core, x);
+    }
+}
+
+static void contra_rom_fire_beam_left_routine_00(ContraCore *core, uint8_t x)
+{
+    contra_rom_fire_beam_add_pos_set_delay(core, x, 0x40u);
+}
+
+static void contra_rom_fire_beam_left_routine_01(ContraCore *core, uint8_t x)
+{
+    contra_rom_animate_small_flame(core, x);
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    if ((core->ram[CONTRA_RAM_FRAME_COUNTER] & 0x7Fu) == core->ram[CONTRA_RAM_ENEMY_VAR_A + x])
+    {
+        contra_rom_begin_fire_beam_attack(core, x);
+    }
+}
+
+static void contra_rom_fire_beam_left_routine_02(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if ((ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u) ||
+        !contra_rom_fire_beam_step_anim(core, x))
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_2 + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_VAR_2 + x] == 0u)
+    {
+        contra_rom_fire_beam_set_delay_10_adv_routine(core, x);
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_3 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_3 + x] - 0x08u);
+}
+
+static void contra_rom_fire_beam_left_routine_03(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if ((ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u) ||
+        !contra_rom_fire_beam_step_anim(core, x))
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_3 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_3 + x] + 0x08u);
+    if ((ram[CONTRA_RAM_ENEMY_VAR_3 + x] != 0u) &&
+        ((ram[CONTRA_RAM_ENEMY_VAR_3 + x] & 0x80u) == 0u))
+    {
+        contra_rom_fire_beam_disable_collision_routine_01(core, x);
+    }
+}
+
+static void contra_rom_fire_beam_right_routine_00(ContraCore *core, uint8_t x)
+{
+    core->ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = 0x40u;
+    contra_rom_fire_beam_add_pos_set_delay(core, x, 0x00u);
+}
+
+static void contra_rom_fire_beam_right_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_animate_small_flame(core, x);
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_A + x] =
+        (uint8_t)((ram[CONTRA_RAM_RANDOM_NUM] + ram[CONTRA_RAM_FRAME_COUNTER]) & 0x3Fu);
+    contra_rom_begin_fire_beam_attack(core, x);
+}
+
+static void contra_rom_fire_beam_right_routine_02(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if ((ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u) ||
+        !contra_rom_fire_beam_step_anim(core, x))
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_2 + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_VAR_2 + x] == 0u)
+    {
+        contra_rom_fire_beam_set_delay_10_adv_routine(core, x);
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_3 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_3 + x] + 0x08u);
+}
+
+static void contra_rom_fire_beam_right_routine_03(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if ((ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u) ||
+        !contra_rom_fire_beam_step_anim(core, x))
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_3 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_3 + x] - 0x08u);
+    if ((ram[CONTRA_RAM_ENEMY_VAR_3 + x] & 0x80u) != 0u)
+    {
+        contra_rom_fire_beam_disable_collision_routine_01(core, x);
+    }
+}
+
 /* exe_enemy_type (bank7:7360-7474): dispatch enemy type/routine to handler. */
 static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
 {
@@ -12252,7 +13375,28 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
     switch (type)
     {
         case 0x10u:
-            if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u)
+            if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x05u)
+            {
+                switch (routine) /* level-6 fire beam down */
+                {
+                    case 0x01u: contra_rom_fire_beam_down_routine_00(core, x); break;
+                    case 0x02u: contra_rom_fire_beam_down_routine_01(core, x); break;
+                    case 0x03u: contra_rom_fire_beam_down_routine_02(core, x); break;
+                    case 0x04u: contra_rom_fire_beam_down_routine_03(core, x); break;
+                    default: break;
+                }
+            }
+            else if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u)
+            {
+                switch (routine) /* level-5 ice grenade generator */
+                {
+                    case 0x01u: contra_rom_ice_grenade_generator_routine_00(core, x); break;
+                    case 0x02u: contra_rom_ice_grenade_generator_routine_01(core, x); break;
+                    case 0x03u: contra_rom_clear_enemy(core, x); break;
+                    default: break;
+                }
+            }
+            else if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u)
             {
                 switch (routine) /* level-2 boss eye */
                 {
@@ -12282,6 +13426,63 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 }
             }
             break;
+        case 0x11u:
+            if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x05u)
+            {
+                switch (routine) /* level-6 fire beam left */
+                {
+                    case 0x01u: contra_rom_fire_beam_left_routine_00(core, x); break;
+                    case 0x02u: contra_rom_fire_beam_left_routine_01(core, x); break;
+                    case 0x03u: contra_rom_fire_beam_left_routine_02(core, x); break;
+                    case 0x04u: contra_rom_fire_beam_left_routine_03(core, x); break;
+                    default: break;
+                }
+            }
+            else if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u)
+            {
+                switch (routine) /* level-5 ice grenade */
+                {
+                    case 0x01u: contra_rom_ice_grenade_routine_00(core, x); break;
+                    case 0x02u: contra_rom_ice_grenade_routine_01(core, x); break;
+                    case 0x03u: contra_rom_enemy_routine_init_explosion_step(core, x); break;
+                    case 0x04u: contra_rom_enemy_routine_explosion_step(core, x); break;
+                    case 0x05u: contra_rom_clear_enemy(core, x); break;
+                    default: break;
+                }
+            }
+            else if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x00u)
+            {
+                switch (routine) /* level-1 fortress boss door */
+                {
+                    case 0x01u: contra_rom_boss_door_routine_00(core, x); break;
+                    case 0x02u: contra_rom_add_scroll_to_enemy_pos(core, x); break;
+                    case 0x03u: contra_rom_boss_door_routine_02(core, x); break;
+                    case 0x04u: contra_rom_enemy_routine_explosion_step(core, x); break;
+                    case 0x05u: contra_rom_boss_door_routine_clear_sprite(core, x); break;
+                    case 0x06u: contra_rom_boss_door_routine_05(core, x); break;
+                    case 0x07u: contra_rom_boss_door_routine_06(core, x); break;
+                    default: break;
+                }
+            }
+            else if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x02u)
+            {
+                switch (routine) /* level-3 moving flame */
+                {
+                    case 0x01u: contra_rom_floating_rock_routine_00(core, x); break;
+                    case 0x02u: contra_rom_moving_flame_routine_01(core, x); break;
+                    default: break;
+                }
+            }
+            else
+            {
+                switch (routine) /* level-2 indoor roller */
+                {
+                    case 0x01u: contra_rom_roller_routine_00(core, x); break;
+                    case 0x02u: contra_rom_roller_routine_01(core, x); break;
+                    default: break; /* hit/explosion via the 0xFE actor */
+                }
+            }
+            break;
         case 0x1Bu: /* level-2 boss eye sphere projectile */
             switch (routine)
             {
@@ -12290,8 +13491,79 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 default: break; /* explosion via the 0xFE actor */
             }
             break;
+        case 0x1Cu: /* level-4 boss gemini */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_boss_gemini_routine_00(core, x); break;
+                case 0x02u: contra_rom_boss_gemini_routine_01(core, x); break;
+                case 0x03u: contra_rom_boss_gemini_routine_02(core, x); break;
+                case 0x04u: contra_rom_boss_gemini_routine_03(core, x); break;
+                case 0x05u: contra_rom_boss_gemini_routine_04(core, x); break;
+                case 0x06u: contra_rom_enemy_routine_explosion_step(core, x); break;
+                case 0x07u: contra_rom_clear_enemy(core, x); break;
+                default: break;
+            }
+            break;
+        case 0x1Du: /* level-4 boss gemini spinning bubbles */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_spinning_bubbles_routine_00(core, x); break;
+                case 0x02u: contra_rom_spinning_bubbles_routine_01(core, x); break;
+                case 0x03u: contra_rom_enemy_routine_init_explosion_step(core, x); break;
+                case 0x04u: contra_rom_enemy_routine_explosion_step(core, x); break;
+                case 0x05u: contra_rom_clear_enemy(core, x); break;
+                default: break;
+            }
+            break;
+        case 0x1Eu: /* level-4 boss blue soldier */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_red_blue_soldier_routine_00(core, x); break;
+                case 0x02u: contra_rom_blue_soldier_routine_01(core, x); break;
+                case 0x03u: contra_rom_blue_soldier_routine_02(core, x); break;
+                case 0x04u: contra_rom_blue_soldier_routine_03(core, x); break;
+                case 0x05u: contra_rom_enemy_routine_init_explosion_step(core, x); break;
+                case 0x06u: contra_rom_enemy_routine_explosion_step(core, x); break;
+                case 0x07u: contra_rom_clear_enemy(core, x); break;
+                default: break;
+            }
+            break;
+        case 0x1Fu: /* level-4 boss red soldier */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_red_blue_soldier_routine_00(core, x); break;
+                case 0x02u: contra_rom_red_soldier_routine_01(core, x); break;
+                case 0x03u: contra_rom_red_soldier_routine_02(core, x); break;
+                case 0x04u: contra_rom_enemy_routine_init_explosion_step(core, x); break;
+                case 0x05u: contra_rom_enemy_routine_explosion_step(core, x); break;
+                case 0x06u: contra_rom_clear_enemy(core, x); break;
+                default: break;
+            }
+            break;
+        case 0x20u: /* level-4 boss red/blue soldier generator */
+            switch (routine)
+            {
+                case 0x01u: contra_rom_red_blue_soldier_gen_routine_00(core, x); break;
+                case 0x02u: contra_rom_red_blue_soldier_gen_routine_01(core, x); break;
+                case 0x03u: contra_rom_clear_enemy(core, x); break;
+                default: break;
+            }
+            break;
         case 0x13u:
-            if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x02u)
+            if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x05u)
+            {
+                /* TODO: port level-6 boss robot (bank0:7473). Do not route it
+                   through level-3 falling rock or level-2 wall turret behavior. */
+            }
+            else if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u)
+            {
+                switch (routine) /* level-5 pipe joint */
+                {
+                    case 0x01u: contra_rom_ice_separator_routine_00(core, x); break;
+                    default: break;
+                }
+            }
+            else if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x02u)
             {
                 switch (routine) /* level-3 falling rock */
                 {
@@ -12315,7 +13587,17 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
             }
             break;
         case 0x14u:
-            if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x02u)
+            if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x05u)
+            {
+                /* TODO: port level-6 spiked disk projectile (bank0:7947). Do not
+                   route it through level-3 mouth or level-2 wall core behavior. */
+            }
+            else if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u)
+            {
+                /* TODO: port level-5 boss UFO (bank0:6647). Do not route it through
+                   level-3 mouth or level-2 wall core behavior. */
+            }
+            else if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x02u)
             {
                 switch (routine) /* level-3 dragon boss mouth */
                 {
@@ -12385,40 +13667,6 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 default: break; /* hit/explosion via the 0xFE actor */
             }
             break;
-        case 0x11u:
-            if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x00u)
-            {
-                switch (routine) /* level-1 fortress boss door */
-                {
-                    case 0x01u: contra_rom_boss_door_routine_00(core, x); break;
-                    case 0x02u: contra_rom_add_scroll_to_enemy_pos(core, x); break;
-                    case 0x03u: contra_rom_boss_door_routine_02(core, x); break;
-                    case 0x04u: contra_rom_enemy_routine_explosion_step(core, x); break;
-                    case 0x05u: contra_rom_boss_door_routine_clear_sprite(core, x); break;
-                    case 0x06u: contra_rom_boss_door_routine_05(core, x); break;
-                    case 0x07u: contra_rom_boss_door_routine_06(core, x); break;
-                    default: break;
-                }
-            }
-            else if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x02u)
-            {
-                switch (routine) /* level-3 moving flame */
-                {
-                    case 0x01u: contra_rom_floating_rock_routine_00(core, x); break;
-                    case 0x02u: contra_rom_moving_flame_routine_01(core, x); break;
-                    default: break;
-                }
-            }
-            else
-            {
-                switch (routine) /* level-2 indoor roller */
-                {
-                    case 0x01u: contra_rom_roller_routine_00(core, x); break;
-                    case 0x02u: contra_rom_roller_routine_01(core, x); break;
-                    default: break; /* hit/explosion via the 0xFE actor */
-                }
-            }
-            break;
         case 0x1Au: /* indoor roller generator */
             switch (routine)
             {
@@ -12428,7 +13676,23 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
             }
             break;
         case 0x12u:
-            if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x00u)
+            if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x05u)
+            {
+                switch (routine) /* level-6 fire beam right */
+                {
+                    case 0x01u: contra_rom_fire_beam_right_routine_00(core, x); break;
+                    case 0x02u: contra_rom_fire_beam_right_routine_01(core, x); break;
+                    case 0x03u: contra_rom_fire_beam_right_routine_02(core, x); break;
+                    case 0x04u: contra_rom_fire_beam_right_routine_03(core, x); break;
+                    default: break;
+                }
+            }
+            else if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u)
+            {
+                /* TODO: port level-5 tank (bank0:6250). Do not route it through
+                   level-3 rock cave or level-2 grenade behavior. */
+            }
+            else if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x00u)
             {
                 switch (routine) /* level-1 exploding bridge */
                 {
@@ -12685,7 +13949,8 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
                destroyed, bumps the plating count); level-2 boss eye 0x10 -> 4
                (routine_03 dec real HP). Everything else takes the explosion actor. */
             const uint8_t dead_type = ram[CONTRA_RAM_ENEMY_TYPE + slot];
-            const bool is_l2 = (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u);
+            const bool is_indoor_base =
+                (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u) || (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x03u);
             uint8_t dest_routine = 0u;
 
             if ((dead_type == 0x14u) && (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x02u))
@@ -12715,9 +13980,14 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
                                          to the 0xFE explosion actor or the killed soldier freezes
                                          in front of the core and blocks the room. */
             }
-            else if ((dead_type == 0x0Au) || (is_l2 && (dead_type == 0x10u)))
+            else if ((dead_type == 0x0Au) ||
+                     ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u) && (dead_type == 0x10u)))
             {
                 dest_routine = 0x04u;
+            }
+            else if ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x03u) && (dead_type == 0x1Cu))
+            {
+                dest_routine = 0x04u; /* boss_gemini_routine_03 */
             }
             else if (dead_type == 0x04u)
             {
@@ -12735,7 +14005,7 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
             {
                 dest_routine = 0x03u; /* flying capsule -> routine_02 (drop weapon item) */
             }
-            else if ((dead_type == 0x11u) && !is_l2)
+            else if ((dead_type == 0x11u) && !is_indoor_base)
             {
                 dest_routine = 0x03u; /* L1 fortress boss door -> boss_defeated_routine */
             }
@@ -12986,10 +14256,10 @@ static void contra_rom_exe_all_enemy_routine(ContraCore *core)
     }
 }
 
-/* Faithful level-2 (indoor base) enemy system. The faithful real-RAM level-2
+/* Faithful level-2/4 (indoor base) enemy system. The faithful real-RAM indoor
    enemies are the only path. */
 
-/* level_2_enemy_screen_* (bank2.asm:2361): each indoor room is a "cores to
+/* level_2_enemy_screen_* / level_4_enemy_screen_* (bank2.asm): each indoor room is a "cores to
    destroy" count, then enemy triples {pos, type(+pos-adjust flags), attrs},
    0xFF-terminated. pos = (hi nibble = Y, lo nibble = X) scaled x16; type byte
    bit7 -> +8 Y, bit6 -> +8 X (see the carry note at the decode below). Types:
@@ -13012,6 +14282,55 @@ static const uint8_t *const contra_l2_enemy_screen_tbl[6] = {
     contra_l2_enemy_screen_00, contra_l2_enemy_screen_01, contra_l2_enemy_screen_02,
     contra_l2_enemy_screen_03, contra_l2_enemy_screen_04, contra_l2_enemy_screen_05};
 
+/* level_4_enemy_screen_* (bank2:2530-2607): Base 2 uses the same indoor loader
+   format as level 2 but has eight core rooms and a Gemini boss room. */
+static const uint8_t contra_l4_enemy_screen_00[] = {
+    0x01u, 0x11u, 0x19u, 0x01u, 0x68u, 0x94u, 0x04u, 0x66u, 0xD3u, 0x00u,
+    0x69u, 0xD3u, 0x00u, 0xFFu};
+static const uint8_t contra_l4_enemy_screen_01[] = {
+    0x04u, 0x11u, 0x19u, 0x01u, 0x76u, 0x54u, 0x03u, 0x77u, 0x54u, 0x01u,
+    0x78u, 0x54u, 0x01u, 0x79u, 0x54u, 0x03u, 0xFFu};
+static const uint8_t contra_l4_enemy_screen_02[] = {
+    0x02u, 0x11u, 0x19u, 0x01u, 0x67u, 0xD4u, 0x04u, 0x68u, 0xD4u, 0x04u,
+    0x58u, 0x93u, 0x00u, 0xFFu};
+static const uint8_t contra_l4_enemy_screen_03[] = {
+    0x02u, 0x11u, 0x19u, 0x01u, 0x68u, 0x13u, 0x00u, 0x77u, 0x54u, 0x03u,
+    0x78u, 0x54u, 0x03u, 0xFFu};
+static const uint8_t contra_l4_enemy_screen_04[] = {
+    0x02u, 0x11u, 0x19u, 0x01u, 0x66u, 0xD4u, 0x03u, 0x68u, 0x93u, 0x00u,
+    0x69u, 0xD4u, 0x03u, 0xFFu};
+static const uint8_t contra_l4_enemy_screen_05[] = {
+    0x01u, 0x11u, 0x1Au, 0x01u, 0x11u, 0x19u, 0x01u, 0x68u, 0x94u, 0x03u, 0xFFu};
+static const uint8_t contra_l4_enemy_screen_06[] = {
+    0x01u, 0x11u, 0x19u, 0x01u, 0x58u, 0x94u, 0x03u, 0x68u, 0x93u, 0x00u, 0xFFu};
+static const uint8_t contra_l4_enemy_screen_07[] = {
+    0x01u, 0x11u, 0x19u, 0x01u, 0x58u, 0x13u, 0x00u, 0x66u, 0xD3u, 0x00u,
+    0x68u, 0x94u, 0x0Bu, 0x69u, 0xD3u, 0x00u, 0xFFu};
+static const uint8_t contra_l4_enemy_screen_08[] = {
+    0x02u, 0x11u, 0x20u, 0x00u, 0x36u, 0x5Cu, 0x00u, 0x39u, 0x5Cu, 0x00u,
+    0x58u, 0x08u, 0x00u, 0x85u, 0x0Au, 0x00u, 0x88u, 0x0Au, 0x01u,
+    0x8Bu, 0x0Au, 0x00u, 0xFFu};
+static const uint8_t *const contra_l4_enemy_screen_tbl[9] = {
+    contra_l4_enemy_screen_00, contra_l4_enemy_screen_01, contra_l4_enemy_screen_02,
+    contra_l4_enemy_screen_03, contra_l4_enemy_screen_04, contra_l4_enemy_screen_05,
+    contra_l4_enemy_screen_06, contra_l4_enemy_screen_07, contra_l4_enemy_screen_08};
+
+static bool contra_get_indoor_enemy_screen_count(const ContraCore *core, size_t *screen_count)
+{
+    switch (core->ram[CONTRA_RAM_CURRENT_LEVEL])
+    {
+        case 0x01u:
+            *screen_count = sizeof(contra_l2_enemy_screen_tbl) / sizeof(contra_l2_enemy_screen_tbl[0]);
+            return true;
+        case 0x03u:
+            *screen_count = sizeof(contra_l4_enemy_screen_tbl) / sizeof(contra_l4_enemy_screen_tbl[0]);
+            return true;
+        default:
+            *screen_count = 0u;
+            return false;
+    }
+}
+
 /* load_enemy_indoor_level (bank2.asm): on room entry, clear all slots and load
    the whole room's enemy set at once (indoor levels are room-based, not
    scroll-triggered), setting WALL_CORE_REMAINING from the first byte. */
@@ -13020,6 +14339,7 @@ static void contra_rom_load_indoor_enemy_data(ContraCore *core)
     uint8_t *const ram = core->ram;
     const uint8_t screen = ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER];
     const uint8_t *data;
+    size_t screen_count;
     size_t y;
     int slot;
 
@@ -13038,11 +14358,13 @@ static void contra_rom_load_indoor_enemy_data(ContraCore *core)
     {
         contra_rom_clear_enemy(core, (uint8_t)slot);
     }
-    if (screen >= 6u)
+    if (!contra_get_indoor_enemy_screen_count(core, &screen_count) || (screen >= screen_count))
     {
         return;
     }
-    data = contra_l2_enemy_screen_tbl[screen];
+    data = (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x03u)
+        ? contra_l4_enemy_screen_tbl[screen]
+        : contra_l2_enemy_screen_tbl[screen];
     if (data[0] == 0xFFu)
     {
         return;
@@ -13081,7 +14403,8 @@ static void contra_run_level_enemy_logic(ContraCore *core)
 {
     contra_load_bank_3_handle_scroll(core);
     contra_rom_exe_all_enemy_routine(core);
-    if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u)
+    if ((core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u) ||
+        (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x03u))
     {
         contra_rom_load_indoor_enemy_data(core);
     }
@@ -14638,6 +15961,7 @@ void contra_core_debug_warp_level2_boss(ContraCore *core)
     ram[CONTRA_RAM_P2_GAME_OVER_STATUS] = 0x01u;
     ram[CONTRA_RAM_P1_NUM_LIVES] = 0x02u;
     ram[CONTRA_RAM_P2_NUM_LIVES] = 0x00u;
+    contra_apply_start_player_env(core);
     for (frame = 0u; frame < 600u; ++frame)
     {
         contra_core_set_input(core, &none);
@@ -14714,6 +16038,36 @@ void contra_core_debug_warp_level2_boss(ContraCore *core)
 
     /* leave the player alive and not mid-jump for the handover to live input */
     ram[CONTRA_RAM_INVINCIBILITY_TIMER] = 0x00u;
+    contra_apply_start_player_env(core);
+}
+
+void contra_core_debug_warp_level4(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+    ContraInputSnapshot none = {{0u, 0u}};
+    unsigned frame;
+
+    ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
+    ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x00u;
+    ram[CONTRA_RAM_CURRENT_LEVEL] = 0x03u;
+    ram[CONTRA_RAM_PLAYER_MODE_1D] = 0x01u;
+    ram[CONTRA_RAM_P1_GAME_OVER_STATUS] = 0x00u;
+    ram[CONTRA_RAM_P2_GAME_OVER_STATUS] = 0x01u;
+    ram[CONTRA_RAM_P1_NUM_LIVES] = 0x02u;
+    ram[CONTRA_RAM_P2_NUM_LIVES] = 0x00u;
+    contra_apply_start_player_env(core);
+
+    for (frame = 0u; frame < 600u; ++frame)
+    {
+        contra_core_set_input(core, &none);
+        contra_core_step_frame(core);
+        if ((ram[CONTRA_RAM_GAME_ROUTINE_INDEX] == 0x05u) &&
+            (ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x04u))
+        {
+            break;
+        }
+    }
+    contra_apply_start_player_env(core);
 }
 
 const uint32_t *contra_core_framebuffer(const ContraCore *core)

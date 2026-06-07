@@ -124,4 +124,8 @@ const uint8_t *contra_core_ram(const ContraCore *core);
    the Level 2 boss room so a front-end can launch "just the L2 boss fight". */
 void contra_core_debug_warp_level2_boss(ContraCore *core);
 
+/* DEBUG (not part of the faithful port): fast-forward an initialized core straight to
+   Level 4 gameplay so a front-end can launch directly on Level 4. */
+void contra_core_debug_warp_level4(ContraCore *core);
+
 #endif
