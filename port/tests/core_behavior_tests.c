@@ -1831,7 +1831,7 @@ static bool test_level2_killed_indoor_soldier_explodes_not_freezes(void)
         if ((core.ram[CONTRA_RAM_ENEMY_TYPE + slot] == 0x15u) &&
             (core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x05u))
         {
-            frozen = true;
+            frozen = true; /* the soft-lock: stuck as a live type-0x15 at routine 5 */
         }
         if (core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x00u)
         {
@@ -1840,6 +1840,41 @@ static bool test_level2_killed_indoor_soldier_explodes_not_freezes(void)
     }
     CHECK(!frozen);
     CHECK(cleared);
+    return true;
+}
+
+/* Pressing Up into the live electric fence (screen not cleared) must show the
+   electric-shock sprite 0x55 while ELECTROCUTED_TIMER runs -- the indoor sprite
+   branch previously drew the facing-up sprite, so the shock never appeared. */
+static bool test_level2_electrocution_shows_shock_sprite(void)
+{
+    ContraCore core;
+    unsigned frame;
+    bool shock = false;
+
+    force_level2_gameplay(&core);
+    for (frame = 0u; frame < 180u; ++frame)
+    {
+        step_no_input(&core);
+        if ((core.ram[CONTRA_RAM_PLAYER_JUMP_STATUS] == 0x00u) &&
+            (core.ram[CONTRA_RAM_EDGE_FALL_CODE] == 0x00u))
+        {
+            break;
+        }
+    }
+    CHECK(core.ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] == 0x00u);
+
+    for (frame = 0u; frame < 60u; ++frame)
+    {
+        step_with_input(&core, CONTRA_BUTTON_UP);
+        if ((core.ram[CONTRA_RAM_ELECTROCUTED_TIMER] != 0u) &&
+            (core.ram[CONTRA_RAM_PLAYER_SPRITE_CODE] == 0x55u))
+        {
+            shock = true;
+            break;
+        }
+    }
+    CHECK(shock);
     return true;
 }
 
@@ -1924,6 +1959,7 @@ int main(void)
         {"level2_indoor_player_bullet_despawns_on_timer", test_level2_indoor_player_bullet_despawns_on_timer},
         {"level2_indoor_fence_animates_chr", test_level2_indoor_fence_animates_chr},
         {"level2_killed_indoor_soldier_explodes_not_freezes", test_level2_killed_indoor_soldier_explodes_not_freezes},
+        {"level2_electrocution_shows_shock_sprite", test_level2_electrocution_shows_shock_sprite},
         {"level2_indoor_player_walk_animates", test_level2_indoor_player_walk_animates},
         {"broad_weapon_gameover_and_alt_graphics_matrix", test_broad_weapon_gameover_and_alt_graphics_matrix},
         {"broad_player_ui_and_end_level_matrix", test_broad_player_ui_and_end_level_matrix}

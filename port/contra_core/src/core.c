@@ -2122,8 +2122,10 @@ static void contra_clear_player_bullet(ContraCore *core, size_t bullet_index)
     ram[CONTRA_RAM_PLAYER_BULLET_OWNER + bullet_index] = 0x00u;
     ram[CONTRA_RAM_PLAYER_BULLET_TIMER + bullet_index] = 0x00u;
     ram[CONTRA_RAM_PLAYER_BULLET_AIM_DIR + bullet_index] = 0x00u;
-    ram[CONTRA_RAM_PLAYER_BULLET_X_VEL_ACCUM + bullet_index] = 0x00u;
-    ram[CONTRA_RAM_PLAYER_BULLET_Y_VEL_ACCUM + bullet_index] = 0x00u;
+    /* clear_bullet_values (bank6:1716) clears everything below EXCEPT the X/Y
+       velocity sub-pixel accumulators: those keep their phase from the previous
+       bullet that used this slot. Zeroing them (as we did) desynced a re-used
+       slot's first move -- it crossed a pixel boundary one frame early. */
     ram[CONTRA_RAM_PLAYER_BULLET_X_VEL_FRACT + bullet_index] = 0x00u;
     ram[CONTRA_RAM_PLAYER_BULLET_Y_VEL_FRACT + bullet_index] = 0x00u;
     ram[CONTRA_RAM_PLAYER_BULLET_X_VEL_FAST + bullet_index] = 0x00u;
@@ -3665,9 +3667,17 @@ static void contra_set_player_sprite(ContraCore *core, uint8_t player_index)
 
     if (core->ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u)
     {
-        if (sequence == 0x01u)
+        if (sequence == 0x00u)
         {
+            /* facing up / standing (player_sprite_indoor_facing_up, bank2:1321) */
             core->ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] = 0x50u;
+        }
+        else if (sequence == 0x01u)
+        {
+            /* electrocuted by the fence (player_sprite_indoor_electrocuted,
+               bank2:1325) -- was wrongly drawn as facing-up (0x50), so the shock
+               pose never showed when you pressed Up into the live fence. */
+            core->ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] = 0x55u;
         }
         else if (sequence == 0x02u)
         {
@@ -3715,8 +3725,9 @@ static void contra_set_player_sprite(ContraCore *core, uint8_t player_index)
         }
         else
         {
-            core->ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] =
-                (core->ram[CONTRA_RAM_PLAYER_RECOIL_TIMER + player_index] != 0u) ? 0x52u : 0x51u;
+            /* default to facing-up; sequences 4/6 are handled as death above this
+               indoor block, so this effectively only catches the standing pose. */
+            core->ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] = 0x50u;
         }
         contra_set_player_horizontal_flip(core, player_index);
         return;
@@ -7293,7 +7304,12 @@ static void contra_rom_begin_enemy_explosion(ContraCore *core, uint8_t x)
        killed enemy can't damage the player who walks into it. */
     ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] | 0x81u);
     ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x38u;
-    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = 0x00u;
+    /* enemy_routine_init_explosion (bank7:7544): the death burst forces sprite
+       palette 2 ((attr & 0xFC) | 0x06) -- the orange/yellow explosion colors. The
+       port hardcoded palette 0, which tinted the explosion with each level's
+       palette-0 colors and made L2 deaths look unlike L1's. */
+    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] =
+        (uint8_t)((ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] & 0xFCu) | 0x06u);
 }
 
 /* --- level-2 wall turret (enemy type 0x13), bank0.asm --- */

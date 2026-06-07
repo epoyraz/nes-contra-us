@@ -37,6 +37,7 @@ int main(void)
     const char *const ram_dump_path = getenv("CONTRA_NATIVE_LEVEL1_RAM_DUMP_PATH");
     const char *const oam_dump_path = getenv("CONTRA_NATIVE_LEVEL1_OAM_DUMP_PATH");
     const char *const palette_dump_path = getenv("CONTRA_NATIVE_LEVEL1_PALETTE_DUMP_PATH");
+    const char *const chr_dump_path = getenv("CONTRA_NATIVE_LEVEL1_CHR_DUMP_PATH");
     const char *const max_frame_text = getenv("CONTRA_NATIVE_LEVEL1_MAX_FRAME");
     const unsigned dump_frame = (dump_frame_text != NULL) ? (unsigned)strtoul(dump_frame_text, NULL, 10) : 0u;
     const unsigned max_frame = (max_frame_text != NULL) ? (unsigned)strtoul(max_frame_text, NULL, 10) : 1500u;
@@ -151,6 +152,16 @@ int main(void)
             if (dump != NULL)
             {
                 fwrite(core.ppu_palette, 1u, sizeof(core.ppu_palette), dump);
+                fclose(dump);
+            }
+        }
+        if ((dump_frame != 0u) && (frame == dump_frame) && (chr_dump_path != NULL))
+        {
+            FILE *const dump = fopen(chr_dump_path, "wb");
+
+            if (dump != NULL)
+            {
+                fwrite(core.ppu_pattern, 1u, sizeof(core.ppu_pattern), dump);
                 fclose(dump);
             }
         }

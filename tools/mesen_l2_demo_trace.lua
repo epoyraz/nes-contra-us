@@ -18,6 +18,7 @@ local framebuffer_dump_path = os.getenv("CONTRA_MESEN_LEVEL1_FRAMEBUFFER_DUMP_PA
 local ram_dump_path = os.getenv("CONTRA_MESEN_LEVEL1_RAM_DUMP_PATH")
 local oam_dump_path = os.getenv("CONTRA_MESEN_LEVEL1_OAM_DUMP_PATH")
 local palette_dump_path = os.getenv("CONTRA_MESEN_LEVEL1_PALETTE_DUMP_PATH")
+local chr_dump_path = os.getenv("CONTRA_MESEN_LEVEL1_CHR_DUMP_PATH")
 local max_frame = tonumber(os.getenv("CONTRA_MESEN_LEVEL1_MAX_FRAME") or "4700")
 -- Mirror of the native CONTRA_FORCE_DEMO_LEVEL test hook: pin every attract demo
 -- to one level by writing DEMO_LEVEL ($27) whenever the game is NOT in demo-play
@@ -36,6 +37,7 @@ local RAM = emu.memType.nesInternalRam
 local NAMETABLE = emu.memType.nesNametableRam
 local OAM = emu.memType.nesSpriteRam
 local PALETTE = emu.memType.nesPaletteRam
+local PPUMEM = emu.memType.nesPpuMemory
 
 local function read_ram(addr)
     return emu.read(addr, RAM, false)
@@ -121,6 +123,15 @@ local function emit_frame()
         if dump ~= nil then
             for offset = 0, 0x1F do
                 dump:write(string.char(emu.read(offset, PALETTE, false)))
+            end
+            dump:close()
+        end
+    end
+    if dump_frame ~= nil and dump_frame ~= 0 and frame == dump_frame and chr_dump_path ~= nil then
+        local dump = io.open(chr_dump_path, "wb")
+        if dump ~= nil then
+            for offset = 0, 0x1FFF do
+                dump:write(string.char(emu.read(offset, PPUMEM, false)))
             end
             dump:close()
         end
