@@ -4965,6 +4965,12 @@ static void contra_load_bank_3_handle_scroll(ContraCore *core)
                 ram[CONTRA_RAM_VERTICAL_SCROLL] = 0xE0u;
                 contra_load_alternate_graphics(core);
                 contra_init_apu_channels(core);
+                /* load the boss-room CHR set: lda CURRENT_LEVEL; lsr; ora #$08;
+                   jsr load_A_offset_graphic_data (bank7:5845-5848) -- list 8 for L2
+                   (level_2_boss_graphic_data $03,$04,$13,$08), list 9 for L4. Without
+                   this the cannon/plating/wall tiles render from the wrong CHR. */
+                contra_load_graphic_data_list(
+                    core, (uint8_t)(0x08u | (ram[CONTRA_RAM_CURRENT_LEVEL] >> 1u)));
                 contra_play_sound(core, 0x42u);
             }
         }
