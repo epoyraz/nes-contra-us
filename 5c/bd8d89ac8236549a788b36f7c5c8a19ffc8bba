@@ -1,0 +1,31 @@
+port/contra_core/src/core.c
+  s_613cc88c061869::t_9b35db50a7dd29 13927-13937,13940-13941,13948-13949
+  s_613cc88c061869::t_760721d33ac32a 422-427
+tools/mesen_l2_boss_warp.lua
+  s_613cc88c061869::t_262e4e4117d3a8 1-24,26,28,31-44,46-48,64,66,73-100,102-105
+  s_613cc88c061869::t_ebfa923ca4a77c 49
+  s_613cc88c061869::t_012d45a8066370 50
+  s_613cc88c061869::t_e14057cfb78aa9 52-53
+  s_613cc88c061869::t_29f7b398480bb0 62,67
+  s_613cc88c061869::t_2f764b54d74a5e 101
+  s_613cc88c061869::t_b13e80b577cb66 25,27
+  s_613cc88c061869::t_4264087340cfe2 29-30
+  s_613cc88c061869::t_45b96cf81c6a14 45,51,54-55
+  s_613cc88c061869::t_6c5b9f8e855534 56-61,63,65,68-72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "5cbd8d89ac8236549a788b36f7c5c8a19ffc8bba",
+  "prompts": {},
+  "sessions": {
+    "s_613cc88c061869": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cc32df33-e503-4de3-99cb-5cfbe54eb58b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
