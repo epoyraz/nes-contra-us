@@ -6335,6 +6335,18 @@ static const uint8_t contra_sniper_animation_delay_2_tbl[3] = {0x01u, 0x60u, 0x8
 static const uint8_t contra_sniper_frame_tbl[3] = {0x03u, 0x00u, 0x00u};
 static const uint8_t contra_sniper_attack_delay_tbl[3] = {0x40u, 0x04u, 0x10u};
 static const uint8_t contra_sniper_bullet_attack_count_tbl[3] = {0x03u, 0x01u, 0x01u};
+/* sniper_standing_sprite_tbl (bank0:1972): muzzle sprite per vertical aim band
+   (up / straight / down). sniper_bullet_y/x_offset (bank0:1976/1980): bullet spawn
+   offset for the same band. sniper_bullet_speed (bank0:1987) per sniper type. */
+static const uint8_t contra_sniper_standing_sprite_tbl[3] = {0x04u, 0x03u, 0x05u};
+static const uint8_t contra_sniper_bullet_y_offset[3] = {0xEEu, 0xF5u, 0x06u};
+static const uint8_t contra_sniper_bullet_x_offset[3] = {0xF3u, 0xF1u, 0xF1u};
+static const uint8_t contra_sniper_bullet_speed[3] = {0x03u, 0x05u, 0x03u};
+
+/* implemented after the aim helpers (contra_rom_aim_at_player /
+   contra_rom_player_enemy_x_dist_idx); forward-declared so sniper_routine_02 can
+   fire without reordering the file. */
+static void contra_rom_sniper_fire_bullet(ContraCore *core, uint8_t x);
 
 /* sniper sprite codes by ENEMY_FRAME (bank0.asm:2073): regular/hiding vs boss. */
 static const uint8_t contra_sniper_sprite_00[7] = {0x44u, 0x45u, 0x46u, 0x43u, 0x42u, 0x41u, 0x29u};
@@ -6360,13 +6372,12 @@ static void contra_rom_sniper_set_sprite(ContraCore *core, uint8_t x)
     ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = attr;
 }
 
-/* sniper_routine_02 (bank0.asm): render, track scroll, run the attack cadence.
-   DEFERRED: the actual bullet creation (no enemy-bullet system yet) — when the
-   sniper would fire, the delay is reset but no bullet spawns. */
+/* sniper_routine_02 (bank0.asm:1839): render, track scroll, run the attack
+   cadence, and fire an aimed bullet at the player on each shot of the burst. */
 static void contra_rom_sniper_routine_02(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
-    uint8_t attr = ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x];
+    uint8_t attr;
 
     contra_rom_sniper_set_sprite(core, x);
     contra_rom_add_scroll_to_enemy_pos(core, x);
@@ -6384,27 +6395,7 @@ static void contra_rom_sniper_routine_02(ContraCore *core, uint8_t x)
     if ((int8_t)ram[CONTRA_RAM_ENEMY_VAR_4 + x] >= 0)
     {
         ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x18u;
-        if (ram[CONTRA_RAM_ENEMY_ATTACK_FLAG] != 0u)
-        {
-            /* fire a bullet at the nearest player (horizontal aim; the ROM's
-               diagonal angle solve is deferred) */
-            static const uint8_t sniper_bullet_speed[3] = {0x03u, 0x05u, 0x03u};
-            const uint8_t ex = ram[CONTRA_RAM_ENEMY_X_POS + x];
-            const uint8_t p0 = ram[CONTRA_RAM_SPRITE_X_POS + 0u];
-            const uint8_t p1 = ram[CONTRA_RAM_SPRITE_X_POS + 1u];
-            const uint8_t d0 = (p0 >= ex) ? (uint8_t)(p0 - ex) : (uint8_t)(ex - p0);
-            const uint8_t d1 = (p1 >= ex) ? (uint8_t)(p1 - ex) : (uint8_t)(ex - p1);
-            const uint8_t player_x = ((p1 != 0u) && ((p0 == 0u) || (d1 < d0))) ? p1 : p0;
-            const bool firing_left = (player_x < ex);
-            const uint8_t idx = (attr < 3u) ? attr : 0u;
-
-            ram[CONTRA_RAM_ENEMY_VAR_2 + x] = firing_left ? 0u : 1u;
-            (void)contra_rom_create_enemy_bullet(
-                core, 0u, 0u, firing_left ? 0x02u : 0x00u, sniper_bullet_speed[idx],
-                (uint8_t)(ex + (firing_left ? 0xF3u : 0x0Du)),
-                (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + 0xEEu));
-            ram[CONTRA_RAM_ENEMY_VAR_3 + x] = 0x06u; /* gun recoil */
-        }
+        contra_rom_sniper_fire_bullet(core, x);
         return;
     }
 
@@ -6567,12 +6558,20 @@ static const uint8_t contra_weapon_box_supertile_tbl[3] = {0x00u, 0x01u, 0x02u};
 static bool contra_rom_set_weapon_box_supertile(ContraCore *core, uint8_t x)
 {
     const uint8_t frame = core->ram[CONTRA_RAM_ENEMY_FRAME + x];
+    const uint8_t supertile = contra_weapon_box_supertile_tbl[(frame < 3u) ? frame : 0u];
 
     contra_render_level_1_nametable_update_supertile(
         core,
         (int)core->ram[CONTRA_RAM_ENEMY_X_POS + x],
         (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + x],
-        contra_weapon_box_supertile_tbl[(frame < 3u) ? frame : 0u]);
+        supertile);
+    /* The ROM routes this through draw_enemy_supertile_a_set_delay, whose
+       nametable write persists. Our background is re-composed from the original
+       level layout every frame, so the open/partial super-tile only survives if
+       it is registered in the per-frame L1 redraw cache (see
+       contra_render_native_enemies). Without this the pill-box door never
+       visually opens -- only the closed box baked into the level data shows. */
+    core->l1_supertile[x] = supertile;
     return false; /* carry clear == drew successfully */
 }
 
@@ -8531,9 +8530,12 @@ static void contra_rom_indoor_roller_gen_routine_01(ContraCore *core, uint8_t x)
    shields -- each destroyed plating bumps WALL_PLATING_DESTROYED_COUNT, and once
    all 4 are gone the boss eye wakes. (bank7:9269/9397.) */
 
-/* create_enemy_bullet_angle_a (bank7:6928-area): bullet whose quadrant is derived
-   from its 24-direction angle (type in bits 7-5, angle in bits 4-0). */
-static void contra_rom_create_enemy_bullet_angle_a(
+/* create_enemy_bullet_angle_a (bank7:9796): bullet whose quadrant is derived from
+   its 24-direction angle (type in bits 7-5, angle in bits 4-0). Falls through to
+   create_enemy_bullet_if_attack_enabled: the level-1 boss cannonball (type 1)
+   always fires, every other bullet only when ENEMY_ATTACK_FLAG is set. Returns
+   true if a bullet was actually created. */
+static bool contra_rom_create_enemy_bullet_angle_a(
     ContraCore *core, uint8_t type_angle, uint8_t speed, uint8_t px, uint8_t py)
 {
     const uint8_t btype = (uint8_t)(type_angle >> 5u);
@@ -8548,7 +8550,11 @@ static void contra_rom_create_enemy_bullet_angle_a(
     {
         quadrant = (uint8_t)(quadrant + 1u); /* upper half */
     }
-    (void)contra_rom_create_enemy_bullet(core, btype, angle, quadrant, speed, px, py);
+    if ((btype != 0x01u) && (core->ram[CONTRA_RAM_ENEMY_ATTACK_FLAG] == 0u))
+    {
+        return false;
+    }
+    return contra_rom_create_enemy_bullet(core, btype, angle, quadrant, speed, px, py);
 }
 
 /* animate_wall_cannon (bank7:9319): show the current open/close frame super-tile
@@ -9094,6 +9100,96 @@ static uint8_t contra_rom_player_enemy_x_dist_idx(const ContraCore *core, uint8_
         d1 = 0xFFu;
     }
     return (d1 < d0) ? 1u : 0u;
+}
+
+/* sniper_routine_02 firing (bank0.asm:1848-1945). The standing sniper (attr 0)
+   and boss sniper (attr 2) solve the real aim direction toward the closest player
+   via quadrant_aim_dir_01 (get_rotate_01); the crouching sniper (attr 1) fires a
+   fixed horizontal shot. aim_at_player returns the within-quadrant aim nibble plus
+   the aim quadrant ($07: bit0 = player above, bit1 = player left) -- the same pair
+   the boss eye projectile fires with -- which together drive the bullet velocity.
+   The full 24-step aim direction (reconstructed by get_rotate_dir) only selects
+   the vertical aim band for the muzzle sprite and the bullet spawn offset. */
+static void contra_rom_sniper_fire_bullet(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t attr = ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x];
+    const uint8_t ex = ram[CONTRA_RAM_ENEMY_X_POS + x];
+    const uint8_t ey = ram[CONTRA_RAM_ENEMY_Y_POS + x];
+    const uint8_t pidx = contra_rom_player_enemy_x_dist_idx(core, x);
+    const uint8_t player_x = ram[CONTRA_RAM_SPRITE_X_POS + pidx];
+    /* VAR_2: 0 = player to the left of the sniper, 1 = player to the right. */
+    const uint8_t firing_right = (player_x >= ex) ? 1u : 0u;
+    uint8_t nibble;
+    uint8_t quadrant;
+    uint8_t dir;
+    uint8_t adj;
+    uint8_t yidx;
+    uint8_t xoff;
+
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = firing_right;
+
+    if ((attr & 0x01u) != 0u)
+    {
+        /* crouching sniper: fixed horizontal shot (nibble 0 = straight along X). */
+        nibble = 0x00u;
+        quadrant = (firing_right != 0u) ? 0x00u : 0x02u;
+    }
+    else
+    {
+        /* standing / boss sniper: aim at the player. The boss sniper aims from
+           16px above its position (ROM ldy #$f0 before add_with_enemy_pos). */
+        const uint8_t sy = (attr == 0x02u) ? (uint8_t)(ey + 0xF0u) : ey;
+
+        nibble = contra_rom_aim_at_player(core, ex, sy, contra_quadrant_aim_dir_01, &quadrant);
+    }
+
+    /* get_rotate_dir (bank7:10236): fold the within-quadrant nibble + quadrant back
+       into the absolute 24-step aim direction (quadrant_aim_dir_01: mid 0x0c, max
+       0x18). */
+    dir = nibble;
+    if ((quadrant & 0x02u) != 0u) { dir = (uint8_t)(0x0Cu - dir); } /* player left */
+    if ((quadrant & 0x01u) != 0u)                                   /* player above */
+    {
+        dir = (uint8_t)(0x18u - dir);
+        if (dir >= 0x18u) { dir = 0x00u; }
+    }
+
+    /* @adjust_bullet_angle: fold the direction into a 0..0x0c half-circle to pick
+       the vertical aim band (0 = up, 1 = straight, 2 = down). */
+    adj = (uint8_t)((dir + 0x06u) % 0x18u);
+    if (adj >= 0x0Cu)
+    {
+        adj = (uint8_t)(0x18u - adj);
+    }
+    yidx = (adj < 0x05u) ? 0u : ((adj < 0x08u) ? 1u : 2u);
+
+    /* standing / boss sniper set the firing muzzle sprite; the crouching sniper
+       keeps its crouch sprite. */
+    if ((attr & 0x01u) == 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_FRAME + x] = contra_sniper_standing_sprite_tbl[yidx];
+    }
+
+    xoff = contra_sniper_bullet_x_offset[yidx];
+    if (firing_right != 0u)
+    {
+        xoff = (uint8_t)(0u - xoff); /* mirror the muzzle offset to the right */
+    }
+
+    /* create_enemy_bullet_if_attack_enabled: regular bullets require the flag. */
+    if (ram[CONTRA_RAM_ENEMY_ATTACK_FLAG] == 0u)
+    {
+        return;
+    }
+    if (contra_rom_create_enemy_bullet(
+            core, 0u, nibble, quadrant,
+            contra_sniper_bullet_speed[(attr < 3u) ? attr : 0u],
+            (uint8_t)(ex + xoff),
+            (uint8_t)(ey + contra_sniper_bullet_y_offset[yidx])))
+    {
+        ram[CONTRA_RAM_ENEMY_VAR_3 + x] = 0x06u; /* gun recoil */
+    }
 }
 
 /* get_quadrant_aim_dir_for_player (bank7:10425): pick the within-quadrant aim
