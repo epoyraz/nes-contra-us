@@ -1,0 +1,35 @@
+port/contra_core/src/core.c
+  s_8dd83b8c9597b5::t_25f0319ba71d14 15172-15178
+  s_8dd83b8c9597b5::t_cab40bb2bb0a1a 111,15098-15108
+  s_8dd83b8c9597b5::t_e2a6d0729463db 13687-13747
+  s_8dd83b8c9597b5::t_4b9b2940fc5a91 13437-13494,13497-13677,13682-13686
+  s_8dd83b8c9597b5::t_09081e051612ba 13495-13496,13678-13681
+port/tests/core_behavior_tests.c
+  s_8dd83b8c9597b5::t_9d2b6c1c2b7f3d 1928-1930
+  s_8dd83b8c9597b5::t_89a9966659c0cc 1960-1973,1975-1985,1988-2026
+  s_8dd83b8c9597b5::t_2804ba36847906 1924-1927
+  s_8dd83b8c9597b5::t_01f00e7351d59c 25-42
+  s_8dd83b8c9597b5::t_a24bd8fa80bdf7 2784
+  s_8dd83b8c9597b5::t_6db6e037d0e288 1857,1974,1986-1987
+  s_8dd83b8c9597b5::t_bfeca85087536a 1839,1846,1848-1849,1855-1856,1858-1884,1893-1902,1909-1923,1931-1934
+  s_8dd83b8c9597b5::t_07198b94c76a49 1935-1955
+  s_8dd83b8c9597b5::t_cedff95a449bf1 1885-1892
+  s_8dd83b8c9597b5::t_58d973053ca68a 1903-1908
+  s_8dd83b8c9597b5::t_594ec881cac49c 1637-1638,1647-1648,1660,1664,1666,1675-1676
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "d96cb0c44d503d111f6e8f2f0caea33703ed21c5",
+  "prompts": {},
+  "sessions": {
+    "s_8dd83b8c9597b5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ea693-1e07-7b30-9209-a4ccb1174aea",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
