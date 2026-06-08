@@ -22,6 +22,24 @@ typedef struct TestCase
     bool (*run)(void);
 } TestCase;
 
+static void test_set_env(const char *name, const char *value)
+{
+#if defined(_WIN32)
+    (void)_putenv_s(name, value);
+#else
+    (void)setenv(name, value, 1);
+#endif
+}
+
+static void test_unset_env(const char *name)
+{
+#if defined(_WIN32)
+    (void)_putenv_s(name, "");
+#else
+    (void)unsetenv(name);
+#endif
+}
+
 enum
 {
     TEST_PLAYER_BULLET_COUNT = 16u
@@ -1616,8 +1634,8 @@ static bool test_level4_debug_env_lives_and_weapon(void)
     ContraCore core;
     bool ok;
 
-    setenv("CONTRA_START_LIVES", "30", 1);
-    setenv("CONTRA_START_WEAPON", "S", 1);
+    test_set_env("CONTRA_START_LIVES", "30");
+    test_set_env("CONTRA_START_WEAPON", "S");
     contra_core_init(&core);
     contra_core_debug_warp_level4(&core);
 
@@ -1626,8 +1644,8 @@ static bool test_level4_debug_env_lives_and_weapon(void)
         (core.ram[CONTRA_RAM_P1_NUM_LIVES] == 0x1Du) &&
         (core.ram[CONTRA_RAM_P1_CURRENT_WEAPON] == 0x03u);
 
-    unsetenv("CONTRA_START_LIVES");
-    unsetenv("CONTRA_START_WEAPON");
+    test_unset_env("CONTRA_START_LIVES");
+    test_unset_env("CONTRA_START_WEAPON");
 
     CHECK(ok);
     return true;
@@ -1639,13 +1657,13 @@ static uint8_t level4_respawn_weapon_with_env(bool keep_weapon)
 
     if (keep_weapon)
     {
-        setenv("CONTRA_KEEP_START_WEAPON", "1", 1);
+        test_set_env("CONTRA_KEEP_START_WEAPON", "1");
     }
     else
     {
-        unsetenv("CONTRA_KEEP_START_WEAPON");
+        test_unset_env("CONTRA_KEEP_START_WEAPON");
     }
-    setenv("CONTRA_START_WEAPON", "S", 1);
+    test_set_env("CONTRA_START_WEAPON", "S");
 
     force_level4_gameplay(&core);
     core.ram[CONTRA_RAM_P1_CURRENT_WEAPON] = 0x01u;
@@ -1654,8 +1672,8 @@ static uint8_t level4_respawn_weapon_with_env(bool keep_weapon)
     core.ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER] = 0x01u;
     step_no_input(&core);
 
-    unsetenv("CONTRA_KEEP_START_WEAPON");
-    unsetenv("CONTRA_START_WEAPON");
+    test_unset_env("CONTRA_KEEP_START_WEAPON");
+    test_unset_env("CONTRA_START_WEAPON");
     return core.ram[CONTRA_RAM_P1_CURRENT_WEAPON];
 }
 
@@ -1818,20 +1836,191 @@ static bool test_level6_boss_robot_not_misrouted_to_level3_or_level2(void)
 {
     ContraCore core;
     const size_t slot = 0u;
+    size_t projectile_slot = 0u;
 
     force_level6_gameplay(&core);
     CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x04u);
 
     core.ram[CONTRA_RAM_ENEMY_TYPE + slot] = 0x13u;
     core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] = 0x01u;
+    core.ram[CONTRA_RAM_ENEMY_HP + slot] = 0x00u;
     core.ram[CONTRA_RAM_ENEMY_SPRITES + slot] = 0x00u;
+    core.ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + slot] = 0x00u;
+    core.ram[CONTRA_RAM_RANDOM_NUM] = 0x2Au;
     core.ram[CONTRA_RAM_ENEMY_X_POS + slot] = 0xB0u;
     core.ram[CONTRA_RAM_ENEMY_Y_POS + slot] = 0xA0u;
     step_no_input(&core);
 
     CHECK(core.ram[CONTRA_RAM_ENEMY_TYPE + slot] == 0x13u);
-    CHECK(core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x01u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x02u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_HP + slot] >= 0x40u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_VAR_1 + slot] != 0x00u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_SPRITES + slot] == 0xB8u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_Y_POS + slot] == 0x9Bu);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + slot] == 0x31u);
+
+    core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] = 0x02u;
+    core.ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + slot] = 0x01u;
+    core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + slot] = 0x00u;
+    core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + slot] = 0x00u;
+    core.ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + slot] = 0x00u;
+    core.ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + slot] = 0x00u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x03u);
+
+    core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] = 0x03u;
+    core.ram[CONTRA_RAM_ENEMY_VAR_1 + slot] = 0x00u;
+    core.ram[CONTRA_RAM_RANDOM_NUM] = 0x00u;
+    core.ram[CONTRA_RAM_FRAME_COUNTER] = 0x00u;
+    core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] = 0x00u;
+    core.ram[CONTRA_RAM_P2_GAME_OVER_STATUS] = 0x01u;
+    core.ram[CONTRA_RAM_SPRITE_X_POS] = 0xC0u;
+    core.ram[CONTRA_RAM_ENEMY_X_POS + slot] = 0x80u;
+    core.ram[CONTRA_RAM_ENEMY_VAR_4 + slot] = 0xFFu;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x05u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + slot] == 0x40u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + slot] == 0xF9u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + slot] == 0x80u);
+    CHECK(
+        ((core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + slot] == 0x00u) &&
+         (core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + slot] == 0x80u)) ||
+        ((core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + slot] == 0x00u) &&
+         (core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + slot] == 0x00u)) ||
+        ((core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + slot] == 0xFFu) &&
+         (core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + slot] == 0x80u))
+    );
+    CHECK(core.ram[CONTRA_RAM_ENEMY_VAR_4 + slot] == 0x00u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_SPRITES + slot] == 0xBAu);
+
+    core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] = 0x03u;
+    core.ram[CONTRA_RAM_ENEMY_VAR_1 + slot] = 0x02u;
+    core.ram[CONTRA_RAM_RANDOM_NUM] = 0x01u;
+    core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + slot] = 0x00u;
+    core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + slot] = 0x00u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x06u);
+    CHECK(
+        ((core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + slot] == 0x01u) &&
+         (core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + slot] == 0x18u)) ||
+        ((core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + slot] == 0xFEu) &&
+         (core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + slot] == 0xE8u))
+    );
+    CHECK(core.ram[CONTRA_RAM_ENEMY_VAR_2 + slot] == 0x0Cu);
+
+    core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] = 0x03u;
+    core.ram[CONTRA_RAM_ENEMY_VAR_1 + slot] = 0x01u;
+    core.ram[CONTRA_RAM_ENEMY_VAR_4 + slot] = 0x00u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x04u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + slot] == 0x20u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_VAR_4 + slot] == 0x01u);
+
+    core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] = 0x04u;
+    core.ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + slot] = 0x01u;
+    core.ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + slot] = 0x40u;
+    core.ram[CONTRA_RAM_ENEMY_X_POS + slot] = 0x80u;
+    core.ram[CONTRA_RAM_ENEMY_Y_POS + slot] = 0x9Bu;
+    core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + slot] = 0x00u;
+    core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + slot] = 0x00u;
+    core.ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + slot] = 0x00u;
+    core.ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + slot] = 0x00u;
+    core.ram[CONTRA_RAM_PLAYER_STATE] = 0x01u;
+    core.ram[CONTRA_RAM_NEW_LIFE_INVINCIBILITY_TIMER] = 0x00u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x03u);
+    CHECK(find_first_active_enemy_type(&core, 0x14u, &projectile_slot));
+    CHECK(core.ram[CONTRA_RAM_ENEMY_X_POS + projectile_slot] == 0xA0u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_Y_POS + projectile_slot] == 0x83u);
+
+    core.ram[CONTRA_RAM_ENEMY_TYPE + slot] = 0x13u;
+    core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] = 0x07u;
+    core.ram[CONTRA_RAM_ENEMY_X_POS + slot] = 0x70u;
+    core.ram[CONTRA_RAM_ENEMY_Y_POS + slot] = 0x80u;
+    core.ram[CONTRA_RAM_ENEMY_VAR_1 + slot] = 0x11u;
+    core.ram[CONTRA_RAM_ENEMY_VAR_2 + slot] = 0x22u;
+    core.ram[CONTRA_RAM_ENEMY_VAR_3 + slot] = 0x33u;
+    core.ram[CONTRA_RAM_ENEMY_VAR_4 + slot] = 0x44u;
+    core.ram[CONTRA_RAM_ENEMY_TYPE + 1u] = 0x01u;
+    core.ram[CONTRA_RAM_ENEMY_ROUTINE + 1u] = 0x01u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x08u);
+    CHECK(core.ram[CONTRA_RAM_DELAY_TIME_LOW_BYTE] == 0xFFu);
+    CHECK(core.ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] == 0x01u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_X_POS + slot] == 0x70u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_Y_POS + slot] == 0x80u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_VAR_1 + slot] == 0x00u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_VAR_2 + slot] == 0x00u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_VAR_3 + slot] == 0x00u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_VAR_4 + slot] == 0x00u);
     CHECK(core.ram[CONTRA_RAM_ENEMY_SPRITES + slot] == 0x00u);
+    return true;
+}
+
+static bool test_level6_spiked_disk_projectile_uses_boss_giant_routine(void)
+{
+    ContraCore core;
+    const size_t slot = 0u;
+    const size_t boss_slot = 15u;
+
+    force_level6_gameplay(&core);
+    CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x04u);
+
+    core.ram[CONTRA_RAM_ENEMY_TYPE + slot] = 0x14u;
+    core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] = 0x01u;
+    core.ram[CONTRA_RAM_ENEMY_X_POS + slot] = 0x50u;
+    core.ram[CONTRA_RAM_ENEMY_Y_POS + slot] = 0x40u;
+    core.ram[CONTRA_RAM_ENEMY_TYPE + boss_slot] = 0x13u;
+    core.ram[CONTRA_RAM_ENEMY_ROUTINE + boss_slot] = 0x00u;
+    core.ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + boss_slot] = 0x00u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x02u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_SPRITES + slot] == 0xBBu);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + slot] == 0xFDu);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + slot] == 0x00u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + slot] == 0x02u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + slot] == 0x00u);
+
+    core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] = 0x01u;
+    core.ram[CONTRA_RAM_ENEMY_SPRITES + slot] = 0x00u;
+    core.ram[CONTRA_RAM_ENEMY_TYPE + boss_slot] = 0x13u;
+    core.ram[CONTRA_RAM_ENEMY_ROUTINE + boss_slot] = 0x00u;
+    core.ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + boss_slot] = 0x40u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x02u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + slot] == 0x03u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + slot] == 0x00u);
+
+    core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] = 0x02u;
+    core.ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + slot] = 0x01u;
+    core.ram[CONTRA_RAM_ENEMY_VAR_1 + slot] = 0x00u;
+    core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + slot] = 0x00u;
+    core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + slot] = 0x00u;
+    core.ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + slot] = 0x00u;
+    core.ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + slot] = 0x00u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x02u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + slot] == 0x06u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_VAR_1 + slot] == 0x01u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_SPRITES + slot] == 0xBCu);
+
+    core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] = 0x02u;
+    core.ram[CONTRA_RAM_ENEMY_X_POS + slot] = 0x50u;
+    core.ram[CONTRA_RAM_ENEMY_Y_POS + slot] = 0xAFu;
+    core.ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + slot] = 0x02u;
+    core.ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + slot] = 0x02u;
+    core.ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + slot] = 0x80u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x02u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + slot] == 0x00u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + slot] == 0x00u);
+
+    core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] = 0x02u;
+    core.ram[CONTRA_RAM_ENEMY_X_POS + slot] = 0xE0u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x03u);
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x00u);
     return true;
 }
 
@@ -2592,6 +2781,7 @@ int main(void)
         {"level6_fire_beam_uses_rom_props_and_init", test_level6_fire_beam_uses_rom_props_and_init},
         {"level6_left_and_right_beams_do_not_use_old_handlers", test_level6_left_and_right_beams_do_not_use_old_handlers},
         {"level6_boss_robot_not_misrouted_to_level3_or_level2", test_level6_boss_robot_not_misrouted_to_level3_or_level2},
+        {"level6_spiked_disk_projectile_uses_boss_giant_routine", test_level6_spiked_disk_projectile_uses_boss_giant_routine},
         {"level2_indoor_enemy_spawn_y_pos_adjust", test_level2_indoor_enemy_spawn_y_pos_adjust},
         {"level2_indoor_player_bullet_spawn_geometry", test_level2_indoor_player_bullet_spawn_geometry},
         {"level2_indoor_player_bullet_despawns_on_timer", test_level2_indoor_player_bullet_despawns_on_timer},
