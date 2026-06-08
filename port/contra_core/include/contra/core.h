@@ -15,6 +15,8 @@ enum
     /* Sizes the level-2 wall structure render caches (l2_structure_tile /
        l2_supertile) — one slot per enemy object slot. */
     CONTRA_NATIVE_MAX_ENEMIES = 24u,
+    CONTRA_LEVEL7_TILE_UPDATE_CACHE = 96u,
+    CONTRA_LEVEL7_SUPERTILE_UPDATE_CACHE = 96u,
     CONTRA_CPU_SPRITE_RENDER_SLOTS = 26u
 };
 
@@ -110,6 +112,20 @@ typedef struct ContraCore
        super-tile is re-drawn every frame from this per-slot cache or it is
        invisible. 0xFF = nothing drawn. */
     uint8_t l1_supertile[CONTRA_NATIVE_MAX_ENEMIES];
+    /* Level 7 mechanisms write directly to the nametable: mechanical claws use
+       level_7_tile_animation through load_bank_3_update_nametable_tiles, while
+       rising/spiked walls and the boss door/mortar use
+       level_7_nametable_update_supertile_data. The native renderer rebuilds the
+       background each frame, so these ROM nametable writes are cached by screen
+       position and re-drawn as overlays. */
+    uint8_t l7_tile_update_count;
+    int16_t l7_tile_update_x[CONTRA_LEVEL7_TILE_UPDATE_CACHE];
+    int16_t l7_tile_update_y[CONTRA_LEVEL7_TILE_UPDATE_CACHE];
+    uint8_t l7_tile_update_index[CONTRA_LEVEL7_TILE_UPDATE_CACHE];
+    uint8_t l7_supertile_update_count;
+    int16_t l7_supertile_update_x[CONTRA_LEVEL7_SUPERTILE_UPDATE_CACHE];
+    int16_t l7_supertile_update_y[CONTRA_LEVEL7_SUPERTILE_UPDATE_CACHE];
+    uint8_t l7_supertile_update_index[CONTRA_LEVEL7_SUPERTILE_UPDATE_CACHE];
 } ContraCore;
 
 void contra_core_init(ContraCore *core);
