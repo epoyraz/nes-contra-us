@@ -188,6 +188,8 @@ local function emit_frame()
         "\"jump\":%u,\"p2_jump\":%u,\"edge_fall\":%u,\"p2_edge_fall\":%u," ..
         "\"y_fast\":%u,\"p2_y_fast\":%u,\"y_fract\":%u,\"p2_y_fract\":%u," ..
         "\"fall_freeze\":%u,\"p2_fall_freeze\":%u," ..
+        "\"seq\":%u,\"p2_seq\":%u,\"sprite\":%u,\"p2_sprite\":%u," ..
+        "\"new_life\":%u,\"p2_new_life\":%u,\"inv\":%u,\"p2_inv\":%u," ..
         "\"lives\":%u,\"game_over\":%u,\"p2_game_over\":%u,\"demo_end\":%u," ..
         "\"oam_offset\":%u,\"enemies\":\"%s\",\"pbul\":\"%s\"," ..
         "\"ram_hash\":\"00000000\",\"pattern_hash\":\"00000000\",\"nametable_hash\":\"00000000\"," ..
@@ -237,6 +239,14 @@ local function emit_frame()
         read_ram(0xC7),
         read_ram(0xC4),
         read_ram(0xC5),
+        read_ram(0xBC),
+        read_ram(0xBD),
+        read_ram(0xD6),
+        read_ram(0xD7),
+        read_ram(0xAE),
+        read_ram(0xAF),
+        read_ram(0xB0),
+        read_ram(0xB1),
         read_ram(0xB8),
         read_ram(0xB9),
         read_ram(0x32),

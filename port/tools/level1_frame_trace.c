@@ -181,6 +181,8 @@ int main(void)
             "\"jump\":%u,\"p2_jump\":%u,\"edge_fall\":%u,\"p2_edge_fall\":%u,"
             "\"y_fast\":%u,\"p2_y_fast\":%u,\"y_fract\":%u,\"p2_y_fract\":%u,"
             "\"fall_freeze\":%u,\"p2_fall_freeze\":%u,"
+            "\"seq\":%u,\"p2_seq\":%u,\"sprite\":%u,\"p2_sprite\":%u,"
+            "\"new_life\":%u,\"p2_new_life\":%u,\"inv\":%u,\"p2_inv\":%u,"
             "\"lives\":%u,\"game_over\":%u,\"p2_game_over\":%u,\"demo_end\":%u,"
             "\"oam_offset\":%u,\"enemies\":\"%s\",\"pbul\":\"%s\","
             "\"ram_hash\":\"%08X\",\"pattern_hash\":\"%08X\",\"nametable_hash\":\"%08X\","
@@ -232,6 +234,14 @@ int main(void)
             (unsigned)ram[CONTRA_RAM_PLAYER_Y_FRACT_VELOCITY + 1u],
             (unsigned)ram[CONTRA_RAM_PLAYER_FALL_X_FREEZE],
             (unsigned)ram[CONTRA_RAM_PLAYER_FALL_X_FREEZE + 1u],
+            (unsigned)ram[CONTRA_RAM_PLAYER_SPRITE_SEQUENCE],
+            (unsigned)ram[CONTRA_RAM_PLAYER_SPRITE_SEQUENCE + 1u],
+            (unsigned)ram[CONTRA_RAM_PLAYER_SPRITE_CODE],
+            (unsigned)ram[CONTRA_RAM_PLAYER_SPRITE_CODE + 1u],
+            (unsigned)ram[CONTRA_RAM_NEW_LIFE_INVINCIBILITY_TIMER],
+            (unsigned)ram[CONTRA_RAM_NEW_LIFE_INVINCIBILITY_TIMER + 1u],
+            (unsigned)ram[CONTRA_RAM_INVINCIBILITY_TIMER],
+            (unsigned)ram[CONTRA_RAM_INVINCIBILITY_TIMER + 1u],
             (unsigned)ram[CONTRA_RAM_P1_NUM_LIVES],
             (unsigned)ram[CONTRA_RAM_P1_GAME_OVER_STATUS],
             (unsigned)ram[CONTRA_RAM_P2_GAME_OVER_STATUS],
