@@ -287,12 +287,19 @@ static bool l2_blowopen_started(const ContraCore *core, size_t i)
     (void)i;
     return core->l2_blowopen_quadrants != 0u;
 }
-/* Inject a live player bullet at (x,y): the faithful bullet-vs-enemy collision
-   gates on PLAYER_BULLET_SPRITE_CODE != 0 and PLAYER_BULLET_ROUTINE == 1. */
+/* Inject a *fresh* live player bullet at (x,y), simulating one shot from a stream
+   of fired bullets. The faithful bullet-vs-enemy collision (bullet_enemy_collision_
+   test, bank7:6928) gates on PLAYER_BULLET_SPRITE_CODE != 0 and PLAYER_BULLET_ROUTINE
+   == 1, and on indoor levels ALSO on PLAYER_BULLET_TIMER < 2 (bank7:6953-6956). On a
+   hit it stamps PLAYER_BULLET_TIMER = 6 (set_bullet_routine_to_2, bank7:7018) so a
+   single bullet can't keep damaging the same enemy. Reset the timer here so each
+   injection counts as a new bullet -- otherwise, on L2/L4 (indoor) the first hit
+   locks the slot out and a multi-HP wall core can never be destroyed. */
 static void l2_inject_player_bullet(ContraCore *core, uint8_t x, uint8_t y)
 {
     core->ram[CONTRA_RAM_PLAYER_BULLET_SPRITE_CODE] = 0x01u;
     core->ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE] = 0x01u;
+    core->ram[CONTRA_RAM_PLAYER_BULLET_TIMER] = 0x00u;
     core->ram[CONTRA_RAM_PLAYER_BULLET_X_POS] = x;
     core->ram[CONTRA_RAM_PLAYER_BULLET_Y_POS] = y;
 }

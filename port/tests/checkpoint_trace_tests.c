@@ -515,9 +515,14 @@ static bool destroy_level2_boss_counted(ContraCore *core, unsigned *elapsed_fram
             break; /* nothing left to shoot */
         }
         keep_player_invincible(core);
-        /* faithful player bullet: gated on SPRITE_CODE != 0 and ROUTINE == 1 */
+        /* faithful player bullet: gated on SPRITE_CODE != 0 and ROUTINE == 1, and
+           on indoor levels also on PLAYER_BULLET_TIMER < 2 (bullet_enemy_collision_
+           test, bank7:6953). A hit stamps TIMER = 6 (bank7:7018), so reset it each
+           shot to inject a fresh bullet -- otherwise the multi-HP boss plating
+           (10 HP) can never be whittled down. */
         core->ram[CONTRA_RAM_PLAYER_BULLET_SPRITE_CODE] = 0x01u;
         core->ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE] = 0x01u;
+        core->ram[CONTRA_RAM_PLAYER_BULLET_TIMER] = 0x00u;
         core->ram[CONTRA_RAM_PLAYER_BULLET_X_POS] = core->ram[CONTRA_RAM_ENEMY_X_POS + idx];
         core->ram[CONTRA_RAM_PLAYER_BULLET_Y_POS] = core->ram[CONTRA_RAM_ENEMY_Y_POS + idx];
         step_no_input_counted(core, elapsed_frames);
