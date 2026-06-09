@@ -1,0 +1,39 @@
+tools/mesen_l2_demo_trace.lua
+  s_51a9c9767141af::t_e29e748c6a1cd8 191-192,242-249
+port/contra_core/src/core.c
+  s_51a9c9767141af::t_9fc8623ecb302c 15512
+  s_51a9c9767141af::t_946093a5cd22ec 15468-15469,15510-15511,15540-15541
+  s_51a9c9767141af::t_fa8e0512594539 4655-4660,4697-4701,4703-4707,4709,4720-4722
+  s_51a9c9767141af::t_32e6a564558745 15911-15916
+  s_51a9c9767141af::t_fc813948b23221 6870-6878
+  s_51a9c9767141af::t_730121b9c3869a 8431-8478
+  s_51a9c9767141af::t_626cb200130fac 4980-5004,6215
+  s_51a9c9767141af::t_cdca640492b31f 7353-7370
+  s_51a9c9767141af::t_3651296f02bf11 15838-15854
+  s_51a9c9767141af::t_e8b41e4ad2bc00 112
+  s_51a9c9767141af::t_c31cd80bc965f5 7288,7510
+  s_51a9c9767141af::t_d1be1ad80a4cbb 5189-5212
+  s_51a9c9767141af::t_d491325333acfe 15869-15870
+  s_51a9c9767141af::t_cdd3879ee9a065 7304-7305,7542-7572,7585-7607,7626-7634
+  s_51a9c9767141af::t_eaff5a985d2f73 6689-6694
+  s_51a9c9767141af::t_438316184a89bf 113-114
+  s_51a9c9767141af::t_a82aac0d5d8696 15513-15515
+port/tools/level1_frame_trace.c
+  s_51a9c9767141af::t_095d1d6d52d8bb 184-185,237-244
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "232b5fe6d72de9769b0d1cbd5399a554015dbe5a",
+  "prompts": {},
+  "sessions": {
+    "s_51a9c9767141af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eabe6-5c2e-7843-b80c-1c5865328616",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
