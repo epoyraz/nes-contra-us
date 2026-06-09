@@ -1,0 +1,54 @@
+tools/mesen_l2_transition_trace.lua
+  s_a24ebfd06247ae::t_0565e97b63c73f 24
+  s_a24ebfd06247ae::t_d5b96d43582b47 29-30
+  s_a24ebfd06247ae::t_375e393c511b82 60-64
+  s_a24ebfd06247ae::t_660680cefd2026 73-86,88,96-101
+  s_a24ebfd06247ae::t_0d734cb7d84672 90-92
+  s_a24ebfd06247ae::t_0823787f27794d 9,11
+  s_a24ebfd06247ae::t_9da954b86ef2d8 1-8,10,12,21-23,25-28,31-59,65-72,87,93-95,102-114
+  s_a24ebfd06247ae::t_4f618186656ff4 89
+  s_a24ebfd06247ae::t_f8ad7b943cb138 13-20
+port/contra_core/include/contra/core.h
+  s_a24ebfd06247ae::t_5485c8315c1c70 107-118
+port/contra_core/src/core.c
+  s_a24ebfd06247ae::t_754e986fd74037 3767-3787
+  s_a24ebfd06247ae::t_cdfcbd677c234b 6534-6537
+  s_a24ebfd06247ae::t_fb956016cc3673 4826-4833
+  s_a24ebfd06247ae::t_9cb634e6202a2d 12040-12072
+  s_a24ebfd06247ae::t_717b7e290002f7 10526-10532
+  s_a24ebfd06247ae::t_f4872625bdb7eb 5173
+  s_a24ebfd06247ae::t_8df592cc4e77df 12115-12120
+  s_a24ebfd06247ae::t_ae840c54d80bcf 17957-17960
+  s_a24ebfd06247ae::t_40e129d60ef49d 16632-16703
+  s_a24ebfd06247ae::t_067bd92bdd6638 16772-16778
+  s_a24ebfd06247ae::t_6c5754dc2d7f01 2928-2951
+  s_a24ebfd06247ae::t_623a0ec9c2f8ea 2892-2897
+  s_a24ebfd06247ae::t_a2cad06395f804 17763-17795
+  s_a24ebfd06247ae::t_28fe5ce0f64ebb 10533
+  s_a24ebfd06247ae::t_0219b547bd29f2 5174-5183
+port/tests/core_behavior_tests.c
+  s_a24ebfd06247ae::t_6f0ae493ea04e2 2961-2970,2973
+  s_a24ebfd06247ae::t_7054bf3e0c4836 2883-2937,3113
+  s_a24ebfd06247ae::t_cbb7c0fc2b656b 2952-2960
+  s_a24ebfd06247ae::t_ecea58f4a5339f 2780-2789,2791-2839,3111
+  s_a24ebfd06247ae::t_fa2c6817f14e36 2938-2951,2971-2972,2974-3040,3108,3110
+  s_a24ebfd06247ae::t_5c71e853cccbe0 2840-2882,3112
+  s_a24ebfd06247ae::t_c49a12522c2e6e 2790
+  s_a24ebfd06247ae::t_704ecb2d5dbf4f 3041-3103,3109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "79149b029516d4b0b8f6859730a0ec59bde3bd19",
+  "prompts": {},
+  "sessions": {
+    "s_a24ebfd06247ae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "133f2237-220f-49b8-80c0-e8327a2a4690",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
