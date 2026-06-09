@@ -6,6 +6,7 @@
 *.bin
 src/assets/asset-game-type.txt
 build*/
+web/dist/
 CMakeUserPresets.json
 .local/
 .local_*

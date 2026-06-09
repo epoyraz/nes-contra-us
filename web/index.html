@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Contra — NES Native Port (WebAssembly)</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="stage">
+    <h1 class="title">CONTRA</h1>
+    <p class="subtitle">NES native port — running in your browser via WebAssembly</p>
+
+    <!-- The "TV": the game framebuffer is drawn to this canvas. -->
+    <div class="tv">
+      <div class="tv-screen">
+        <canvas id="screen" width="256" height="240"></canvas>
+        <div id="loading" class="loading">Loading…</div>
+      </div>
+    </div>
+
+    <p class="hint">
+      Press <kbd>Enter</kbd> (or click <b>START</b>) to begin.
+      <br>
+      <kbd>&larr;</kbd><kbd>&uarr;</kbd><kbd>&rarr;</kbd><kbd>&darr;</kbd> move ·
+      <kbd>X</kbd>/<kbd>Space</kbd> fire · <kbd>Z</kbd> jump ·
+      <kbd>Enter</kbd> Start · <kbd>Shift</kbd> Select
+    </p>
+
+    <!-- NES controller — markup from CodePen epzilla/AqweZk, wired to the game. -->
+    <div id="controller">
+      <div id="inset-area">
+        <div id="nintendo-text">Nintendo</div>
+        <div id="mid-stripe">
+          <div id="stripe1" class="stripe"></div>
+          <div id="stripe2" class="stripe"></div>
+          <div id="stripe3" class="stripe"></div>
+          <div id="stripe4" class="stripe"></div>
+        </div>
+        <div id="a-box" class="button-box">
+          <div id="a-button" class="red-button"></div>
+        </div>
+        <div id="b-box" class="button-box">
+          <div id="b-button" class="red-button"></div>
+        </div>
+      </div>
+      <div id="fill-tri-top"></div>
+      <div id="fill-tri-bottom"></div>
+      <div id="bottom"></div>
+      <div id="right"></div>
+      <div id="fill-tri-bottom-right"></div>
+      <div id="fill-circle"></div>
+      <div id="middle-buttons">
+        <div id="select" class="middle-button"></div>
+        <div id="start" class="middle-button"></div>
+      </div>
+      <div id="d-pad">
+        <div id="up-button" class="d-pad-button">&#8659;</div>
+        <div id="left-button" class="d-pad-button">&#8659;</div>
+        <div id="right-button" class="d-pad-button">&#8659;</div>
+        <div id="down-button" class="d-pad-button">&#8659;</div>
+        <div id="middle-part"></div>
+      </div>
+      <div id="notSoSecretCode">WOOHOO!<br>HOORAY FOR NOSTALGIA!!!</div>
+    </div>
+  </main>
+
+  <!-- Emscripten module factory (MODULARIZE, EXPORT_NAME=ContraModule). -->
+  <script src="dist/contra.js"></script>
+  <script src="controller.js"></script>
+</body>
+</html>
