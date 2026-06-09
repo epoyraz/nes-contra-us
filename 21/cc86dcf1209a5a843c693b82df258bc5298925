@@ -1,0 +1,34 @@
+port/platform_web/main.c
+  s_f3fc6cf71ea413::t_fba5c8578a9f1b 1-114
+web/README.md
+  s_f3fc6cf71ea413::t_32aac1ec70bbf4 1-64,67-71
+web/controller.js
+  s_f3fc6cf71ea413::t_392aaf8c4f4d3e 1-45,53-96,99-100,102-108,110-120,123-199,201-229,242-249
+  s_f3fc6cf71ea413::t_7afda5da9b55e1 230-241
+web/styles.css
+  s_f3fc6cf71ea413::t_252df9d41e2237 1-531,533-562
+web/build.ps1
+  s_f3fc6cf71ea413::t_ce41ced99925bb 1-53
+web/index.html
+  s_f3fc6cf71ea413::t_f01e58461d072a 1-25,27-72
+web/build.sh
+  s_f3fc6cf71ea413::t_601520abc8bc20 1-56
+.gitignore
+  s_f3fc6cf71ea413::t_2dc49799ed01d3 9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "21cc86dcf1209a5a843c693b82df258bc5298925",
+  "prompts": {},
+  "sessions": {
+    "s_f3fc6cf71ea413": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6dcbb935-0174-45aa-b130-cf6786ccff4d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
