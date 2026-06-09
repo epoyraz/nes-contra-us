@@ -4904,18 +4904,15 @@ static void contra_apply_outdoor_horizontal_frame_scroll(ContraCore *core, uint8
     const uint8_t trigger_x = (active_players == 0x03u) ? 0xB0u : 0x80u;
     int scroller = -1;
 
+    /* set_frame_scroll_if_appropriate (bank7:5141-5151): bail on indoor levels,
+       while a boss-reveal auto-scroll timer is already running, or once the
+       boss-reveal auto-scroll has latched LEVEL_STOP_SCROLL to #$FF (bit 7). The
+       auto-scroll itself is *started* by contra_rom_set_boss_auto_scroll below
+       (bank7:5172). */
     if ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u) ||
         (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u) ||
         ((uint8_t)(ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] | ram[CONTRA_RAM_AUTO_SCROLL_TIMER_01]) != 0u) ||
-        ((ram[CONTRA_RAM_LEVEL_STOP_SCROLL] & 0x80u) != 0u) ||
-        /* set_frame_scroll_if_appropriate (bank7): on the boss screen the boss-
-           reveal auto-scroll has set LEVEL_STOP_SCROLL to #$FF, so this routine
-           early-exits and the scripted post-boss walk (BOSS_DEFEATED_FLAG bit 7)
-           moves the player freely instead of holding it for a screen scroll. The
-           native boss-reveal leaves LEVEL_STOP_SCROLL at the boss screen number,
-           so key off the end-of-level walk flag directly to get the same behavior:
-           the boss screen is the last screen, so the end-walk never scrolls. */
-        ((ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] & 0x80u) != 0u))
+        ((ram[CONTRA_RAM_LEVEL_STOP_SCROLL] & 0x80u) != 0u))
     {
         return;
     }
@@ -4952,6 +4949,14 @@ static void contra_apply_outdoor_horizontal_frame_scroll(ContraCore *core, uint8
             ram[CONTRA_RAM_SPRITE_X_POS + (size_t)scroller] =
                 (uint8_t)(ram[CONTRA_RAM_SPRITE_X_POS + (size_t)scroller] - 1u);
         }
+        return;
+    }
+
+    /* @set_horizontal_level_frame_scroll (bank7:5172-5173): start the boss-reveal
+       auto-scroll if the player has reached the boss screen. If it takes over,
+       skip the player-driven scroll this frame (the ASM's `beq @exit`). */
+    if (contra_rom_set_boss_auto_scroll(core))
+    {
         return;
     }
 
@@ -5222,8 +5227,46 @@ static void contra_load_bank_3_handle_scroll(ContraCore *core)
         return;
     }
 
-    if ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u) ||
-        (scroll_pixels == 0u))
+    if (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u)
+    {
+        return;
+    }
+
+    /* @handle_outdoor_level (bank7:5575-5598): advance the boss-reveal auto-scroll.
+       Tick AUTO_SCROLL_TIMER_01 then _00; while either is running force a 1px frame
+       scroll, and when _00 elapses set BOSS_AUTO_SCROLL_COMPLETE so the boss
+       routines (which gate on it) can start. Then recompute the scroll amount. */
+    {
+        bool force_frame_scroll = false;
+
+        if (ram[CONTRA_RAM_AUTO_SCROLL_TIMER_01] != 0u)
+        {
+            ram[CONTRA_RAM_AUTO_SCROLL_TIMER_01] =
+                (uint8_t)(ram[CONTRA_RAM_AUTO_SCROLL_TIMER_01] - 1u);
+            if (ram[CONTRA_RAM_AUTO_SCROLL_TIMER_01] != 0u)
+            {
+                force_frame_scroll = true;
+            }
+        }
+        if (!force_frame_scroll && (ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] != 0u))
+        {
+            ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] =
+                (uint8_t)(ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] - 1u);
+            if (ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] == 0u)
+            {
+                ram[CONTRA_RAM_BOSS_AUTO_SCROLL_COMPLETE] =
+                    (uint8_t)(ram[CONTRA_RAM_BOSS_AUTO_SCROLL_COMPLETE] + 1u);
+            }
+            force_frame_scroll = true;
+        }
+        if (force_frame_scroll)
+        {
+            ram[CONTRA_RAM_FRAME_SCROLL] = 0x01u;
+        }
+        scroll_pixels = (uint8_t)(ram[CONTRA_RAM_FRAME_SCROLL] + ram[CONTRA_RAM_TANK_AUTO_SCROLL]);
+    }
+
+    if (scroll_pixels == 0u)
     {
         return;
     }
