@@ -43,13 +43,9 @@
     Enter: BTN.START,
     ShiftLeft: BTN.SELECT,
     ShiftRight: BTN.SELECT,
-    KeyZ: BTN.B,
-    KeyY: BTN.B,
-    KeyS: BTN.B,
-    ControlLeft: BTN.B,
-    Space: BTN.A,
-    KeyX: BTN.A,
-    KeyA: BTN.A
+    KeyA: BTN.A,   /* fire (NES A) — home-row friendly on QWERTZ */
+    KeyS: BTN.B,   /* jump (NES B) */
+    Space: BTN.A   /* alt fire   */
   };
 
   /* On-screen controller element id -> button bit. */
@@ -87,6 +83,12 @@
     });
   }
 
+  /* {element, bit} for every on-screen button. The render loop mirrors the
+     combined (keyboard | on-screen) input state onto each button's `pressed`
+     styling — a single source of truth, so physical key presses light up the
+     virtual controller too. */
+  var pressables = [];
+
   function setupOnScreenController() {
     Object.keys(BUTTON_MAP).forEach(function (id) {
       var el = document.getElementById(id);
@@ -94,11 +96,9 @@
         return;
       }
       var bit = BUTTON_MAP[id];
-      /* The element actually styled with :active is the d-pad/red button itself
-         (same node here), so toggle a .pressed class for visual feedback. */
+      pressables.push({ el: el, bit: bit });
       var press = function (e) {
         pointerMask |= bit;
-        el.classList.add("pressed");
         if (e.pointerId !== undefined && el.setPointerCapture) {
           try { el.setPointerCapture(e.pointerId); } catch (_) {}
         }
@@ -106,7 +106,6 @@
       };
       var release = function (e) {
         pointerMask &= ~bit;
-        el.classList.remove("pressed");
         if (e && e.preventDefault) {
           e.preventDefault();
         }
@@ -118,6 +117,19 @@
       /* Block the synthetic context menu / text selection on long press. */
       el.addEventListener("contextmenu", function (e) { e.preventDefault(); });
     });
+  }
+
+  /* Reflect the combined button bitmask onto the on-screen controller. Only
+     touches the DOM when the mask changes, so it's cheap to call every frame. */
+  var lastVisualMask = -1;
+  function syncPressedVisual(mask) {
+    if (mask === lastVisualMask) {
+      return;
+    }
+    lastVisualMask = mask;
+    for (var i = 0; i < pressables.length; i += 1) {
+      pressables[i].el.classList.toggle("pressed", (mask & pressables[i].bit) !== 0);
+    }
   }
 
   /* The Konami-code easter egg from the original pen (up up down down left right
@@ -197,7 +209,9 @@
       acc += now - last;
       last = now;
 
-      setInput(keyboardMask | pointerMask);
+      var combined = keyboardMask | pointerMask;
+      setInput(combined);
+      syncPressedVisual(combined);
 
       /* Catch up at 60 Hz, but never spiral (cap at 5 steps like the SDL host). */
       var steps = 0;

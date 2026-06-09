@@ -129,6 +129,9 @@ body {
   height: 250px;
   border-radius: 5px;
   background-color: #ccc;
+  /* The page centers its text (title/hint); reset so the controller's own
+     relatively-positioned text (e.g. the "Nintendo" logo) isn't shoved right. */
+  text-align: left;
   /* keep on-screen taps from selecting text / scrolling / zooming */
   user-select: none;
   -webkit-user-select: none;
@@ -527,9 +530,11 @@ body {
 #d-pad #middle-part::before {
   content: "";
   position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   height: 20px;
   width: 20px;
-  margin: 7px 0 0 7px;
   border-right: 1px solid #999;
   border-bottom: 1px solid #999;
   border-radius: 50%;
