@@ -16229,7 +16229,16 @@ static void contra_rom_exe_all_enemy_routine(ContraCore *core)
         {
             continue;
         }
-        if ((core->ram[CONTRA_RAM_ENEMY_STATE_WIDTH + sx] & 0x01u) == 0u)
+        /* On a regular indoor level (LEVEL_LOCATION_TYPE bit 0 set; 0x80 indoor-boss
+           takes the outdoor path), an enemy high on the pseudo-3D corridor
+           (ENEMY_Y_POS < 0x9C) is too far up to reach the player, so the player-body
+           collision is skipped (@handle_outdoor, bank7:7330-7340). Without this, a
+           bullet still descending toward a player (y < 0x9C) registers a hit one
+           frame early -- e.g. it killed demo P2 before it could crouch under the shot.
+           The bullet-vs-enemy test below still runs (the ROM's @continue path). */
+        if ((((core->ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] & 0x01u) == 0u) ||
+             (core->ram[CONTRA_RAM_ENEMY_Y_POS + sx] >= 0x9Cu)) &&
+            ((core->ram[CONTRA_RAM_ENEMY_STATE_WIDTH + sx] & 0x01u) == 0u))
         {
             contra_rom_check_players_collision(core, sx);
         }

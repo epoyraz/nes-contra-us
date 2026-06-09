@@ -1518,6 +1518,42 @@ static bool test_level2_repeated_room_advances_reach_boss_state(void)
     return true;
 }
 
+/* Regression for the indoor player-collision Y gate (bank7:7330-7340): on a
+   regular indoor level, an enemy high on the pseudo-3D corridor (ENEMY_Y_POS <
+   0x9C) is too far up to reach the player, so its player-body collision is
+   skipped. The Level 2 attract demo exposed the missing gate: a descending enemy
+   bullet (y < 0x9C) killed demo P2 one frame before it could crouch under the
+   shot. Force the L2 demo from boot and assert P2 never dies through that window
+   (it died at demo frame ~918 in the buggy port). */
+static bool test_level2_demo_p2_survives_high_descending_bullet(void)
+{
+    ContraCore core;
+    unsigned frame;
+
+#ifdef _WIN32
+    _putenv("CONTRA_FORCE_DEMO_LEVEL=1");
+#else
+    setenv("CONTRA_FORCE_DEMO_LEVEL", "1", 1);
+#endif
+    contra_core_init(&core);
+#ifdef _WIN32
+    _putenv("CONTRA_FORCE_DEMO_LEVEL="); /* removes the var on Windows/MinGW */
+#else
+    unsetenv("CONTRA_FORCE_DEMO_LEVEL");
+#endif
+
+    for (frame = 1u; frame <= 935u; ++frame)
+    {
+        step_no_input(&core);
+        if (frame >= 900u)
+        {
+            /* P2 (player index 1) must never enter the death state (0x02) here. */
+            CHECK(core.ram[CONTRA_RAM_PLAYER_STATE + 1u] != 0x02u);
+        }
+    }
+    return true;
+}
+
 static bool test_level2_boss_room_loads_rom_enemy_data(void)
 {
     ContraCore core;
@@ -2771,6 +2807,7 @@ int main(void)
         {"attract_level2_loads_wall_core_without_early_clear", test_attract_level2_loads_wall_core_without_early_clear},
         {"game_over_delay_expiry_loads_screen_without_glitch", test_game_over_delay_expiry_loads_screen_without_glitch},
         {"level2_repeated_room_advances_reach_boss_state", test_level2_repeated_room_advances_reach_boss_state},
+        {"level2_demo_p2_survives_high_descending_bullet", test_level2_demo_p2_survives_high_descending_bullet},
         {"level2_boss_room_loads_rom_enemy_data", test_level2_boss_room_loads_rom_enemy_data},
         {"level2_boss_room_wall_cannons_fire_projectiles", test_level2_boss_room_wall_cannons_fire_projectiles},
         {"level4_first_room_loads_rom_enemy_data", test_level4_first_room_loads_rom_enemy_data},
