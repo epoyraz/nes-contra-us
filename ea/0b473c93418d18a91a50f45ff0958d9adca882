@@ -1,0 +1,36 @@
+port/contra_core/src/core.c
+  s_d6f4243e7218de::t_1650b5e689409d 12507-12510
+  s_d6f4243e7218de::t_f2f09277548149 12531
+  s_d6f4243e7218de::t_c3a44d33f95d96 3280-3288,3309-3314
+  s_d6f4243e7218de::t_80f69d263fb6ed 15697-15702
+  s_d6f4243e7218de::t_03c932e76c36f9 10920-10928
+  s_d6f4243e7218de::t_75245ae29d744c 16295
+  s_d6f4243e7218de::t_c6b08e8763df7a 12545-12549
+  s_d6f4243e7218de::t_6595acfa00d3a1 16400-16505,16510
+  s_d6f4243e7218de::t_f2b6a27ab72a6c 16676
+  s_d6f4243e7218de::t_099be572993837 16583-16586
+  s_d6f4243e7218de::t_e308c5d62e7da1 12223-12224,12237,12241,12245,12250,12255-12264
+  s_d6f4243e7218de::t_f2cfca4390db62 16638-16642
+  s_d6f4243e7218de::t_b3a650da42c336 12550-12554
+  s_d6f4243e7218de::t_aa34f6e4556c84 3340-3345
+  s_d6f4243e7218de::t_d01189950478dc 10853-10855,10870-10872
+  s_d6f4243e7218de::t_e362b55ec062c7 12498-12499
+port/contra_core/include/contra/core.h
+  s_d6f4243e7218de::t_f3d602343ea332 98-99,105-109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "ea0b473c93418d18a91a50f45ff0958d9adca882",
+  "prompts": {},
+  "sessions": {
+    "s_d6f4243e7218de": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "825b5bf6-c121-4087-8508-1505c9d1a7d5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
