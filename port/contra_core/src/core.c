@@ -18287,14 +18287,24 @@ static void contra_level_routine_05(ContraCore *core)
 
     contra_load_level_intro_screen_graphics(core);
     ram[CONTRA_RAM_VERTICAL_SCROLL] = 0x00u; /* intro screen scrolls from 0 */
-    /* The ROM busy-writes the next stage's intro graphics across 5 video
-       frames (reference recording frames 7443-7447: FRAME_COUNTER frozen,
-       LEVEL_ROUTINE_INDEX still 5) and flips the routine index to 0 only as
-       the load finishes; the level_routine_00 that follows costs one more
-       flush frame. */
-    core->frame_stall_frames = 0x05u;
+    /* The ROM busy-writes the next stage's intro graphics across several
+       video frames (FRAME_COUNTER frozen, LEVEL_ROUTINE_INDEX still 5) and
+       flips the routine index to 0 only as the load finishes. Measured from
+       the reference recording: entering an indoor base (levels 2/4) freezes
+       5 frames and the level_routine_00 that follows costs one more flush
+       frame (frames 7443-7449); entering an outdoor stage freezes 4 with no
+       extra flush frame (frames 15509-15513). */
+    if ((ram[CONTRA_RAM_CURRENT_LEVEL] & 0x01u) != 0u)
+    {
+        core->frame_stall_frames = 0x05u;
+        core->level_transition_pending = 0x01u;
+    }
+    else
+    {
+        core->frame_stall_frames = 0x04u;
+        core->level_transition_pending = 0x00u;
+    }
     core->frame_stall_routine_reset = 0x01u;
-    core->level_transition_pending = 0x01u;
     ram[CONTRA_RAM_END_LEVEL_ROUTINE_INDEX] = 0x00u;
     ram[CONTRA_RAM_SPRITE_LOAD_TYPE] = 0x00u;
 }
