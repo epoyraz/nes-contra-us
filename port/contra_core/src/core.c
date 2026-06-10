@@ -7535,11 +7535,12 @@ static void contra_rom_sniper_routine_01(ContraCore *core, uint8_t x)
     uint8_t attr;
 
     contra_rom_sniper_set_sprite(core, x);
+    /* The ROM does NOT bail out when add_scroll_to_enemy_pos removes the
+       off-screen sniper here: the rest of the routine runs on the husk (the
+       delay still elapses and enable_enemy_collision leaves sw=0x02 on the
+       removed slot); only advance_enemy_routine's routine==0 guard stops the
+       advance. Faithful husks need the same zombie tail. */
     contra_rom_add_scroll_to_enemy_pos(core, x);
-    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
-    {
-        return; /* scrolled off and removed */
-    }
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
         (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
     if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
