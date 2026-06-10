@@ -1,0 +1,40 @@
+# Deploys the prebuilt site on the gh-pages branch via GitHub Actions.
+#
+# This is a TEMPLATE: deploy-pages.ps1 installs it onto the gh-pages branch as
+# .github/workflows/pages.yml. It is NOT meant to run from wasm/main (which is
+# why it lives under web/ rather than .github/workflows/ on those branches).
+#
+# Why Actions instead of the classic branch build: the legacy Pages builder can
+# stall/err out, and (unlike CI) we can't rebuild here anyway — the wasm bundle
+# embeds the git-ignored baserom.nes. So we just publish what's already on the
+# branch. Requires Pages "Build and deployment > Source = GitHub Actions".
+name: Deploy gh-pages
+
+on:
+  push:
+    branches: [gh-pages]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - id: deployment
+        uses: actions/deploy-pages@v4
