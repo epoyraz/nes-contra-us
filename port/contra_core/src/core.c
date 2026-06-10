@@ -293,6 +293,18 @@ static const int8_t contra_bullet_initial_pos_jump[12][2] = {
     {  0,  16}, {  0,  16}, {-15,  15}, {-16,   0},
     {-15, -15}, {  0, -16}, {  0,  16}, {  0,  16}
 };
+/* bullet_initial_pos_02/03 (bank6:$b626/$b63a): the INDOOR offset tables --
+   used by the indoor BOSS screen too (init_bullet_sprite_pos selects them for
+   any non-zero location type, while the velocity stays outdoor-style). */
+static const int8_t contra_bullet_initial_pos_indoor_ground[10][2] = {
+    { -1, -24}, { 15, -16}, { 16,  -6}, { 15,   8}, { 16,  11},
+    {-16,  11}, {-15,   8}, {-16,  -6}, {-15, -16}, { -1, -24}
+};
+static const int8_t contra_bullet_initial_pos_indoor_jump[12][2] = {
+    {  0, -16}, { 15, -15}, { 16,   0}, { 15,  15},
+    {  0,  16}, {  0,  16}, {-15,  15}, {-16,   0},
+    {-15, -15}, {  0, -16}, {  0, -16}, {  0, -16}
+};
 static const int8_t contra_bullet_velocity_fast[12][2] = {
     {  0, -3}, {  2, -3}, {  3,  0}, {  2,  2},
     {  3,  0}, { -3,  0}, { -3,  2}, { -3,  0},
@@ -2379,9 +2391,21 @@ static void contra_init_player_bullet_position(
         return;
     }
 
-    position_table = (ram[CONTRA_RAM_PLAYER_JUMP_STATUS + player_index] != 0u)
-        ? contra_bullet_initial_pos_jump
-        : contra_bullet_initial_pos_ground;
+    if (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u)
+    {
+        /* indoor BOSS screen: init_bullet_sprite_pos (bank6:675) picks the
+           INDOOR offset tables for any non-zero location type, while the
+           velocity below stays outdoor-style. */
+        position_table = (ram[CONTRA_RAM_PLAYER_JUMP_STATUS + player_index] != 0u)
+            ? contra_bullet_initial_pos_indoor_jump
+            : contra_bullet_initial_pos_indoor_ground;
+    }
+    else
+    {
+        position_table = (ram[CONTRA_RAM_PLAYER_JUMP_STATUS + player_index] != 0u)
+            ? contra_bullet_initial_pos_jump
+            : contra_bullet_initial_pos_ground;
+    }
 
     ram[CONTRA_RAM_PLAYER_BULLET_X_POS + bullet_slot] =
         (uint8_t)(ram[CONTRA_RAM_SPRITE_X_POS + player_index] + position_table[aim_dir][0]);
@@ -4733,7 +4757,10 @@ static void contra_set_jump_status_and_y_velocity(ContraCore *core, uint8_t play
     ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + player_index] = 0x00u;
     ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] = 0x00u;
 
-    if (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0u)
+    /* the ROM tests only BIT 0 of the location type (`lsr`, bank7:4954): the
+       indoor BOSS room (0x80) jumps with the outdoor -5.94, not the indoor
+       -4.56 -- that's the jump into the boss room from the last corridor. */
+    if ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] & 0x01u) == 0u)
     {
         ram[CONTRA_RAM_PLAYER_Y_FAST_VELOCITY + player_index] = 0xFBu;
         ram[CONTRA_RAM_PLAYER_Y_FRACT_VELOCITY + player_index] = 0xF0u;
@@ -9679,11 +9706,10 @@ static void contra_rom_jumping_soldier_routine_01(ContraCore *core, uint8_t x)
         return;
     }
 
-    /* mid-jump: walk, then follow the jump arc */
-    if (contra_rom_apply_indoor_velocity(core, x))
-    {
-        return; /* walked off-screen and was removed */
-    }
+    /* mid-jump: walk, then follow the jump arc. The ROM's @apply_y_vel
+       (bank0:3618) steps the Y arc even when the walk just removed the
+       soldier -- the husk's frozen Y carries one extra arc step. */
+    (void)contra_rom_apply_indoor_velocity(core, x);
     ram[CONTRA_RAM_ENEMY_Y_POS + x] = (uint8_t)(
         (int)ram[CONTRA_RAM_ENEMY_Y_POS + x] +
         contra_jumping_soldier_y_vel_tbl[ram[CONTRA_RAM_ENEMY_VAR_1 + x] % 20u]);
@@ -16353,7 +16379,9 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
             {
                 case 0x01u: contra_rom_indoor_roller_gen_routine_00(core, x); break;
                 case 0x02u: contra_rom_indoor_roller_gen_routine_01(core, x); break;
-                default: break; /* removed via clear once the rounds are done */
+                /* table entry 2 (bank0:3906) is remove_enemy itself */
+                case 0x03u: contra_rom_remove_enemy_offscreen(core, x); break;
+                default: break;
             }
             break;
         case 0x12u:
