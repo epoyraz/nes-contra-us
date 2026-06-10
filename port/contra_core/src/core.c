@@ -4568,6 +4568,37 @@ static void contra_move_player_horizontally(ContraCore *core, uint8_t player_ind
         (uint8_t)(ram[CONTRA_RAM_SPRITE_X_POS + player_index] + velocity + (accum >> 8u));
 }
 
+/* auto_scroll_player (bank7:4279-4296), the tail of player_state_routine_01
+   and the head of player_state_routine_02: while a boss-reveal auto-scroll
+   timer runs, push the player back against the scroll every frame -- 1px left
+   on horizontal levels (stopping at the outdoor left edge 0x1A), 1px down on
+   the vertical level. */
+static void contra_auto_scroll_player(ContraCore *core, uint8_t player_index)
+{
+    uint8_t *const ram = core->ram;
+
+    if ((uint8_t)(ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] |
+                  ram[CONTRA_RAM_AUTO_SCROLL_TIMER_01]) == 0u)
+    {
+        return;
+    }
+
+    if (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u)
+    {
+        ram[CONTRA_RAM_SPRITE_Y_POS + player_index] =
+            (uint8_t)(ram[CONTRA_RAM_SPRITE_Y_POS + player_index] + 1u);
+        return;
+    }
+
+    if (ram[CONTRA_RAM_SPRITE_X_POS + player_index] < 0x1Au)
+    {
+        return;
+    }
+
+    ram[CONTRA_RAM_SPRITE_X_POS + player_index] =
+        (uint8_t)(ram[CONTRA_RAM_SPRITE_X_POS + player_index] - 1u);
+}
+
 static void contra_handle_player_fall_out(ContraCore *core, uint8_t player_index)
 {
     uint8_t *const ram = core->ram;
@@ -4807,6 +4838,37 @@ static void contra_handle_d_pad(ContraCore *core, uint8_t player_index)
     }
 }
 
+/* player_state_routine_00's landing test (bank7:4205 @check_if_floor_exit +
+   check_collision_below bank7:5296): a spawn column is landable when there is
+   no solid at the spawn row, no solid at y+0x20, and SOME collision (floor,
+   water or solid) in the 16px rows below it down to row 0x0E. */
+static bool contra_rom_spawn_spot_landable(ContraCore *core, uint8_t player_index)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t x = ram[CONTRA_RAM_SPRITE_X_POS + player_index];
+    const uint8_t y = ram[CONTRA_RAM_SPRITE_Y_POS + player_index];
+    uint8_t code = contra_get_player_bg_collision_code(core, player_index);
+    uint8_t row;
+
+    if ((code & 0x80u) != 0u)
+    {
+        return false; /* solid object at the spawn row */
+    }
+    code = contra_rom_get_bg_collision_far(core, x, (uint8_t)(y + 0x20u));
+    if ((code & 0x80u) != 0u)
+    {
+        return false;
+    }
+    for (row = (uint8_t)(((uint8_t)(y + 0x20u) >> 4u) + 1u); row < 0x0Eu; ++row)
+    {
+        if (contra_get_outdoor_bg_collision(core, x, (uint8_t)(row << 4u)) != 0u)
+        {
+            return true; /* something to land on below */
+        }
+    }
+    return false;
+}
+
 static void contra_run_player_state_routine(ContraCore *core, uint8_t player_index)
 {
     uint8_t *const ram = core->ram;
@@ -4827,6 +4889,31 @@ static void contra_run_player_state_routine(ContraCore *core, uint8_t player_ind
             ram[CONTRA_RAM_SPRITE_Y_POS + player_index] = contra_vertical_spawn_position[spawn_index];
             ram[CONTRA_RAM_SPRITE_X_POS + player_index] = contra_horizontal_spawn_position[spawn_index];
             ram[CONTRA_RAM_PLAYER_JUMP_STATUS + player_index] = 0x01u;
+
+            /* player_state_routine_00 (bank7:4166-4188), outdoor only: if the
+               table spawn column has nothing to land on, restart at x=0x10 and
+               walk right in 0x10 steps; past 0xE0 fall back to x=0x30. */
+            if ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0u) &&
+                !contra_rom_spawn_spot_landable(core, player_index))
+            {
+                ram[CONTRA_RAM_SPRITE_X_POS + player_index] = 0x10u;
+                for (;;)
+                {
+                    uint8_t sx;
+
+                    if (contra_rom_spawn_spot_landable(core, player_index))
+                    {
+                        break;
+                    }
+                    sx = (uint8_t)(ram[CONTRA_RAM_SPRITE_X_POS + player_index] + 0x10u);
+                    ram[CONTRA_RAM_SPRITE_X_POS + player_index] = sx;
+                    if (sx >= 0xE0u)
+                    {
+                        ram[CONTRA_RAM_SPRITE_X_POS + player_index] = 0x30u;
+                        break;
+                    }
+                }
+            }
             ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] = 0x02u;
             ram[CONTRA_RAM_PLAYER_Y_FAST_VELOCITY + player_index] = 0x00u;
             ram[CONTRA_RAM_NEW_LIFE_INVINCIBILITY_TIMER + player_index] = 0x80u;
@@ -4903,6 +4990,7 @@ static void contra_run_player_state_routine(ContraCore *core, uint8_t player_ind
             }
 
             contra_move_player_horizontally(core, player_index);
+            contra_auto_scroll_player(core, player_index);
 
             contra_set_player_sprite_and_attrs(core, player_index);
             ram[CONTRA_RAM_PLAYER_AIM_PREV_FRAME + player_index] = ram[CONTRA_RAM_PLAYER_AIM_DIR + player_index];
@@ -4919,6 +5007,7 @@ static void contra_run_player_state_routine(ContraCore *core, uint8_t player_ind
         {
             const uint8_t screen_type = contra_get_level_screen_type(core);
 
+            contra_auto_scroll_player(core, player_index);
             ram[CONTRA_RAM_PLAYER_SPRITE_SEQUENCE + player_index] = contra_player_dead_sequence_tbl[screen_type];
             if (ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + player_index] != 0u)
             {
@@ -6342,11 +6431,6 @@ static void contra_set_frame_scroll_draw_player_bullets(ContraCore *core)
         core->ram[CONTRA_RAM_PLAYER_GAME_OVER_BIT_FIELD] = 0x00u;
     }
 
-    if ((uint8_t)(core->ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] | core->ram[CONTRA_RAM_AUTO_SCROLL_TIMER_01]) != 0u)
-    {
-        core->ram[CONTRA_RAM_FRAME_SCROLL] = 0x01u;
-    }
-
     if (active_players == 0x01u)
     {
         contra_handle_invincibility_and_weapon_strength(core, 0u);
@@ -6365,6 +6449,14 @@ static void contra_set_frame_scroll_draw_player_bullets(ContraCore *core)
     if (core->ram[CONTRA_RAM_INDOOR_SCROLL] >= 0x02u)
     {
         core->ram[CONTRA_RAM_INDOOR_SCROLL] = 0x00u;
+    }
+
+    /* bank7:3879-3884: the auto-scroll FRAME_SCROLL=1 is set AFTER the player
+       routines (a latch this frame counts) and BEFORE the bullet routines, so
+       in-flight bullets ride the scroll on the latch frame itself. */
+    if ((uint8_t)(core->ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] | core->ram[CONTRA_RAM_AUTO_SCROLL_TIMER_01]) != 0u)
+    {
+        core->ram[CONTRA_RAM_FRAME_SCROLL] = 0x01u;
     }
 
     contra_update_player_bullets(core);
@@ -16314,13 +16406,16 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
             continue;
         }
 
-        /* hit */
+        /* hit -- the ROM's loop RTSes after the first overlapping bullet
+           (bank7:7035), so an enemy takes at most ONE bullet per frame; the
+           bullet is consumed (routine 2) even against a dead/invulnerable
+           enemy. */
         hp = ram[CONTRA_RAM_ENEMY_HP + slot];
         ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE + b] = 0x02u;
         ram[CONTRA_RAM_PLAYER_BULLET_TIMER + b] = 0x06u;
         if ((hp == 0u) || (hp >= 0xF0u))
         {
-            continue; /* already dead, or invulnerable this frame */
+            return; /* already dead, or invulnerable this frame */
         }
         hp = (uint8_t)(hp - 1u);
         ram[CONTRA_RAM_ENEMY_HP + slot] = hp;
@@ -16413,6 +16508,7 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
             contra_rom_begin_enemy_explosion(core, slot); /* TODO: award score */
             return;
         }
+        return; /* survived the hit: at most one bullet per enemy per frame */
     }
 }
 
