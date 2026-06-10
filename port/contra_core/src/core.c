@@ -4965,6 +4965,13 @@ static void contra_apply_outdoor_horizontal_frame_scroll(ContraCore *core, uint8
         return;
     }
 
+    /* The ROM's check (bank7:5160) is `SPRITE_X_POS >= point` but runs INLINE
+       in the player state routine between the d-pad velocity and the move, on
+       the PRE-move X; this port-side check runs after the player already
+       moved, so `>` on the post-move X is the equivalent boundary (verified:
+       `>=` here scrolls one frame early on the level's first scroll). Known
+       residual: a player landing in water exactly on the scroll point converts
+       motion to movement instead of scroll for one frame (ROM scrolls). */
     if (((active_players & 0x01u) != 0u) &&
         (ram[CONTRA_RAM_PLAYER_STATE + 0u] == 0x01u) &&
         (ram[CONTRA_RAM_PLAYER_X_VELOCITY + 0u] == 0x01u) &&
