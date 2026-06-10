@@ -13625,6 +13625,53 @@ static void contra_rom_boss_mouth_routine_04(ContraCore *core, uint8_t x)
     contra_rom_set_enemy_routine_to_a(core, x, 0x03u); /* -> boss_mouth_routine_02 */
 }
 
+/* boss_mouth_routine_08 (bank0:4682): the dragon-defeated set piece -- every
+   other frame (ENEMY_VAR_3 toggling) walk 14 fixed positions, draw the
+   destroyed background super-tile (budget-gated, retried on failure) and spawn
+   a two-round 0x89 explosion there; after all 14, set the level-end delay to
+   0x60 and remove. (The super-tile pixels themselves are cosmetic for the
+   native renderer; the budget byte cost and the slot's X/Y walk are the
+   structural effects.) */
+static void contra_rom_boss_mouth_routine_08(ContraCore *core, uint8_t x)
+{
+    static const uint8_t y_tbl[14] = {
+        0x20u, 0x20u, 0x20u, 0x20u, 0x40u, 0x40u, 0x60u, 0x60u,
+        0x80u, 0x80u, 0xA0u, 0xA0u, 0xC0u, 0xC0u};
+    static const uint8_t x_tbl[14] = {
+        0x50u, 0xB0u, 0x70u, 0x90u, 0x70u, 0x90u, 0x70u, 0x90u,
+        0x70u, 0x90u, 0x70u, 0x90u, 0x70u, 0x90u};
+    uint8_t *const ram = core->ram;
+    uint8_t i;
+
+    ram[CONTRA_RAM_ENEMY_VAR_3 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_3 + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_VAR_3 + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_3 + x] = 0x01u;
+
+    i = ram[CONTRA_RAM_ENEMY_VAR_2 + x];
+    if (i >= 14u)
+    {
+        i = 13u; /* unreachable in ROM data; guard the table read */
+    }
+    ram[CONTRA_RAM_ENEMY_Y_POS + x] = y_tbl[i];
+    ram[CONTRA_RAM_ENEMY_X_POS + x] = x_tbl[i];
+    if (!contra_rom_enemy_supertile_draw_budget(core))
+    {
+        return; /* draw failed: retry next toggle */
+    }
+    contra_rom_create_explosion_at(core, x_tbl[i], y_tbl[i]);
+
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_2 + x] + 1u);
+    if (ram[CONTRA_RAM_ENEMY_VAR_2 + x] >= 0x0Eu)
+    {
+        ram[CONTRA_RAM_DELAY_TIME_LOW_BYTE] = 0x60u; /* set_delay_remove_enemy */
+        ram[CONTRA_RAM_DELAY_TIME_HIGH_BYTE] = 0x00u;
+        contra_rom_remove_enemy(core, x);
+    }
+}
+
 /* dragon_arm_orb_set_sprite (bank0:4943): the tip (its child link is the #$ff
    terminator) is the red hand orb (sprite_7b); every other orb is gray (sprite_7a). */
 static void contra_rom_dragon_arm_orb_set_sprite(ContraCore *core, uint8_t x)
@@ -16512,7 +16559,13 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                     case 0x03u: contra_rom_boss_mouth_routine_02(core, x); break;
                     case 0x04u: contra_rom_boss_mouth_routine_03(core, x); break;
                     case 0x05u: contra_rom_boss_mouth_routine_04(core, x); break;
-                    default: break; /* defeat sequence (routine_08) deferred */
+                    /* table tail (bank0:4646): boss_defeated_routine, explosion,
+                       clear_sprite, then the 14-explosion set piece */
+                    case 0x06u: contra_rom_boss_door_routine_02(core, x); break;
+                    case 0x07u: contra_rom_enemy_routine_explosion_inplace(core, x); break;
+                    case 0x08u: contra_rom_boss_door_routine_clear_sprite(core, x); break;
+                    case 0x09u: contra_rom_boss_mouth_routine_08(core, x); break;
+                    default: break;
                 }
             }
             else
@@ -17195,17 +17248,10 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
 
             if ((dead_type == 0x14u) && (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x02u))
             {
-                /* dragon boss mouth defeated -> boss_defeated_routine (bank7:7536):
-                   flag the win, set the auto-move delay, wipe the remaining enemies,
-                   and explode. (routine_08's 14-explosion set piece is a cosmetic
-                   deferral; the dragon arms still drive BOSS_SCREEN_ENEMIES_DESTROYED
-                   when they are ported.) */
-                contra_init_apu_channels(core);
-                contra_play_sound(core, 0x57u); /* sound_57: boss destroyed */
-                ram[CONTRA_RAM_DELAY_TIME_LOW_BYTE] = 0xFFu;
-                ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] = 0x01u;
-                contra_rom_destroy_all_enemies(core, (int)slot);
-                contra_rom_begin_enemy_explosion(core, slot);
+                /* dragon boss mouth defeated: the nibble (high of $65, bank7
+                   L3 table) only RAISES the routine to 6 = boss_defeated_routine,
+                   which runs NEXT frame (sound, DELAY=0xFF, destroy_all). */
+                contra_rom_set_enemy_routine_to_a(core, slot, 0x06u);
                 return;
             }
             if ((dead_type == 0x13u) || (dead_type == 0x14u) || (dead_type == 0x08u))
