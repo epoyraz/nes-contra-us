@@ -3277,9 +3277,15 @@ static bool contra_read_level_collision_pattern_index(
    in world space (screen<<8 + scroll + x is scroll-invariant), so it persists as
    the level scrolls and after the bridge enemy is removed. When the faithful
    system is off this list stays empty, so the check is a no-op. */
-/* PORT HARNESS (bridge_has_gap): no single ASM routine -- test the port-side bridge-gap list at a world position. */
-static bool contra_rom_bridge_has_gap(const ContraCore *core, uint8_t screen_x, uint8_t screen_y)
+/* PORT HARNESS (supertile_collision_override): no single ASM routine -- look up
+   the port-side runtime collision rewrites (bridge gaps via clear_supertile_bg_
+   collision, boss-door tunnel cells via set_supertile_bg_collision) at a world
+   position. Returns true with the ROM collision code for the queried point:
+   the stored nibble holds bits 0-1 = top 16px row, bits 2-3 = bottom row. */
+static bool contra_rom_supertile_collision_override(
+    const ContraCore *core, uint8_t screen_x, uint8_t screen_y, uint8_t *out_code)
 {
+    static const uint8_t collision_code_lookup_tbl[4] = {0x00u, 0x01u, 0x02u, 0x80u};
     const uint16_t world_x =
         (uint16_t)(((uint16_t)core->ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] << 8u) +
                    core->ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] + screen_x);
@@ -3300,6 +3306,12 @@ static bool contra_rom_bridge_has_gap(const ContraCore *core, uint8_t screen_x, 
         if ((world_x >= gx) && (world_x < (uint16_t)(gx + 32u)) &&
             ((int)screen_y >= gy) && ((int)screen_y < (gy + 32)))
         {
+            const uint8_t nibble = core->l1_bridge_gap_coll[i];
+            const uint8_t bits = (((int)screen_y - gy) >= 16)
+                ? (uint8_t)(nibble >> 2u)
+                : nibble;
+
+            *out_code = collision_code_lookup_tbl[bits & 0x03u];
             return true;
         }
     }
@@ -3324,9 +3336,13 @@ static uint8_t contra_get_outdoor_horizontal_bg_collision(
         return 0u;
     }
 
-    if (contra_rom_bridge_has_gap(core, screen_x, screen_y))
     {
-        return 0u;
+        uint8_t override_code;
+
+        if (contra_rom_supertile_collision_override(core, screen_x, screen_y, &override_code))
+        {
+            return override_code;
+        }
     }
 
     if (!contra_read_level_collision_pattern_index(
@@ -10834,11 +10850,11 @@ static const uint8_t contra_boss_bomb_turret_supertile_tbl[6] = {
     0x29u, 0x26u, 0x2Au, 0x27u, 0x2Bu, 0x28u};
 static const uint8_t contra_boss_bomb_turret_bomb_velocity_tbl[4] = {0x01u, 0x03u, 0x05u, 0x07u};
 
-/* draw_boss_bomb_turret (bank0:2134-2169): draw bomb-turret super-tile, jungle bg variant. */
-static void contra_rom_draw_boss_bomb_turret(ContraCore *core, uint8_t x)
+/* draw_boss_bomb_turret_y (bank0:2134-2169): draw bomb-turret super-tile at
+   index y, jungle bg variant. */
+static void contra_rom_draw_boss_bomb_turret_y(ContraCore *core, uint8_t x, uint8_t idx)
 {
     uint8_t *const ram = core->ram;
-    uint8_t idx = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
     int draw_x = (int)ram[CONTRA_RAM_ENEMY_X_POS + x];
 
     if ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x01u) != 0u)
@@ -10849,6 +10865,11 @@ static void contra_rom_draw_boss_bomb_turret(ContraCore *core, uint8_t x)
     contra_render_level_1_nametable_update_supertile(
         core, draw_x, (int)ram[CONTRA_RAM_ENEMY_Y_POS + x],
         contra_boss_bomb_turret_supertile_tbl[(idx < 6u) ? idx : 0u]);
+}
+
+static void contra_rom_draw_boss_bomb_turret(ContraCore *core, uint8_t x)
+{
+    contra_rom_draw_boss_bomb_turret_y(core, x, core->ram[CONTRA_RAM_ENEMY_VAR_1 + x]);
 }
 
 /* boss_bomb_turret_routine_00/01 (bank0): after a startup delay, alternate
@@ -10894,6 +10915,15 @@ static void contra_rom_boss_bomb_turret_routine_01(ContraCore *core, uint8_t x)
         contra_boss_bomb_turret_bomb_velocity_tbl[ram[CONTRA_RAM_RANDOM_NUM] & 0x03u],
         (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] + 0xF8u),
         ram[CONTRA_RAM_ENEMY_Y_POS + x]);
+}
+
+/* boss_bomb_turret_routine_02 (bank0:2173-2178), the destroyed routine (set by
+   the level-1 nibble table for type 0x10): draw the destroyed-turret super-tile
+   (index 4) and advance into the appended explosion trio. */
+static void contra_rom_boss_bomb_turret_routine_02(ContraCore *core, uint8_t x)
+{
+    contra_rom_draw_boss_bomb_turret_y(core, x, 0x04u);
+    contra_rom_advance_enemy_routine(core, x);
 }
 
 /* --- red turret (enemy type 0x07), bank0.asm:973 --- */
@@ -12190,39 +12220,48 @@ static const uint8_t contra_exploding_bridge_cloud_x_offset[5] = {0x10u, 0xF0u, 
    collision lookup reports "empty" there (the player falls through). draw_x_base
    is the enemy X (or X-0x20 for the trailing tile); the L1 render helper applies
    the -0x0c super-tile offset, so the recorded screen X matches the drawn tile. */
-static void contra_rom_bridge_destroy_supertile(
-    ContraCore *core, uint8_t x, uint8_t draw_x_base, uint8_t tile)
+static void contra_rom_record_supertile_collision_override(
+    ContraCore *core, uint8_t cell_screen_x, uint8_t cell_screen_y, uint8_t tile, uint8_t coll)
 {
     uint8_t *const ram = core->ram;
-    const uint8_t cell_screen_x = (uint8_t)(draw_x_base - 12u);
-    const uint8_t cell_screen_y = (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] - 12u);
     const uint16_t world_x =
         (uint16_t)(((uint16_t)ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] << 8u) +
                    ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] + cell_screen_x);
     uint8_t i;
-
-    contra_render_level_1_nametable_update_supertile(
-        core, (int)draw_x_base, (int)ram[CONTRA_RAM_ENEMY_Y_POS + x], tile);
 
     for (i = 0u; i < core->l1_bridge_gap_count; ++i)
     {
         if ((core->l1_bridge_gap_world_x[i] == world_x) &&
             (core->l1_bridge_gap_screen_y[i] == cell_screen_y))
         {
-            /* A later section re-draws this cell with a more-destroyed super-tile
+            /* A later step re-draws this cell with a more-destroyed super-tile
                (e.g. 0x1a -> 0x1b); keep the latest so the persistent per-frame
                redraw matches what the ROM left on the nametable. */
             core->l1_bridge_gap_tile[i] = tile;
+            core->l1_bridge_gap_coll[i] = coll;
             return; /* already recorded */
         }
     }
-    if (core->l1_bridge_gap_count < 16u)
+    if (core->l1_bridge_gap_count < 24u)
     {
         core->l1_bridge_gap_world_x[core->l1_bridge_gap_count] = world_x;
         core->l1_bridge_gap_screen_y[core->l1_bridge_gap_count] = cell_screen_y;
         core->l1_bridge_gap_tile[core->l1_bridge_gap_count] = tile;
+        core->l1_bridge_gap_coll[core->l1_bridge_gap_count] = coll;
         core->l1_bridge_gap_count = (uint8_t)(core->l1_bridge_gap_count + 1u);
     }
+}
+
+static void contra_rom_bridge_destroy_supertile(
+    ContraCore *core, uint8_t x, uint8_t draw_x_base, uint8_t tile)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_render_level_1_nametable_update_supertile(
+        core, (int)draw_x_base, (int)ram[CONTRA_RAM_ENEMY_Y_POS + x], tile);
+    contra_rom_record_supertile_collision_override(
+        core, (uint8_t)(draw_x_base - 12u),
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] - 12u), tile, 0x00u);
 }
 
 /* exploding_bridge_routine_00 (bank0:2273): wait until a player is within 0x18
@@ -12456,6 +12495,8 @@ static void contra_rom_boss_door_routine_05(ContraCore *core, uint8_t x)
    8th entry's 0xFF terminates), and collision codes (bank0:2261). */
 static const uint8_t contra_door_tunnel_supertile_tbl[8] = {
     0x1Eu, 0x22u, 0x1Fu, 0x23u, 0x20u, 0x24u, 0x21u, 0x25u};
+static const uint8_t contra_door_tunnel_collision_tbl[8] = {
+    0x00u, 0x00u, 0x00u, 0x04u, 0x00u, 0x04u, 0x00u, 0x04u};
 static const int8_t contra_door_tunnel_offset_tbl[8][2] = {
     {(int8_t)0xF0, (int8_t)0xF0}, {0x20, 0x00}, {(int8_t)0xE0, 0x20}, {0x20, 0x00},
     {(int8_t)0xE0, 0x20}, {0x20, 0x00}, {(int8_t)0xE0, 0x20}, {0x20, 0x00}};
@@ -12463,10 +12504,10 @@ static const int8_t contra_door_tunnel_offset_tbl[8][2] = {
 /* boss_wall_plated_door_routine_06 (bank0:2207): every 8th frame stamp the next
    tunnel super-tile and pop an explosion at the door position; on the in-between
    tick move the door to the next tunnel cell; after the 8 cells, remove the door.
-   The ROM also rewrites bg collision per cell (set_supertile_bg_collision); the
-   native L1 background has no per-tile collision array (same gap the exploding
-   bridge documents), and the post-defeat auto-move + engine end-of-level handle
-   progression, so the collision rewrite is omitted. */
+   The ROM also rewrites bg collision per cell (set_supertile_bg_collision,
+   wall_plated_door_collision_code_tbl) -- the tunnel floor opens up and the
+   walking-off player falls INTO the blasted hole; recorded in the runtime
+   collision-override list like the exploding bridge. */
 static void contra_rom_boss_door_routine_06(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -12487,7 +12528,7 @@ static void contra_rom_boss_door_routine_06(ContraCore *core, uint8_t x)
         {
             ram[CONTRA_RAM_DELAY_TIME_LOW_BYTE] = 0x30u;
             ram[CONTRA_RAM_DELAY_TIME_HIGH_BYTE] = 0x00u;
-            contra_rom_clear_enemy(core, x); /* set_delay_remove_enemy */
+            contra_rom_remove_enemy_offscreen(core, x); /* set_delay_remove_enemy -> remove_enemy keeps the husk */
             return;
         }
         ram[CONTRA_RAM_ENEMY_Y_POS + x] =
@@ -12501,8 +12542,16 @@ static void contra_rom_boss_door_routine_06(ContraCore *core, uint8_t x)
        equivalent now that the draw helper no longer touches the delay. */
     idx = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
     contra_rom_draw_enemy_supertile_a_set_delay(core, x, contra_door_tunnel_supertile_tbl[idx]);
-    contra_rom_create_explosion_at(
-        core, ram[CONTRA_RAM_ENEMY_X_POS + x], ram[CONTRA_RAM_ENEMY_Y_POS + x]);
+    contra_rom_record_supertile_collision_override(
+        core, (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] - 12u),
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] - 12u),
+        contra_door_tunnel_supertile_tbl[idx],
+        contra_door_tunnel_collision_tbl[idx]);
+    /* the ROM tail is `jmp create_enemy_for_explosion` (bank0:2230): the SMALL
+       single-round 0x08 explosion, not the big 0x89 burst */
+    contra_rom_create_explosion_sequence(
+        core, ram[CONTRA_RAM_ENEMY_X_POS + x], ram[CONTRA_RAM_ENEMY_Y_POS + x],
+        0x08u, 0x06u);
     ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)(idx + 1u);
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x08u;
 }
@@ -15645,7 +15694,12 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 {
                     case 0x01u: contra_rom_boss_bomb_turret_routine_00(core, x); break;
                     case 0x02u: contra_rom_boss_bomb_turret_routine_01(core, x); break;
-                    default: break; /* explosion handled via the kill path */
+                    case 0x03u: contra_rom_boss_bomb_turret_routine_02(core, x); break;
+                    /* appended shared explosion trio (bank0:2086-2088) */
+                    case 0x04u: contra_rom_enemy_routine_init_explosion_inplace(core, x); break;
+                    case 0x05u: contra_rom_enemy_routine_explosion_inplace(core, x); break;
+                    case 0x06u: contra_rom_enemy_routine_remove_inplace(core, x); break;
+                    default: break;
                 }
             }
             break;
@@ -16238,7 +16292,7 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x01u: contra_rom_enemy_bullet_routine_00(core, x); break;
                 case 0x02u: contra_rom_enemy_bullet_routine_01(core, x); break;
                 case 0x03u: contra_rom_enemy_bullet_routine_02(core, x); break;
-                case 0x04u: contra_rom_clear_enemy(core, x); break; /* remove_enemy */
+                case 0x04u: contra_rom_remove_enemy_offscreen(core, x); break; /* remove_enemy keeps the husk */
                 default: break;
             }
             break;
@@ -16343,12 +16397,117 @@ static const uint8_t contra_collision_box_codes_04[15][4] = {
     {0xF3u, 0xF3u, 0x1Au, 0x1Au}, {0xE7u, 0xEEu, 0x33u, 0x24u},
     {0xF2u, 0xF2u, 0x13u, 0x1Cu}};
 
+/* add_player_score (bank7:1247-1339): add a 2-byte score (units of 100 game
+   points) to the player's score, award the 30,000-point extra lives, and track
+   the high score. Scores are interleaved 2 bytes per player at $07E2; the
+   extra-life thresholds live at $3C (start 0xC8 = 20,000 points, +0x12C per
+   life, capped once the high byte reaches 0x75). The special falcon score
+   (add_hi != 0, 0x1388 = 500,000) skips the threshold compare AND the cap:
+   it always grants one life and advances the threshold by the same 0x1388. */
+static void contra_rom_add_player_score(ContraCore *core, uint8_t player, uint8_t add_lo, uint8_t add_hi)
+{
+    uint8_t *const ram = core->ram;
+    const unsigned score = CONTRA_RAM_PLAYER_1_SCORE_LOW + ((unsigned)player * 2u);
+    const unsigned thr = CONTRA_RAM_EXTRA_LIFE_SCORE_LOW + ((unsigned)player * 2u);
+    const unsigned lo = (unsigned)ram[score] + add_lo;
+    const unsigned hi = (unsigned)ram[score + 1u] + add_hi + (lo >> 8u);
+    bool award;
+
+    if (hi >= 0x100u)
+    {
+        ram[score] = 0xFFu; /* maxed out at 9,999,900 */
+        ram[score + 1u] = 0xFFu;
+    }
+    else
+    {
+        ram[score] = (uint8_t)lo;
+        ram[score + 1u] = (uint8_t)hi;
+    }
+
+    if (add_hi != 0u)
+    {
+        award = true; /* falcon score: unconditional */
+    }
+    else if ((ram[score + 1u] > ram[thr + 1u]) ||
+             ((ram[score + 1u] == ram[thr + 1u]) && (ram[score] >= ram[thr])))
+    {
+        award = ram[thr + 1u] < 0x75u; /* past 2,995,200 no more lives */
+    }
+    else
+    {
+        award = false;
+    }
+
+    if (award)
+    {
+        const unsigned step_lo = (add_hi != 0u) ? 0x88u : 0x2Cu;
+        const unsigned step_hi = (add_hi != 0u) ? 0x13u : 0x01u;
+        const unsigned tlo = (unsigned)ram[thr] + step_lo;
+        const unsigned thi = (unsigned)ram[thr + 1u] + step_hi + (tlo >> 8u);
+        uint8_t lives;
+
+        if (thi >= 0x100u)
+        {
+            ram[thr] = 0xFFu;
+            ram[thr + 1u] = 0xFFu;
+        }
+        else
+        {
+            ram[thr] = (uint8_t)tlo;
+            ram[thr + 1u] = (uint8_t)thi;
+        }
+
+        lives = (uint8_t)(ram[CONTRA_RAM_P1_NUM_LIVES + player] + 1u);
+        if (lives >= 0x63u)
+        {
+            lives = 0x63u;
+        }
+        ram[CONTRA_RAM_P1_NUM_LIVES + player] = lives;
+        if (add_hi == 0u)
+        {
+            contra_play_sound(core, 0x20u); /* sound_20: extra life */
+        }
+    }
+
+    /* @set_if_new_high_score */
+    if ((ram[score + 1u] > ram[CONTRA_RAM_HIGH_SCORE_HIGH]) ||
+        ((ram[score + 1u] == ram[CONTRA_RAM_HIGH_SCORE_HIGH]) &&
+         (ram[score] >= ram[CONTRA_RAM_HIGH_SCORE_LOW])))
+    {
+        ram[CONTRA_RAM_HIGH_SCORE_LOW] = ram[score];
+        ram[CONTRA_RAM_HIGH_SCORE_HIGH] = ram[score + 1u];
+    }
+}
+
+/* add_enemy_score_set_enemy_routine (bank7:7998-8027), the scoring half: pull
+   the score code from the high nibble of ENEMY_SCORE_COLLISION, add the points
+   (code 0x0A is the 2-byte falcon score and bypasses the demo-mode gate, which
+   lives in add_player_low_score), then clear the score nibble. */
+static void contra_rom_add_enemy_score(ContraCore *core, uint8_t slot, uint8_t player)
+{
+    static const uint8_t score_codes_tbl[10] = {
+        0x00u, 0x01u, 0x03u, 0x05u, 0x0Au, 0x14u, 0x1Eu, 0x32u, 0x64u, 0x96u};
+    uint8_t *const ram = core->ram;
+    const uint8_t code = (uint8_t)(ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + slot] >> 4u);
+
+    if (code == 0x0Au)
+    {
+        contra_rom_add_player_score(core, player, 0x88u, 0x13u); /* 500,000 */
+    }
+    else if ((code < 10u) && (score_codes_tbl[code] != 0u) &&
+             (ram[CONTRA_RAM_DEMO_MODE] == 0u))
+    {
+        contra_rom_add_player_score(core, player, score_codes_tbl[code], 0x00u);
+    }
+    ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + slot] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + slot] & 0x0Fu);
+}
+
 /* bullet_enemy_collision_test (bank7.asm:6928) + set_enemy_collision_box +
    bullet_collision_logic, outdoor path: test each live player bullet against the
    enemy's bullet hitbox; on a hit subtract HP (HP >= 0xF0 is invulnerable, e.g.
    the open pill box) and remove the enemy when HP reaches 0.
-   DEFERRED: score award, explosion animation (enemy is removed on death for
-   now), and laser pass-through (the bullet is consumed on any hit). */
+   DEFERRED: laser pass-through (the bullet is consumed on any hit). */
 static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slot)
 {
     uint8_t *const ram = core->ram;
@@ -16421,6 +16580,10 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
         ram[CONTRA_RAM_ENEMY_HP + slot] = hp;
         if (hp == 0u)
         {
+            /* bullet_collision_logic (bank7:7078): the kill awards the bullet
+               owner's score (and possibly an extra life) before the destroyed
+               routine is dispatched. */
+            contra_rom_add_enemy_score(core, slot, ram[CONTRA_RAM_PLAYER_BULLET_OWNER + b]);
             /* set_destroyed_enemy_routine (bank7:7977): a killed enemy routes to
                its type's destroyed routine (enemy_destroyed_routine tables) rather
                than always exploding. The cases we cover (RAM routine value =
@@ -16472,6 +16635,11 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
             {
                 dest_routine = 0x04u;
             }
+            else if ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x00u) && (dead_type == 0x10u))
+            {
+                dest_routine = 0x03u; /* level-1 boss bomb turret -> routine_02
+                                         (nibble $33 high, bank7:8104) */
+            }
             else if ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x03u) && (dead_type == 0x1Cu))
             {
                 dest_routine = 0x04u; /* boss_gemini_routine_03 */
@@ -16505,7 +16673,7 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
                 contra_rom_set_enemy_routine_to_a(core, slot, dest_routine);
                 return;
             }
-            contra_rom_begin_enemy_explosion(core, slot); /* TODO: award score */
+            contra_rom_begin_enemy_explosion(core, slot);
             return;
         }
         return; /* survived the hit: at most one bullet per enemy per frame */
