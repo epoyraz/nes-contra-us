@@ -135,7 +135,8 @@ body {
   /* keep on-screen taps from selecting text / scrolling / zooming */
   user-select: none;
   -webkit-user-select: none;
-  touch-action: manipulation;
+  -webkit-touch-callout: none;
+  touch-action: none;
 }
 
 #inset-area {
@@ -557,11 +558,25 @@ body {
   to   { opacity: 0; }
 }
 
-/* Scale the fixed-width controller down on narrow screens. */
-@media (max-width: 640px) {
-  #controller {
-    transform: scale(0.62);
-    transform-origin: top center;
-    margin-bottom: -95px; /* reclaim the space the scale leaves behind */
-  }
+/* ----------------------------------------------------------------------- */
+/* Mobile / narrow viewports                                               */
+/* ----------------------------------------------------------------------- */
+
+/* Tighten the page chrome and let the game canvas use the full width. */
+@media (max-width: 700px) {
+  html, body { overflow-x: hidden; }
+  .stage { padding: 18px 8px 36px; }
+  .title { font-size: 11vw; letter-spacing: 3px; text-shadow: 2px 2px 0 #000; }
+  .subtitle { font-size: 12px; margin: 4px 0 16px; }
+  .tv { padding: 10px; border-radius: 10px; }
+  .tv-screen { max-width: 94vw; }
+  .hint { font-size: 12px; line-height: 1.9; margin: 16px 0 22px; }
 }
+
+/* The NES controller is a fixed 600x250px absolute-positioned layout, so it
+   can't reflow. Shrink it with `zoom` (not `transform: scale`) so its layout
+   box shrinks too — otherwise the box stays 600px wide and forces horizontal
+   page overflow on phones. */
+@media (max-width: 640px) { #controller { zoom: 0.62; } }
+@media (max-width: 420px) { #controller { zoom: 0.50; } }
+@media (max-width: 340px) { #controller { zoom: 0.44; } }
