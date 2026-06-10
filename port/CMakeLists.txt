@@ -47,6 +47,15 @@ target_link_libraries(contra_level1_frame_trace PRIVATE contra_core)
 contra_apply_warnings(contra_level1_frame_trace)
 contra_apply_coverage(contra_level1_frame_trace)
 
+add_executable(contra_play_replay_trace
+    tools/play_replay_trace.c
+)
+
+target_link_libraries(contra_play_replay_trace PRIVATE contra_core)
+
+contra_apply_warnings(contra_play_replay_trace)
+contra_apply_coverage(contra_play_replay_trace)
+
 if(CONTRA_PORT_BUILD_TESTS)
     add_executable(contra_core_tests
         tests/core_behavior_tests.c
