@@ -8162,8 +8162,9 @@ static void contra_rom_set_flying_capsule_y_vel(ContraCore *core, uint8_t x)
     ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = (uint8_t)vel;
 }
 
-/* flying_capsule_routine_00 (bank0.asm:680): record the base position, enter
-   from the left, set the cruise velocity (right + weave), advance. */
+/* flying_capsule_routine_00 (bank0.asm:680): record the base position, then
+   horizontal levels enter from the left (X=0x10, cruise right + Y weave) while
+   the vertical waterfall rises from the bottom (X+=0x20, Y=0xE0, -1.5 up). */
 static void contra_rom_flying_capsule_routine_00(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -8171,12 +8172,24 @@ static void contra_rom_flying_capsule_routine_00(ContraCore *core, uint8_t x)
     ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = 0x03u;
     ram[CONTRA_RAM_ENEMY_VAR_1 + x] = ram[CONTRA_RAM_ENEMY_Y_POS + x];
     ram[CONTRA_RAM_ENEMY_VAR_2 + x] = ram[CONTRA_RAM_ENEMY_X_POS + x];
-    contra_rom_add_a_to_enemy_y_pos(core, x, 0x20u);
-    ram[CONTRA_RAM_ENEMY_X_POS + x] = 0x10u;
-    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = 0x00u; /* flying_capsule_vel_tbl[0] */
-    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] = 0x00u;
-    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x] = 0x80u;
-    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] = 0x01u;
+    if (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u)
+    {
+        contra_rom_add_a_to_enemy_x_pos(core, x, 0x20u);
+        ram[CONTRA_RAM_ENEMY_Y_POS + x] = 0xE0u;
+        ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = 0x80u; /* flying_capsule_vel_tbl[4] */
+        ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] = 0xFEu;
+        ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x] = 0x00u;
+        ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] = 0x00u;
+    }
+    else
+    {
+        contra_rom_add_a_to_enemy_y_pos(core, x, 0x20u);
+        ram[CONTRA_RAM_ENEMY_X_POS + x] = 0x10u;
+        ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = 0x00u; /* flying_capsule_vel_tbl[0] */
+        ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] = 0x00u;
+        ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x] = 0x80u;
+        ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] = 0x01u;
+    }
     contra_rom_advance_enemy_routine(core, x);
 }
 
