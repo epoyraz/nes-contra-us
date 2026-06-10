@@ -1,0 +1,567 @@
+/*
+ * Page layout + NES controller styling.
+ *
+ * The controller rules below are a plain-CSS compile of the SCSS from CodePen
+ * epzilla/AqweZk (the "NES Controller"). The Compass `@import` (vendor-prefix
+ * helper) and the `$red` variable have been resolved by hand; nesting has been
+ * flattened; `.pressed` selectors were added so keyboard / programmatic presses
+ * light the buttons the same way `:active` does for mouse/touch.
+ */
+
+@import url(https://fonts.googleapis.com/css?family=Prosto+One);
+
+@font-face {
+  font-family: 'Pretendo';
+  src: url('http://remleyinvitational.com/fonts/pretendo-webfont.eot');
+  src: url('http://remleyinvitational.com/fonts/pretendo-webfont.woff') format('woff'),
+       url('http://remleyinvitational.com/fonts/pretendo-webfont.ttf')  format('truetype'),
+       url('http://remleyinvitational.com/fonts/pretendo-webfont.svg#svgPretendo') format('svg');
+}
+
+/* ----------------------------------------------------------------------- */
+/* Page layout (not from the pen)                                          */
+/* ----------------------------------------------------------------------- */
+
+html, body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  min-height: 100vh;
+  background: #1a1a1a url('https://subtlepatterns.com/patterns/irongrip.png');
+  color: #e8e8e8;
+  font-family: "Prosto One", "Segoe UI", sans-serif;
+}
+
+.stage {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 28px 16px 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.title {
+  margin: 0;
+  font-size: 56px;
+  letter-spacing: 6px;
+  color: #cc0000;
+  text-shadow: 3px 3px 0 #000, 6px 6px 0 rgba(0, 0, 0, 0.35);
+}
+
+.subtitle {
+  margin: 6px 0 22px;
+  font-size: 14px;
+  color: #aaa;
+}
+
+/* TV / console bezel around the game canvas. */
+.tv {
+  background: linear-gradient(#3a3a3a, #2a2a2a);
+  padding: 18px;
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 3px #555, 0 12px 28px rgba(0, 0, 0, 0.55);
+}
+
+.tv-screen {
+  position: relative;
+  width: 512px;
+  max-width: 80vw;
+  background: #000;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: inset 0 0 24px rgba(0, 0, 0, 0.9);
+}
+
+#screen {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* Crisp, blocky NES pixels rather than blurry upscaling. */
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background: #000;
+}
+
+.loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #cc0000;
+  font-size: 20px;
+  letter-spacing: 2px;
+  background: #000;
+}
+
+.hint {
+  margin: 22px 0 30px;
+  font-size: 13px;
+  line-height: 2;
+  color: #bbb;
+}
+
+.hint kbd {
+  display: inline-block;
+  padding: 2px 7px;
+  margin: 0 1px;
+  background: #2c2c2c;
+  border: 1px solid #555;
+  border-bottom-width: 3px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 12px;
+  color: #eee;
+}
+
+/* ----------------------------------------------------------------------- */
+/* NES controller (CodePen epzilla/AqweZk, compiled SCSS -> CSS)           */
+/* ----------------------------------------------------------------------- */
+
+#controller {
+  position: relative;   /* pen used absolute; relative lets us center it in flow */
+  margin: 0 auto;
+  width: 600px;
+  height: 250px;
+  border-radius: 5px;
+  background-color: #ccc;
+  /* The page centers its text (title/hint); reset so the controller's own
+     relatively-positioned text (e.g. the "Nintendo" logo) isn't shoved right. */
+  text-align: left;
+  /* keep on-screen taps from selecting text / scrolling / zooming */
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+#inset-area {
+  position: absolute;
+  width: 550px;
+  height: 175px;
+  top: 50px;
+  left: 25px;
+  border-radius: 5px;
+  background-color: #202020;
+}
+
+#nintendo-text {
+  position: relative;
+  top: 40px;
+  left: 383px;
+  color: #cc0000;
+  font-size: 24px;
+  font-family: "Pretendo", Pretendo, "Prosto One", sans-serif;
+}
+
+#mid-stripe {
+  position: relative;
+  width: 180px;
+  height: 175px;
+  top: -27px;
+  left: 165px;
+}
+
+#mid-stripe .stripe {
+  width: 100%;
+  background-color: #777;
+}
+
+#mid-stripe #stripe1 {
+  height: 25px;
+  border-bottom-right-radius: 5px;
+  border-bottom-left-radius: 5px;
+}
+
+#mid-stripe #stripe2 {
+  height: 25px;
+  margin-top: 7px;
+  border-radius: 5px;
+}
+
+#mid-stripe #stripe3 {
+  height: 25px;
+  margin-top: 7px;
+  border-radius: 5px;
+}
+
+#mid-stripe #stripe4 {
+  height: 15px;
+  margin-top: 71px;
+  border-top-right-radius: 5px;
+  border-top-left-radius: 5px;
+}
+
+#fill-tri-top {
+  position: absolute;
+  width: 0;
+  height: 0;
+  left: 608px;
+  top: 13px;
+  border-left: 15px solid #aaa;
+  border-top: 20px solid transparent;
+}
+
+#fill-tri-bottom {
+  position: absolute;
+  width: 0;
+  height: 0;
+  left: 12px;
+  top: 258px;
+  border-top: 15px solid #aaa;
+  border-left: 20px solid transparent;
+}
+
+#bottom {
+  position: absolute;
+  width: 570px;
+  height: 12px;
+  left: 12px;
+  top: 258px;
+  border-top: 15px solid #aaa;
+  border-left: 20px solid transparent;
+}
+
+#right {
+  position: absolute;
+  width: 12px;
+  height: 225px;
+  left: 608px;
+  top: 13px;
+  border-left: 15px solid #aaa;
+  border-top: 20px solid transparent;
+}
+
+#fill-tri-bottom-right {
+  position: absolute;
+  width: 0;
+  height: 0;
+  left: 602px;
+  top: 253px;
+  border-left: 15px solid #aaa;
+  border-top: 20px solid transparent;
+  z-index: -1;
+}
+
+#fill-circle {
+  position: absolute;
+  width: 20px;
+  height: 30px;
+  left: 602px;
+  top: 243px;
+  border-radius: 50%;
+  background-color: #aaa;
+  z-index: -1;
+}
+
+.button-box {
+  position: absolute;
+  width: 50px;
+  height: 50px;
+  background-color: #eee;
+  border-radius: 5px;
+}
+
+.button-box .red-button {
+  height: 42px;
+  width: 42px;
+  margin-top: 2px;
+  margin-left: 2px;
+  background-color: #cc0000;
+  border-radius: 50%;
+  border-bottom: 4px solid #660000;
+  border-right: 4px solid #660000;
+  cursor: pointer;
+}
+
+.button-box .red-button::before {
+  content: "";
+  position: absolute;
+  display: block;
+  width: 34px;
+  height: 34px;
+  left: 4px;
+  top: 4px;
+  border-radius: 50%;
+  border-top: 2px solid #880000;
+  border-left: 2px solid #880000;
+  border-bottom: 2px solid #ccc;
+  border-right: 2px solid #ccc;
+  background-color: #cc0000;
+}
+
+#a-box {
+  left: 450px;
+  top: 100px;
+}
+
+#a-box::after {
+  content: "A";
+  font-weight: bolder;
+  position: absolute;
+  right: 0;
+  top: 53px;
+  color: #cc0000;
+}
+
+#a-box #a-button:active,
+#a-box #a-button.pressed {
+  margin-top: 6px;
+  margin-left: 6px;
+  border: 0px;
+}
+
+#a-box #a-button:active::before,
+#a-box #a-button.pressed::before {
+  content: "";
+  position: absolute;
+  display: block;
+  width: 34px;
+  height: 34px;
+  left: 6px;
+  top: 6px;
+  border-radius: 50%;
+  border-top: 2px solid #880000;
+  border-left: 2px solid #880000;
+  border-bottom: 2px solid #ccc;
+  border-right: 2px solid #ccc;
+  background-color: #cc0000;
+}
+
+#b-box {
+  left: 390px;
+  top: 100px;
+}
+
+#b-box::after {
+  content: "B";
+  font-weight: bolder;
+  position: absolute;
+  right: 0;
+  top: 53px;
+  color: #cc0000;
+}
+
+#b-box #b-button:active,
+#b-box #b-button.pressed {
+  margin-top: 6px;
+  margin-left: 6px;
+  border: 0px;
+}
+
+#b-box #b-button:active::before,
+#b-box #b-button.pressed::before {
+  content: "";
+  position: absolute;
+  display: block;
+  width: 34px;
+  height: 34px;
+  left: 6px;
+  top: 6px;
+  border-radius: 50%;
+  border-top: 2px solid #880000;
+  border-left: 2px solid #880000;
+  border-bottom: 2px solid #ccc;
+  border-right: 2px solid #ccc;
+  background-color: #cc0000;
+}
+
+#middle-buttons {
+  position: absolute;
+  width: 170px;
+  height: 45px;
+  top: 155px;
+  left: 198px;
+  background-color: #eee;
+  border-radius: 5px;
+  border: 5px inset white;
+}
+
+#middle-buttons .middle-button {
+  position: absolute;
+  width: 50px;
+  height: 20px;
+  background-color: #202020;
+  font-size: 15px;
+  border-radius: 10px;
+  box-shadow: 2px 2px #888;
+  cursor: pointer;
+}
+
+#middle-buttons #select {
+  left: 25px;
+  top: 15px;
+}
+
+#middle-buttons #select::before {
+  content: "SELECT";
+  position: absolute;
+  color: #cc0000;
+  top: -50px;
+  left: -5px;
+}
+
+#middle-buttons #select:active,
+#middle-buttons #select.pressed {
+  left: 27px;
+  top: 17px;
+  box-shadow: 0px 0px #000;
+}
+
+#middle-buttons #select:active::before,
+#middle-buttons #select.pressed::before {
+  content: "SELECT";
+  position: absolute;
+  color: #cc0000;
+  top: -52px;
+  left: -7px;
+}
+
+#middle-buttons #start {
+  left: 95px;
+  top: 15px;
+}
+
+#middle-buttons #start::before {
+  content: "START";
+  position: absolute;
+  color: #cc0000;
+  top: -50px;
+}
+
+#middle-buttons #start:active,
+#middle-buttons #start.pressed {
+  left: 97px;
+  top: 17px;
+  box-shadow: 0px 0px #000;
+}
+
+#middle-buttons #start:active::before,
+#middle-buttons #start.pressed::before {
+  content: "START";
+  position: absolute;
+  color: #cc0000;
+  top: -52px;
+  left: -2px;
+}
+
+#d-pad {
+  position: absolute;
+  top: 110px;
+  left: 65px;
+  height: 100px;
+  width: 100px;
+}
+
+#d-pad .d-pad-button {
+  position: absolute;
+  height: 34px;
+  width: 34px;
+  background-color: black;
+  color: #444;
+  font-size: 28px;
+  text-align: center;
+  border-bottom-right-radius: 5px;
+  border-bottom-left-radius: 5px;
+  cursor: pointer;
+}
+
+#d-pad #up-button {
+  left: 33px;
+  box-shadow: -3px 0 0 #888;
+  transform: rotate(180deg);
+}
+
+#d-pad #up-button:active,
+#d-pad #up-button.pressed {
+  transform: rotate(180deg) rotate3d(1, 0, 0, 30deg);
+  box-shadow: -1px 0 0 #888;
+}
+
+#d-pad #left-button {
+  top: 33px;
+  box-shadow: 3px 0px 0px #888;
+  transform: rotate(90deg);
+}
+
+#d-pad #left-button:active,
+#d-pad #left-button.pressed {
+  transform: rotate(90deg) rotate3d(1, 0, 0, 20deg);
+  box-shadow: 1px 0 0 #888;
+}
+
+#d-pad #right-button {
+  top: 33px;
+  left: 66px;
+  box-shadow: -3px 3px 0 #888;
+  transform: rotate(270deg);
+}
+
+#d-pad #right-button:active,
+#d-pad #right-button.pressed {
+  transform: rotate(270deg) rotate3d(1, 0, 0, 20deg);
+  box-shadow: -1px 1px 0 #888;
+}
+
+#d-pad #down-button {
+  left: 33px;
+  top: 66px;
+  box-shadow: 3px 1px 0px #888;
+}
+
+#d-pad #down-button:active,
+#d-pad #down-button.pressed {
+  transform: rotate3d(1, 0, 0, 30deg);
+  box-shadow: 1px 0 0 #888;
+}
+
+#d-pad #middle-part {
+  position: absolute;
+  height: 34px;
+  width: 34px;
+  top: 33px;
+  left: 33px;
+  background-color: black;
+}
+
+#d-pad #middle-part::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  height: 20px;
+  width: 20px;
+  border-right: 1px solid #999;
+  border-bottom: 1px solid #999;
+  border-radius: 50%;
+}
+
+#notSoSecretCode {
+  position: absolute;
+  left: 700px;
+  color: white;
+  font-size: 60px;
+  display: none;
+}
+
+.blink {
+  animation: blink 0.8s linear infinite;
+}
+
+@keyframes blink {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+/* Scale the fixed-width controller down on narrow screens. */
+@media (max-width: 640px) {
+  #controller {
+    transform: scale(0.62);
+    transform-origin: top center;
+    margin-bottom: -95px; /* reclaim the space the scale leaves behind */
+  }
+}
