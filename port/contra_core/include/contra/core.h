@@ -51,6 +51,15 @@ typedef struct ContraCore
     ContraInputSnapshot pending_input;
     uint8_t startup_wait_frames;
     uint8_t level_graphics_wait_frames;
+    /* The ROM's end-of-level next-stage load busy-writes the PPU across video
+       frames (FRAME_COUNTER frozen, no game-logic iterations). frame_stall_
+       frames idles the step loop the same way; frame_stall_routine_reset
+       defers level_routine_05's LEVEL_ROUTINE_INDEX=0 to the last stall frame
+       (the ROM flips it only as the load finishes); level_transition_pending
+       marks the following level_routine_00 to add its 1-frame flush stall. */
+    uint8_t frame_stall_frames;
+    uint8_t frame_stall_routine_reset;
+    uint8_t level_transition_pending;
     uint8_t level1_weapon_box_restore_timer;
     int16_t level1_weapon_box_restore_x;
     int16_t level1_weapon_box_restore_y;

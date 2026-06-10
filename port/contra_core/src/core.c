@@ -6349,6 +6349,14 @@ static void contra_level_routine_00(ContraCore *core)
     contra_init_ppu_write_screen_supertiles(core);
     contra_load_bank_0_load_level_enemies_to_mem(core);
     core->ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = (uint8_t)(core->ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] + 1u);
+    if (core->level_transition_pending != 0u)
+    {
+        /* mid-game level transition only (the boot path is already timed by
+           startup_wait_frames): the ROM spends one extra video frame flushing
+           this routine's PPU writes (reference frame 7449). */
+        core->level_transition_pending = 0u;
+        core->frame_stall_frames = 0x01u;
+    }
 }
 
 static void contra_level_routine_01(ContraCore *core)
@@ -6383,7 +6391,11 @@ static void contra_level_routine_02(ContraCore *core)
     }
 
     contra_zero_out_nametables(core);
-    core->level_graphics_wait_frames = 0x08u;
+    /* the ROM's level graphics load spans more video frames for the indoor
+       base levels (reference recording: level 1 = 8 frozen frames at boot,
+       level 2 = 10 at frames 7643-7652) */
+    core->level_graphics_wait_frames =
+        (core->ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u) ? 0x0Au : 0x08u;
 }
 
 static void contra_finish_level_graphics_load(ContraCore *core)
@@ -17848,7 +17860,15 @@ static void contra_level_routine_05(ContraCore *core)
     }
 
     contra_load_level_intro_screen_graphics(core);
-    ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x00u;
+    ram[CONTRA_RAM_VERTICAL_SCROLL] = 0x00u; /* intro screen scrolls from 0 */
+    /* The ROM busy-writes the next stage's intro graphics across 5 video
+       frames (reference recording frames 7443-7447: FRAME_COUNTER frozen,
+       LEVEL_ROUTINE_INDEX still 5) and flips the routine index to 0 only as
+       the load finishes; the level_routine_00 that follows costs one more
+       flush frame. */
+    core->frame_stall_frames = 0x05u;
+    core->frame_stall_routine_reset = 0x01u;
+    core->level_transition_pending = 0x01u;
     ram[CONTRA_RAM_END_LEVEL_ROUTINE_INDEX] = 0x00u;
     ram[CONTRA_RAM_SPRITE_LOAD_TYPE] = 0x00u;
 }
@@ -19111,6 +19131,18 @@ void contra_core_step_frame(ContraCore *core)
             update_latches = true;
         }
         contra_render_frame(core, update_latches);
+        return;
+    }
+
+    if (core->frame_stall_frames != 0u)
+    {
+        core->frame_stall_frames = (uint8_t)(core->frame_stall_frames - 1u);
+        if ((core->frame_stall_frames == 0u) && (core->frame_stall_routine_reset != 0u))
+        {
+            core->frame_stall_routine_reset = 0u;
+            core->ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x00u;
+        }
+        contra_render_frame(core, true);
         return;
     }
 
