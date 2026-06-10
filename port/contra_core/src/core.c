@@ -18008,6 +18008,62 @@ static void contra_run_level_1_end_level_player_routine(ContraCore *core, uint8_
     }
 }
 
+/* end_of_lvl_routine_indoor (bank3:1385): walk each player to their elevator
+   (P1 left to x=0x0C, P2 right to x=0xF4), mount it (state 3 = can't move,
+   sprite_91), wait for the other player, then ride up. */
+static void contra_run_indoor_end_level_player_routine(ContraCore *core, uint8_t player_index, uint8_t state_index)
+{
+    static const uint8_t indoor_lvl_end_input_tbl[2] = {CONTRA_BUTTON_LEFT, CONTRA_BUTTON_RIGHT};
+    static const uint8_t indoor_lvl_elevator_pos_tbl[2] = {0x0Cu, 0xF4u};
+    static const uint8_t indoor_lvl_elevator_attr_tbl[2] = {0x00u, 0x45u};
+    uint8_t *const ram = core->ram;
+
+    switch (state_index)
+    {
+        case 0x00u:
+        {
+            const uint8_t dx = (uint8_t)(ram[CONTRA_RAM_SPRITE_X_POS + player_index] -
+                                         indoor_lvl_elevator_pos_tbl[player_index]);
+            const uint8_t dist = ((dx & 0x80u) != 0u) ? (uint8_t)(0u - dx) : dx;
+
+            ram[CONTRA_RAM_CONTROLLER_STATE + player_index] = indoor_lvl_end_input_tbl[player_index];
+            if (dist < 0x02u)
+            {
+                ram[CONTRA_RAM_LEVEL_END_LVL_ROUTINE_STATE + player_index] =
+                    (uint8_t)(ram[CONTRA_RAM_LEVEL_END_LVL_ROUTINE_STATE + player_index] + 1u);
+            }
+            break;
+        }
+
+        case 0x01u:
+            ram[CONTRA_RAM_PLAYER_STATE + player_index] = 0x03u; /* can't move */
+            ram[CONTRA_RAM_SPRITE_ATTR + player_index] = indoor_lvl_elevator_attr_tbl[player_index];
+            ram[CONTRA_RAM_CPU_SPRITE_BUFFER + player_index] = 0x91u; /* on the elevator */
+            ram[CONTRA_RAM_LEVEL_END_LVL_ROUTINE_STATE + player_index] =
+                (uint8_t)(ram[CONTRA_RAM_LEVEL_END_LVL_ROUTINE_STATE + player_index] + 1u);
+            break;
+
+        case 0x02u:
+        {
+            const uint8_t other_state =
+                ram[CONTRA_RAM_LEVEL_END_LVL_ROUTINE_STATE + (player_index ^ 1u)];
+
+            if ((other_state == 0u) || (other_state >= 0x03u))
+            {
+                ram[CONTRA_RAM_LEVEL_END_LVL_ROUTINE_STATE + player_index] =
+                    (uint8_t)(ram[CONTRA_RAM_LEVEL_END_LVL_ROUTINE_STATE + player_index] + 1u);
+            }
+            break;
+        }
+
+        default:
+            ram[CONTRA_RAM_SPRITE_Y_POS + player_index] =
+                (uint8_t)(ram[CONTRA_RAM_SPRITE_Y_POS + player_index] - 1u); /* ride up */
+            ram[CONTRA_RAM_CPU_SPRITE_BUFFER + player_index] = 0x91u;
+            break;
+    }
+}
+
 static void contra_run_end_level_sequence(ContraCore *core)
 {
     uint8_t *const ram = core->ram;
@@ -18071,6 +18127,11 @@ static void contra_run_end_level_sequence(ContraCore *core)
                     if (ram[CONTRA_RAM_CURRENT_LEVEL] == 0u)
                     {
                         contra_run_level_1_end_level_player_routine(core, (uint8_t)player_index, (uint8_t)(routine_state - 1u));
+                    }
+                    else if ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u) ||
+                             (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x03u))
+                    {
+                        contra_run_indoor_end_level_player_routine(core, (uint8_t)player_index, (uint8_t)(routine_state - 1u));
                     }
                     else if (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x02u)
                     {
