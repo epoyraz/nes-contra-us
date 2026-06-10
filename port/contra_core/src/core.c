@@ -3401,6 +3401,15 @@ static uint8_t contra_get_outdoor_bg_collision(
     uint8_t pattern_index;
     uint8_t collision_code;
 
+    /* read_bg_collision_byte (bank7:6404): the raw screen Y (pre-scroll, $15)
+       past 0xE0 is "past last bg collision row" -> empty. On the waterfall
+       this is what lets falling rocks drop off the bottom instead of bouncing
+       on the last supertile row. */
+    if (screen_y >= 0xE0u)
+    {
+        return 0u;
+    }
+
     if (core->ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] == 0u)
     {
         return contra_get_outdoor_horizontal_bg_collision(core, screen_x, screen_y);
@@ -7066,6 +7075,8 @@ static void contra_rom_remove_enemy_offscreen(ContraCore *core, uint8_t x)
     contra_rom_remove_enemy(core, x);
 }
 
+static void contra_rom_add_4_to_enemy_y_pos(ContraCore *core, uint8_t x);
+
 /* add_a_to_enemy_y_pos / add_a_to_enemy_x_pos (bank7.asm:8387/8394). */
 static void contra_rom_add_a_to_enemy_y_pos(ContraCore *core, uint8_t x, uint8_t a)
 {
@@ -7505,7 +7516,10 @@ static void contra_rom_sniper_routine_00(ContraCore *core, uint8_t x)
 
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = contra_sniper_animation_delay_tbl[idx];
     ram[CONTRA_RAM_ENEMY_FRAME + x] = contra_sniper_frame_tbl[idx];
-    contra_rom_add_a_to_enemy_y_pos(core, x, 0x04u);
+    /* add_4_to_enemy_y_pos is the VERTICAL_SCROLL-snapping variant
+       (bank7:8404) -- on the waterfall it seats the sniper on the scroll
+       grid; the crouch +5 below is the plain add. */
+    contra_rom_add_4_to_enemy_y_pos(core, x);
     if (attr == 0x01u)
     {
         contra_rom_add_a_to_enemy_y_pos(core, x, 0x05u);
