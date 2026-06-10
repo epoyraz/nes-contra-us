@@ -9820,8 +9820,16 @@ static void contra_rom_indoor_soldier_routine_01(ContraCore *core, uint8_t x)
         }
         else if (weapon == 1u)
         {
-            contra_rom_enemy_launch_grenade(
-                core, ram[CONTRA_RAM_ENEMY_X_POS + x], ram[CONTRA_RAM_ENEMY_Y_POS + x]);
+            /* bank0:3461: inc VAR_1, throw only on ODD counts -- every other
+               beat, and the count advances even when the launch itself is
+               blocked (e.g. ENEMY_ATTACK_FLAG still 0 after a respawn) */
+            ram[CONTRA_RAM_ENEMY_VAR_1 + x] =
+                (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] + 1u);
+            if ((ram[CONTRA_RAM_ENEMY_VAR_1 + x] & 0x01u) != 0u)
+            {
+                contra_rom_enemy_launch_grenade(
+                    core, ram[CONTRA_RAM_ENEMY_X_POS + x], ram[CONTRA_RAM_ENEMY_Y_POS + x]);
+            }
         }
         else
         {
