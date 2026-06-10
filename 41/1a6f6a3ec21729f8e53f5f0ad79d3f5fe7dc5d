@@ -1,0 +1,21 @@
+port/tools/l3_boss_transition_probe.c
+  s_d6f4243e7218de::t_2e25c113bb5e1f 1-120
+port/tools/l3_platform_trace.c
+  s_d6f4243e7218de::t_2e25c113bb5e1f 1-117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "411a6f6a3ec21729f8e53f5f0ad79d3f5fe7dc5d",
+  "prompts": {},
+  "sessions": {
+    "s_d6f4243e7218de": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "825b5bf6-c121-4087-8508-1505c9d1a7d5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
