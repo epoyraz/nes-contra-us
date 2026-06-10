@@ -8434,13 +8434,13 @@ static void contra_rom_sniper_routine_05(ContraCore *core, uint8_t x)
     contra_rom_apply_gravity_to_destroyed_soldier(core, x);
 }
 
-/* enemy_routine_init_explosion (bank7:7572) on the enemy's own slot: explosion
-   sound if ENEMY_STATE_WIDTH bit 1 allows, force sprite palette 2, hide the
-   sprite for one frame, advance. */
-static void contra_rom_enemy_routine_init_explosion_inplace(ContraCore *core, uint8_t x)
+/* explosion_sound_hide_enemy (bank7:7589): the shared tail of enemy_routine_
+   init_explosion and mortar_shot_routine_03 -- store the updated state width,
+   explosion sound if bit 1 allows, force sprite palette 2, hide the sprite for
+   one frame, advance. */
+static void contra_rom_explosion_sound_hide_enemy(ContraCore *core, uint8_t x, uint8_t sw)
 {
     uint8_t *const ram = core->ram;
-    const uint8_t sw = (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] | 0x81u);
 
     ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = sw;
     if ((sw & 0x02u) != 0u)
@@ -8458,6 +8458,25 @@ static void contra_rom_enemy_routine_init_explosion_inplace(ContraCore *core, ui
     ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x01u; /* invisible sprite for one frame */
     contra_rom_add_scroll_to_enemy_pos(core, x);
     contra_rom_set_enemy_delay_adv_routine(core, x, 0x01u);
+}
+
+/* enemy_routine_init_explosion (bank7:7572) on the enemy's own slot. */
+static void contra_rom_enemy_routine_init_explosion_inplace(ContraCore *core, uint8_t x)
+{
+    contra_rom_explosion_sound_hide_enemy(
+        core, x, (uint8_t)(core->ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] | 0x81u));
+}
+
+/* mortar_shot_routine_03 (bank7:7582): a split mortar round hit the ground --
+   score/collision code 0x0D, strip the player-enemy collision bits (0 and 6),
+   let bullets pass through (bit 7), then the shared explosion tail. */
+static void contra_rom_mortar_shot_routine_03(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = 0x0Du;
+    contra_rom_explosion_sound_hide_enemy(
+        core, x, (uint8_t)((ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0xBEu) | 0x80u));
 }
 
 /* enemy_routine_explosion (bank7:7616) on the enemy's own slot: 3 sprites
@@ -13336,9 +13355,7 @@ static void contra_rom_mortar_shot_routine_02(ContraCore *core, uint8_t x)
         ram[CONTRA_RAM_ENEMY_Y_POS + slot] = ram[CONTRA_RAM_ENEMY_Y_POS + x];
         ram[CONTRA_RAM_ENEMY_ATTRIBUTES + slot] = count;
     }
-    /* ROM advances the initial mortar to enemy_routine_init_explosion; the port's
-       shared 0xFE explosion actor is the equivalent kill/explode path. */
-    contra_rom_begin_enemy_explosion(core, x);
+    contra_rom_advance_enemy_routine(core, x); /* -> enemy_routine_init_explosion */
 }
 
 /* mortar_shot_routine_01 (bank7:9684): fly under gravity. The initial shot splits at
@@ -13379,7 +13396,7 @@ static void contra_rom_mortar_shot_routine_01(ContraCore *core, uint8_t x)
         return; /* no floor yet */
     }
     contra_play_sound(core, 0x24u);
-    contra_rom_begin_enemy_explosion(core, x); /* ROM: -> mortar_shot_routine_03 */
+    contra_rom_set_enemy_routine_to_a(core, x, 0x07u); /* -> mortar_shot_routine_03 */
 }
 
 /* enable/disable_bullet_enemy_collision (bank7:8371/8349): bit 7 of ENEMY_STATE_WIDTH
@@ -16847,7 +16864,13 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x01u: contra_rom_mortar_shot_routine_00(core, x); break;
                 case 0x02u: contra_rom_mortar_shot_routine_01(core, x); break;
                 case 0x03u: contra_rom_mortar_shot_routine_02(core, x); break;
-                default: break; /* explosion via the 0xFE actor */
+                /* 4-6: the initial shot's explosion trio; 7-9: a split round's
+                   ground-hit trio (mortar_shot_routine_03 entry). */
+                case 0x04u: contra_rom_enemy_routine_init_explosion_inplace(core, x); break;
+                case 0x07u: contra_rom_mortar_shot_routine_03(core, x); break;
+                case 0x05u: case 0x08u: contra_rom_enemy_routine_explosion_inplace(core, x); break;
+                case 0x06u: case 0x09u: contra_rom_enemy_routine_remove_inplace(core, x); break;
+                default: break;
             }
             break;
         case 0x06u: /* sniper */
