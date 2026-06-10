@@ -109,6 +109,7 @@ static void contra_rom_bullet_generation(
 static void contra_rom_destroy_all_enemies(ContraCore *core, int keep_slot);
 static void contra_rom_add_10_to_enemy_y_fract_vel(ContraCore *core, uint8_t x);
 static void contra_rom_add_a_to_enemy_y_fract_vel(ContraCore *core, uint8_t x, uint8_t a);
+static uint8_t contra_rom_get_bg_collision_far(const ContraCore *core, uint8_t x, uint8_t y);
 static void contra_rom_create_explosion_at(ContraCore *core, uint8_t px, uint8_t py);
 static void contra_load_next_supertiles_screen_indexes(ContraCore *core);
 static void contra_rom_reverse_enemy_x_direction(ContraCore *core, uint8_t x);
@@ -3286,8 +3287,15 @@ static bool contra_rom_bridge_has_gap(const ContraCore *core, uint8_t screen_x, 
 
     for (i = 0u; i < core->l1_bridge_gap_count; ++i)
     {
-        const uint16_t gx = core->l1_bridge_gap_world_x[i];
-        const int gy = (int)core->l1_bridge_gap_screen_y[i];
+        /* clear_supertile_bg_collision (bank7:8143) clears the GRID-ALIGNED
+           super-tile cell containing the draw point; the stored coordinates
+           are the visual draw anchor (a few px inside the cell), so snap to
+           the 32px grid here -- the world grid at multiples of 32, the screen
+           rows at 0x10 + 32k. Unsnapped, the gap leaked 4px into the intact
+           neighbor cell and a soldier stepped off a bridge the ROM still
+           considers floor. */
+        const uint16_t gx = (uint16_t)(core->l1_bridge_gap_world_x[i] & ~(uint16_t)31u);
+        const int gy = ((((int)core->l1_bridge_gap_screen_y[i] - 0x10) & ~31) + 0x10);
 
         if ((world_x >= gx) && (world_x < (uint16_t)(gx + 32u)) &&
             ((int)screen_y >= gy) && ((int)screen_y < (gy + 32)))
@@ -4809,12 +4817,6 @@ static void contra_run_player_state_routine(ContraCore *core, uint8_t player_ind
         current_level = 7u;
     }
 
-    if (ram[CONTRA_RAM_INDOOR_PLAYER_ADV_FLAG + player_index] == 0u)
-    {
-        ram[CONTRA_RAM_PLAYER_X_VELOCITY + player_index] = 0x00u;
-        ram[CONTRA_RAM_INDOOR_TRANSITION_X_FRACT_VEL + player_index] = 0x00u;
-    }
-
     switch (ram[CONTRA_RAM_PLAYER_STATE + player_index])
     {
         case 0x00u:
@@ -4837,6 +4839,21 @@ static void contra_run_player_state_routine(ContraCore *core, uint8_t player_ind
             contra_set_player_aim_for_input(core, player_index);
             contra_check_player_ledge(core, player_index);
             contra_check_player_fire(core, player_index);
+
+            /* handle_player_state_calc_x_vel (bank7:4359): the per-frame X
+               velocity reset is STATE-1 ONLY -- a dead player's corpse keeps
+               its last velocity byte (the ROM never clears it). */
+            if (ram[CONTRA_RAM_INDOOR_PLAYER_ADV_FLAG + player_index] == 0u)
+            {
+                ram[CONTRA_RAM_PLAYER_X_VELOCITY + player_index] = 0x00u;
+                ram[CONTRA_RAM_INDOOR_TRANSITION_X_FRACT_VEL + player_index] = 0x00u;
+            }
+
+            /* handle_player_state (bank7:4455) defaults the sprite sequence to
+               3 (walking/curled-jump) every frame; the d-pad branches overwrite
+               it for standing/aiming/crouching, so it survives exactly while
+               jumping or falling -- including the spawn drop-in. */
+            ram[CONTRA_RAM_PLAYER_SPRITE_SEQUENCE + player_index] = 0x03u;
 
             if (contra_update_indoor_player_transition(core, player_index))
             {
@@ -6910,11 +6927,78 @@ static const uint8_t contra_bullet_collision_code_tbl[6] = {0x01u, 0x05u, 0x05u,
 /* cannonball_explosion_sprite_tbl (bank0:498): type-1 bomb ground-explosion frames. */
 static const uint8_t contra_cannonball_explosion_sprite_tbl[3] = {0x37u, 0x36u, 0x37u};
 /* adjust_bullet_velocity speed scaling reduces to vel*mult/8: 0.5x .. 1.875x */
-static const uint8_t contra_bullet_speed_mult[8] = {4u, 6u, 8u, 10u, 12u, 13u, 14u, 15u};
-
+/* adjust_bullet_velocity (bank7:10086): per-speed-code shift-add cascades.
+   NOT vel*mult/8 -- each shift stage truncates at the byte level (the ROM
+   comments document that 1.75x/1.87x drop the fast-byte carry), so the low
+   bits differ from a clean multiply; the subpixel phase is gameplay-visible
+   as the frame each +1px carry lands on. */
 static uint16_t contra_rom_adjust_bullet_velocity(uint8_t fract, uint8_t speed)
 {
-    return (uint16_t)(((uint16_t)fract * contra_bullet_speed_mult[speed & 0x07u]) >> 3u);
+    uint8_t v04 = fract; /* $04 */
+    uint8_t v05 = 0u;    /* $05 */
+    uint8_t half;        /* lda $05 / lsr / lda $04 / ror */
+    uint8_t a;
+    unsigned sum;
+
+    switch (speed & 0x07u)
+    {
+        case 0x00u: /* .5x: lsr $05 / ror $04 */
+        case 0x01u: /* .75x: halve in place, then the 1.5x add of the halved value */
+        {
+            const uint8_t carry = (uint8_t)(v05 & 0x01u);
+
+            v05 >>= 1u;
+            v04 = (uint8_t)((v04 >> 1u) | (uint8_t)(carry << 7u));
+            if ((speed & 0x07u) == 0x00u)
+            {
+                break;
+            }
+        }
+        /* fall through */
+        case 0x04u: /* 1.5x: add the byte-half */
+            half = (uint8_t)((v04 >> 1u) | (uint8_t)((v05 & 0x01u) << 7u));
+            sum = (unsigned)v04 + half;
+            v04 = (uint8_t)sum;
+            v05 = (uint8_t)(v05 + (sum >> 8u));
+            break;
+
+        case 0x03u: /* 1.25x: add the byte-quarter */
+            half = (uint8_t)((v04 >> 1u) | (uint8_t)((v05 & 0x01u) << 7u));
+            sum = (unsigned)v04 + (half >> 1u);
+            v04 = (uint8_t)sum;
+            v05 = (uint8_t)(v05 + (sum >> 8u));
+            break;
+
+        case 0x02u: /* 1x */
+            break;
+
+        case 0x05u: /* 1.62x: v + half + eighth */
+            half = (uint8_t)((v04 >> 1u) | (uint8_t)((v05 & 0x01u) << 7u));
+            a = (uint8_t)((uint8_t)((half >> 1u) >> 1u) + half);
+            sum = (unsigned)v04 + a;
+            v04 = (uint8_t)sum;
+            v05 = (uint8_t)(v05 + (sum >> 8u));
+            break;
+
+        case 0x06u: /* 1.75x: v + half + quarter (byte-truncated, ROM quirk) */
+            half = (uint8_t)((v04 >> 1u) | (uint8_t)((v05 & 0x01u) << 7u));
+            a = (uint8_t)((uint8_t)(half >> 1u) + half);
+            sum = (unsigned)v04 + a;
+            v04 = (uint8_t)sum;
+            v05 = (uint8_t)(v05 + (sum >> 8u));
+            break;
+
+        case 0x07u: /* 1.87x: v + half + quarter + eighth (byte-truncated) */
+        default:
+            half = (uint8_t)((v04 >> 1u) | (uint8_t)((v05 & 0x01u) << 7u));
+            a = (uint8_t)((uint8_t)(half >> 1u) + half);
+            a = (uint8_t)(a + (uint8_t)((uint8_t)(half >> 1u) >> 1u));
+            sum = (unsigned)v04 + a;
+            v04 = (uint8_t)sum;
+            v05 = (uint8_t)(v05 + (sum >> 8u));
+            break;
+    }
+    return (uint16_t)(((uint16_t)v05 << 8u) | v04);
 }
 
 /* create_enemy_bullet (bank7): spawn a type-1 enemy bullet at (px,py) aimed by
@@ -6982,6 +7066,20 @@ static void contra_rom_enemy_bullet_routine_01(ContraCore *core, uint8_t x)
     /* the ROM continues unconditionally after update_enemy_pos even when the
        bullet was just removed -- the writes below land in the husk, and
        advance_enemy_routine no-ops on routine 0, exactly like the ROM */
+    if (core->ram[CONTRA_RAM_ENEMY_VAR_1 + x] == 0x00u)
+    {
+        /* regular bullet (bank0:405-411): on levels that flag solid bullet-bg
+           collision (LEVEL_SOLID_BG_COLLISION_CHECK bit 7), remove the bullet
+           when it flies into solid background. */
+        if (((core->ram[CONTRA_RAM_LEVEL_SOLID_BG_COLLISION_CHECK] & 0x80u) != 0u) &&
+            (contra_rom_get_bg_collision_far(
+                 core, core->ram[CONTRA_RAM_ENEMY_X_POS + x],
+                 core->ram[CONTRA_RAM_ENEMY_Y_POS + x]) == 0x80u))
+        {
+            contra_rom_remove_enemy(core, x);
+        }
+        return;
+    }
     if (core->ram[CONTRA_RAM_ENEMY_VAR_1 + x] == 0x01u)
     {
         /* cannonball_add_gravity_explode (bank0:457): the large cannonball
@@ -11077,11 +11175,15 @@ static void contra_rom_bullet_generation(
    fails, so the buffer-full retry path is unreachable). */
 static void contra_rom_draw_enemy_supertile_a_set_delay(ContraCore *core, uint8_t x, uint8_t supertile)
 {
+    /* draw_enemy_supertile_a_set_delay (bank7:8599) sets ANIMATION_DELAY = 1
+       only when the draw FAILS (CPU graphics buffer full -> retry next frame).
+       The native renderer cannot fail, so the caller's delay always stands --
+       the port used to write 1 unconditionally here, which made the rotating
+       gun open and rotate every frame instead of on its 8/0x30-frame beats. */
     contra_render_level_1_nametable_update_supertile(
         core, (int)core->ram[CONTRA_RAM_ENEMY_X_POS + x],
         (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + x], supertile);
     core->l1_supertile[x] = supertile; /* persist for the per-frame L1 redraw */
-    core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u;
 }
 
 static const uint8_t contra_rotating_gun_bullets_per_attack_tbl[4] = {0x01u, 0x02u, 0x03u, 0x03u};
@@ -11153,8 +11255,7 @@ static void contra_rom_rotating_gun_routine_02(ContraCore *core, uint8_t x)
     {
         return;
     }
-    /* draw the next opening super-tile (offset 3 + FRAME); set_delay drops the
-       delay to 1 so the animation steps each frame. */
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x08u; /* next opening step in 8 frames */
     contra_rom_draw_enemy_supertile_a_set_delay(
         core, x, (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 0x03u));
     ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
@@ -11262,10 +11363,11 @@ static void contra_rom_rotating_gun_routine_06(ContraCore *core, uint8_t x)
     {
         return;
     }
-    contra_render_level_1_nametable_update_supertile(
-        core, (int)core->ram[CONTRA_RAM_ENEMY_X_POS + x],
-        (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + x], 0x16u);
-    contra_rom_begin_enemy_explosion(core, x);
+    /* draw_enemy_supertile_a + cache the rock so the per-frame L1 redraw shows
+       it; the ROM then advances into its own appended explosion routines,
+       keeping ENEMY_TYPE 0x04 (not the shared 0xFE actor). */
+    contra_rom_draw_enemy_supertile_a_set_delay(core, x, 0x16u);
+    contra_rom_advance_enemy_routine(core, x); /* -> enemy_routine_init_explosion */
 }
 
 /* --- red turret active rotate-and-fire (enemy type 0x07), bank0.asm:1072-1199 ---
@@ -12133,13 +12235,13 @@ static void contra_rom_exploding_bridge_routine_04(ContraCore *core, uint8_t x)
     ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] + 1u);
     if (ram[CONTRA_RAM_ENEMY_VAR_1 + x] >= 0x04u)
     {
-        contra_rom_clear_enemy(core, x); /* all sections gone */
+        contra_rom_remove_enemy_offscreen(core, x); /* all sections gone; ROM remove_enemy keeps type */
         return;
     }
     nx = (unsigned)ram[CONTRA_RAM_ENEMY_X_POS + x] + 0x20u;
     if (nx > 0xFFu)
     {
-        contra_rom_clear_enemy(core, x);
+        contra_rom_remove_enemy_offscreen(core, x);
         return;
     }
     ram[CONTRA_RAM_ENEMY_X_POS + x] = (uint8_t)nx;
@@ -12297,9 +12399,8 @@ static void contra_rom_boss_door_routine_06(ContraCore *core, uint8_t x)
         return;
     }
     /* delay reached 0: stamp this cell's tunnel super-tile + explosion, advance.
-       In the ROM the delay is set to 8 before the draw and a successful draw leaves
-       it alone; the native draw helper unconditionally writes delay=1 (a side effect
-       other callers rely on), so set the 8 *after* the draw for the same net result. */
+       The ROM sets the 8-frame delay before the draw; setting it after is
+       equivalent now that the draw helper no longer touches the delay. */
     idx = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
     contra_rom_draw_enemy_supertile_a_set_delay(core, x, contra_door_tunnel_supertile_tbl[idx]);
     contra_rom_create_explosion_at(
@@ -16022,7 +16123,11 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x05u: contra_rom_rotating_gun_routine_04(core, x); break;
                 case 0x06u: contra_rom_rotating_gun_routine_05(core, x); break;
                 case 0x07u: contra_rom_rotating_gun_routine_06(core, x); break;
-                default: break; /* explosion via the 0xFE actor */
+                /* routines 8-10: the appended shared explosion trio, type kept */
+                case 0x08u: contra_rom_enemy_routine_init_explosion_inplace(core, x); break;
+                case 0x09u: contra_rom_enemy_routine_explosion_inplace(core, x); break;
+                case 0x0Au: contra_rom_enemy_routine_remove_inplace(core, x); break;
+                default: break;
             }
             break;
         case 0x01u: /* enemy bullet */
@@ -16495,6 +16600,13 @@ static void contra_rom_check_players_collision(ContraCore *core, uint8_t slot)
             continue;
         }
         contra_kill_player(core, (uint8_t)p);
+        /* bank7:6863-6866: the enemy BULLET that hit the player is removed
+           (remove_current_enemy keeps the type-01 husk); other enemy types
+           survive the collision. */
+        if (ram[CONTRA_RAM_ENEMY_TYPE + slot] == 0x01u)
+        {
+            contra_rom_remove_enemy(core, (uint8_t)slot);
+        }
     }
 }
 
