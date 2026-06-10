@@ -110,6 +110,7 @@ static void contra_rom_destroy_all_enemies(ContraCore *core, int keep_slot);
 static void contra_rom_add_10_to_enemy_y_fract_vel(ContraCore *core, uint8_t x);
 static void contra_rom_add_a_to_enemy_y_fract_vel(ContraCore *core, uint8_t x, uint8_t a);
 static uint8_t contra_rom_get_bg_collision_far(const ContraCore *core, uint8_t x, uint8_t y);
+static void contra_rom_add_player_score(ContraCore *core, uint8_t player, uint8_t add_lo, uint8_t add_hi);
 static void contra_rom_create_explosion_at(ContraCore *core, uint8_t px, uint8_t py);
 static void contra_rom_create_explosion_sequence(
     ContraCore *core, uint8_t px, uint8_t py, uint8_t state_width, uint8_t routine);
@@ -12672,17 +12673,23 @@ static void contra_rom_destroy_all_enemies(ContraCore *core, int keep_slot)
     }
 }
 
-/* pick_up_weapon_item (bank7:6860): the player touched a weapon item -- apply the
-   weapon change for ATTRIBUTES & 0x07 (R adds rapid fire; M/F/S/L replace and drop
-   rapid fire unless it's the same weapon; B grants the barrier timer; falcon wipes
-   the screen), then remove the item. (Score/sound award is deferred, like the rest
-   of the faithful path.) */
+/* pick_up_weapon_item (bank7:6884): the player touched a weapon item -- award
+   1,000 points (#$0A via add_player_low_score, demo-gated), then apply the
+   weapon change for ATTRIBUTES & 0x07 (R adds rapid fire; M/F/S/L replace and
+   drop rapid fire unless it's the same weapon; B grants the barrier timer;
+   falcon wipes the screen), then remove the item. */
 static void contra_rom_pick_up_weapon_item(ContraCore *core, uint8_t slot, uint8_t player)
 {
     uint8_t *const ram = core->ram;
     const uint8_t attrs = (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTRIBUTES + slot] & 0x07u);
     uint8_t item_type;
     uint8_t keep_mask;
+
+    if (ram[CONTRA_RAM_DEMO_MODE] == 0u)
+    {
+        contra_rom_add_player_score(core, player, 0x0Au, 0x00u); /* 1,000 points */
+    }
+    contra_play_sound(core, 0x1Fu); /* sound_1f: weapon item taken */
 
     if (attrs == 0u)
     {

@@ -39,6 +39,10 @@ local oam_dump_path = os.getenv("CONTRA_MESEN_PLAY_OAM_DUMP_PATH")
 local nametable_dump_path = os.getenv("CONTRA_MESEN_PLAY_NAMETABLE_DUMP_PATH")
 local palette_dump_path = os.getenv("CONTRA_MESEN_PLAY_PALETTE_DUMP_PATH")
 local framebuffer_dump_path = os.getenv("CONTRA_MESEN_PLAY_FRAMEBUFFER_DUMP_PATH")
+-- side-channel score trace ("frame score16" per line); does not touch the
+-- recording schema
+local score_trace_path = os.getenv("CONTRA_MESEN_PLAY_SCORE_TRACE_PATH")
+local score_trace = score_trace_path and io.open(score_trace_path, "w") or nil
 local output = io.open(output_path, "w")
 
 if output == nil then
@@ -366,6 +370,12 @@ local function emit_frame()
     if replay_path == nil or frame % 600 == 0 then
         output:flush()
     end
+
+    if score_trace ~= nil then
+        score_trace:write(string.format(
+            "%u %u\n", frame,
+            read_ram(0x7E2) + read_ram(0x7E3) * 256))
+    end
 end
 
 local function on_end_frame()
@@ -378,6 +388,9 @@ local function on_end_frame()
     end
 
     if max_frame > 0 and frame >= max_frame then
+        if score_trace ~= nil then
+            score_trace:close()
+        end
         output:close()
         emu.stop(0)
     end

@@ -287,6 +287,10 @@ int main(int argc, char **argv)
     const char *const chr_dump_path = getenv("CONTRA_NATIVE_PLAY_CHR_DUMP_PATH");
     const char *const supertile_dump_path = getenv("CONTRA_NATIVE_PLAY_SUPERTILE_DUMP_PATH");
     const char *const rng_mode_text = getenv("CONTRA_NATIVE_PLAY_RNG");
+    /* side-channel score trace ("frame score16" per line, P1 score at $07E2/3);
+       pairs with the recorder's CONTRA_MESEN_PLAY_SCORE_TRACE_PATH */
+    const char *const score_trace_path = getenv("CONTRA_NATIVE_PLAY_SCORE_TRACE_PATH");
+    FILE *score_trace = (score_trace_path != NULL) ? fopen(score_trace_path, "w") : NULL;
     const bool rng_free = (rng_mode_text != NULL) && (strcmp(rng_mode_text, "free") == 0);
     const bool use_latched = (input_mode_text != NULL) && (strcmp(input_mode_text, "latched") == 0);
     const long input_offset = (input_offset_text != NULL) ? strtol(input_offset_text, NULL, 10) : 0;
@@ -573,6 +577,17 @@ int main(int argc, char **argv)
             fnv1a_bytes(core.ppu_palette, sizeof(core.ppu_palette)),
             fnv1a_bytes(core.framebuffer, sizeof(core.framebuffer))
         );
+
+        if (score_trace != NULL)
+        {
+            fprintf(score_trace, "%u %u\n", frame,
+                    (unsigned)ram[0x7E2u] + ((unsigned)ram[0x7E3u] << 8u));
+        }
+    }
+
+    if (score_trace != NULL)
+    {
+        fclose(score_trace);
     }
 
     if ((native_fc_count > 0u) && (native_fc_count < ALIGNMENT_WINDOW))
