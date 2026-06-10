@@ -14269,9 +14269,12 @@ static void contra_rom_dragon_arm_orb_pat_1_2_3_or_4(ContraCore *core, uint8_t x
             }
             if ((ram[CONTRA_RAM_ENEMY_VAR_3 + cur] & 0x80u) != 0u)
             {
-                /* whole arm reached the spin-out index: random delay, advance to hook */
+                /* whole arm reached the spin-out index: random delay, advance to
+                   hook. The ROM's `adc FRAME_COUNTER` (bank0:5077) carries in 1:
+                   this path is only reached through the equality cmp against
+                   dragon_arm_frame_02_tbl, which leaves the carry SET. */
                 const uint8_t idx = (uint8_t)((ram[CONTRA_RAM_RANDOM_NUM] +
-                                               ram[CONTRA_RAM_FRAME_COUNTER]) & 0x03u);
+                                               ram[CONTRA_RAM_FRAME_COUNTER] + 1u) & 0x03u);
                 ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = contra_dragon_arm_delay_tbl[idx];
                 ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
                 return;
