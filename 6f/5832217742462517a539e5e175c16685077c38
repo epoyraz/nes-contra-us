@@ -1,0 +1,21 @@
+port/contra_core/src/core.c
+  s_d6f4243e7218de::t_3cf81a851a36b2 6454-6459
+  s_d6f4243e7218de::t_1453340b0d7327 4571-4601,4841-4867,4869,4892-4916,4993,5010,16409-16412,16418,16511
+  s_d6f4243e7218de::t_85f9871da52a0d 4868,4870-4871
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "6f5832217742462517a539e5e175c16685077c38",
+  "prompts": {},
+  "sessions": {
+    "s_d6f4243e7218de": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "825b5bf6-c121-4087-8508-1505c9d1a7d5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
