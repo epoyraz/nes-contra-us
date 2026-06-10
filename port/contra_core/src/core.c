@@ -9172,6 +9172,40 @@ static void contra_rom_create_roller(ContraCore *core, uint8_t px, uint8_t py, u
     contra_rom_create_roller_with_segment(core, px, py, contra_rom_find_far_segment(px), attrs);
 }
 
+/* roller_routine_04 (bank7:7611): show_explosion_a with explosion_type_03
+   ({0x36,0x37}) and only 2 sprites; collision disabled on the last one. */
+static void contra_rom_roller_routine_explosion(ContraCore *core, uint8_t x)
+{
+    static const uint8_t explosion_type_03[2] = {0x36u, 0x37u};
+    uint8_t *const ram = core->ram;
+    uint8_t frame;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    frame = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = frame;
+    if (frame >= 2u)
+    {
+        contra_rom_advance_enemy_routine(core, x);
+        return;
+    }
+    if ((uint8_t)(frame + 1u) >= 2u)
+    {
+        contra_rom_disable_enemy_collision(core, x);
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x0Au;
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = explosion_type_03[frame];
+}
+
 /* roller_routine_00/01 (bank0:2860): start at Y=0x72, then roll down the
    corridor -- the sprite grows (0x99..0x9c) with depth, collision turns on once
    it's close (Y in [0xAC,0xBC)), and it's removed once it rolls past (Y>=0xBC).
@@ -9207,7 +9241,7 @@ static void contra_rom_roller_routine_01(ContraCore *core, uint8_t x)
     ny = ram[CONTRA_RAM_ENEMY_Y_POS + x];
     if (ny >= 0xBCu)
     {
-        contra_rom_clear_enemy(core, x); /* rolled past the player */
+        contra_rom_remove_enemy_offscreen(core, x); /* rolled past: remove_enemy keeps the husk */
     }
     else if (ny >= 0xACu)
     {
@@ -15961,7 +15995,12 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 {
                     case 0x01u: contra_rom_roller_routine_00(core, x); break;
                     case 0x02u: contra_rom_roller_routine_01(core, x); break;
-                    default: break; /* hit/explosion via the 0xFE actor */
+                    /* table tail (bank0:2852-2854): init_explosion,
+                       roller_routine_04 (explosion_type_03), remove_enemy */
+                    case 0x03u: contra_rom_enemy_routine_init_explosion_inplace(core, x); break;
+                    case 0x04u: contra_rom_roller_routine_explosion(core, x); break;
+                    case 0x05u: contra_rom_enemy_routine_remove_inplace(core, x); break;
+                    default: break;
                 }
             }
             break;
@@ -16734,6 +16773,7 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
     for (bullet = 0x0F; bullet >= 0; --bullet)
     {
         const unsigned b = (unsigned)bullet;
+        uint8_t borrow = 1u;
         uint8_t diff;
         uint8_t hp;
 
@@ -16754,17 +16794,27 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
                     continue;
                 }
             }
-            else if ((ram[CONTRA_RAM_PLAYER_BULLET_SLOT + b] & 0x80u) == 0u)
+            else
             {
-                continue;
+                if ((ram[CONTRA_RAM_PLAYER_BULLET_SLOT + b] & 0x80u) == 0u)
+                {
+                    continue;
+                }
+                /* indoor floor enemies reach the box test through the SLOT
+                   bit-7 path, where the 6502 carry is still SET from the
+                   location-type lsr (bank7:6973) -- no -1 borrow. The outdoor
+                   path (carry clear from the lsr) and the indoor wall-enemy
+                   path (carry clear from `cmp #$02` with timer < 2) keep it. */
+                borrow = 0u;
             }
         }
-        /* outdoor box test (the ROM enters with carry clear -> the -1 borrow) */
-        diff = (uint8_t)(ram[CONTRA_RAM_PLAYER_BULLET_Y_POS + b] - box_y - 1u);
+        diff = (uint8_t)(ram[CONTRA_RAM_PLAYER_BULLET_Y_POS + b] - box_y - borrow);
         if (diff >= box[2])
         {
             continue;
         }
+        /* the X sbc's borrow is always 1: its carry comes from the Y `cmp`,
+           which is clear whenever the Y test passed (bank7:6990) */
         diff = (uint8_t)(ram[CONTRA_RAM_PLAYER_BULLET_X_POS + b] - box_x - 1u);
         if (diff >= box[3])
         {
@@ -16832,6 +16882,10 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
             {
                 dest_routine = 0x04u; /* group of 4: nibble $43 high (bank7:8110)
                                          -- straight to the knockback animation */
+            }
+            else if ((is_indoor_base != 0) && (dead_type == 0x11u))
+            {
+                dest_routine = 0x03u; /* roller: nibble $43 low -> init_explosion */
             }
             else if ((dead_type == 0x15u) && (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x02u))
             {

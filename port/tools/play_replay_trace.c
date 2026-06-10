@@ -337,7 +337,24 @@ int main(int argc, char **argv)
         uint8_t p2_fed;
         unsigned slot;
 
-        if ((source >= 1) && (source <= (long)last_frame) && rows[source].has_row)
+        /* LAG SCHEDULE: a recording row whose FRAME_COUNTER equals the previous
+           row's marks a real-NES lag frame (the ROM's main loop overran the
+           video frame -- e.g. the six-roller room): the game logic never ran
+           and the controller was never polled. Skip stepping the core for that
+           video frame -- unless the native side is in one of its own modeled
+           stalls (level loads / transitions), which freeze the counter on both
+           sides in lockstep already. The recorder's snapshot of a lag frame is
+           a torn mid-iteration state, so the comparator skips those rows. */
+        const bool lag_frame =
+            (source >= 2) && (source <= (long)last_frame) &&
+            rows[source].has_row && rows[source].has_frame_counter &&
+            rows[source - 1].has_row && rows[source - 1].has_frame_counter &&
+            (rows[source].frame_counter == rows[source - 1].frame_counter) &&
+            (core.startup_wait_frames == 0u) &&
+            (core.level_graphics_wait_frames == 0u) &&
+            (core.frame_stall_frames == 0u);
+
+        if (!lag_frame && (source >= 1) && (source <= (long)last_frame) && rows[source].has_row)
         {
             const PlayInputRow *const row = &rows[source];
 
@@ -369,8 +386,11 @@ int main(int argc, char **argv)
         p1_fed = input.player[0];
         p2_fed = input.player[1];
 
-        contra_core_set_input(&core, &input);
-        contra_core_step_frame(&core);
+        if (!lag_frame)
+        {
+            contra_core_set_input(&core, &input);
+            contra_core_step_frame(&core);
+        }
 
         if (native_fc_count < ALIGNMENT_WINDOW)
         {

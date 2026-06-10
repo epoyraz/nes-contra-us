@@ -125,6 +125,13 @@ def main(argv):
     broken = False
     field_counts = Counter()
     for f in common:
+        # A mesen row whose FRAME_COUNTER equals the previous row's is a real-NES
+        # lag frame: the game loop never finished, so the recorder's snapshot is
+        # a torn mid-iteration state and the replay skips stepping that frame
+        # (the lag schedule). Skip comparing it.
+        prev = mesen.get(f - 1)
+        if prev is not None and prev.get("frame_counter") == mesen[f].get("frame_counter"):
+            continue
         keys = gameplay_diff(native[f], mesen[f])
         if not keys:
             if not broken:
