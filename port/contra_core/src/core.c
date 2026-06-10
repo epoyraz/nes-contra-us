@@ -9622,17 +9622,16 @@ static void contra_rom_grenade_routine_01(ContraCore *core, uint8_t x)
     }
 }
 
-/* grenade_routine_02 (bank0:3029): explode at the bottom, set the blast's
-   player-collision box (mortar_shot_routine_03), then start the explosion. */
+/* grenade_routine_02 (bank0:3029): explode at the bottom -- sound, Y=0xAC, the
+   blast's player-collision box via mortar_shot_routine_03 (whose shared tail
+   ALSO advances), then advance again: the landing frame ends at the explosion
+   routine (RAM 3 -> 5), skipping a visible init_explosion frame. */
 static void contra_rom_grenade_routine_02(ContraCore *core, uint8_t x)
 {
-    uint8_t *const ram = core->ram;
-
-    ram[CONTRA_RAM_ENEMY_Y_POS + x] = 0xACu;
-    ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = 0x0Du;
-    ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
-        (uint8_t)((ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0xBEu) | 0x80u);
-    contra_rom_begin_enemy_explosion(core, x);
+    contra_play_sound(core, 0x24u);
+    core->ram[CONTRA_RAM_ENEMY_Y_POS + x] = 0xACu;
+    contra_rom_mortar_shot_routine_03(core, x); /* advances 3 -> 4 */
+    contra_rom_advance_enemy_routine(core, x);  /* and 4 -> 5 */
 }
 
 /* ===== level-2 grenade launcher (0x17, "seeking guy"), bank0:3680 ==========
@@ -16809,7 +16808,13 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                     case 0x01u: contra_rom_grenade_routine_00(core, x); break;
                     case 0x02u: contra_rom_grenade_routine_01(core, x); break;
                     case 0x03u: contra_rom_grenade_routine_02(core, x); break;
-                    default: break; /* explosion via the 0xFE actor */
+                    /* appended trio: destroy_all (e.g. the boss core dying) raises
+                       a mid-air grenade to 4 via its nibble and the explosion runs
+                       in place */
+                    case 0x04u: contra_rom_enemy_routine_init_explosion_inplace(core, x); break;
+                    case 0x05u: contra_rom_enemy_routine_explosion_inplace(core, x); break;
+                    case 0x06u: contra_rom_enemy_routine_remove_inplace(core, x); break;
+                    default: break;
                 }
             }
             break;
