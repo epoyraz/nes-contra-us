@@ -10,14 +10,6 @@
 
 @import url(https://fonts.googleapis.com/css?family=Prosto+One);
 
-@font-face {
-  font-family: 'Pretendo';
-  src: url('http://remleyinvitational.com/fonts/pretendo-webfont.eot');
-  src: url('http://remleyinvitational.com/fonts/pretendo-webfont.woff') format('woff'),
-       url('http://remleyinvitational.com/fonts/pretendo-webfont.ttf')  format('truetype'),
-       url('http://remleyinvitational.com/fonts/pretendo-webfont.svg#svgPretendo') format('svg');
-}
-
 /* ----------------------------------------------------------------------- */
 /* Page layout (not from the pen)                                          */
 /* ----------------------------------------------------------------------- */
@@ -155,7 +147,7 @@ body {
   left: 383px;
   color: #cc0000;
   font-size: 24px;
-  font-family: "Pretendo", Pretendo, "Prosto One", sans-serif;
+  font-family: "Prosto One", sans-serif;
 }
 
 #mid-stripe {
