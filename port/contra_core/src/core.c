@@ -2604,14 +2604,25 @@ static bool contra_create_flame_bullet(ContraCore *core, uint8_t player_index)
         rapid_fire ? contra_f_bullet_velocity_fract_rapid : contra_f_bullet_velocity_fract,
         aim_dir
     );
-    center_x =
-        (int)ram[CONTRA_RAM_PLAYER_BULLET_X_POS + (size_t)bullet_slot] + contra_f_bullet_center_offset_tbl[aim_dir][0];
-    center_y =
-        (int)ram[CONTRA_RAM_PLAYER_BULLET_Y_POS + (size_t)bullet_slot] + contra_f_bullet_center_offset_tbl[aim_dir][1];
-    if ((center_y < 0) || (center_y > 0xFF) || (center_x < 0) || (center_x > 0xFF))
+    /* f_bullet_outdoor_init_center (bank6:1028): the X center is a plain 8-bit
+       add (it WRAPS -- a left shot near the screen edge gets FS_X=0xFF, never
+       killed); only the Y center is screened, with the 6502 carry: a positive
+       offset kills on overflow past the bottom, a negative offset kills when
+       the add does NOT carry (shot off the top). */
+    center_x = (uint8_t)(ram[CONTRA_RAM_PLAYER_BULLET_X_POS + (size_t)bullet_slot] +
+                         (uint8_t)contra_f_bullet_center_offset_tbl[aim_dir][0]);
     {
-        contra_clear_player_bullet(core, (size_t)bullet_slot);
-        return false;
+        const int8_t off_y = contra_f_bullet_center_offset_tbl[aim_dir][1];
+        const uint16_t sum_y = (uint16_t)ram[CONTRA_RAM_PLAYER_BULLET_Y_POS + (size_t)bullet_slot] +
+                               (uint8_t)off_y;
+        const bool carry = sum_y > 0xFFu;
+
+        if ((off_y >= 0) ? carry : !carry)
+        {
+            contra_clear_player_bullet(core, (size_t)bullet_slot);
+            return false;
+        }
+        center_y = (uint8_t)sum_y;
     }
 
     ram[CONTRA_RAM_PLAYER_BULLET_TIMER + (size_t)bullet_slot] = contra_f_bullet_initial_timer_tbl[aim_dir];
