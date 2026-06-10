@@ -5242,10 +5242,22 @@ static void contra_animate_indoor_fence(ContraCore *core)
         }
         base = (uint8_t)((ram[CONTRA_RAM_FRAME_COUNTER] & 0x0Cu) << 1u); /* 0x00/0x08/0x10/0x18 */
     }
+    else if ((ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] & 0x80u) == 0u)
+    {
+        base = 0x20u; /* screen cleared: blank overlay removes the fence (once) */
+        ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] = 0x80u;
+    }
     else
     {
-        base = 0x20u; /* screen cleared: blank overlay removes the fence */
+        return; /* fence already removed */
     }
+
+    /* the fence CHR rewrite occupies 0x45 bytes of CPU_GRAPHICS_BUFFER
+       (header 5 + 0x40 pattern bytes) -- on these frames a full enemy
+       super-tile stamp finds the buffer past its 0x40 entry check and must
+       retry next frame (bank7:1353). */
+    ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] =
+        (uint8_t)(ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] + 0x45u);
 
     for (y = 0u; y < 0x40u; ++y)
     {
@@ -8710,6 +8722,16 @@ static void contra_rom_wall_core_routine_08(ContraCore *core, uint8_t x)
     q = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_3 + x] & 0x03u);
     ram[CONTRA_RAM_ENEMY_Y_POS + x] = contra_level_2_wall_core_update_y_tbl[q];
     ram[CONTRA_RAM_ENEMY_X_POS + x] = contra_level_2_wall_core_update_x_tbl[q];
+    if (ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] >= 0x40u)
+    {
+        /* draw_enemy_supertile_a failed -- CPU_GRAPHICS_BUFFER already holds
+           this frame's fence CHR rewrite (bank7:1353 entry check). The ROM's
+           @set_delay_exit retries next frame, with the position already moved. */
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u;
+        return;
+    }
+    ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] =
+        (uint8_t)(ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] + 0x21u); /* the super-tile stamp */
     core->l2_blowopen_quadrants = (uint8_t)(core->l2_blowopen_quadrants | (uint8_t)(1u << q));
     contra_rom_create_explosion_sequence(
         core,
@@ -19203,6 +19225,12 @@ void contra_core_step_frame(ContraCore *core)
         contra_render_frame(core, true);
         return;
     }
+
+    /* the NMI flushed CPU_GRAPHICS_BUFFER at the end of the previous frame:
+       this frame's writers (fence animation, enemy super-tile stamps) start
+       from an empty buffer. Only the BUDGET is modeled (ram[$21]); the actual
+       pixels go straight to the native renderer. */
+    core->ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = 0x00u;
 
     contra_flush_pending_horizontal_level_writes(core);
     contra_process_level_1_weapon_box_restore(core);
