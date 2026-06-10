@@ -3390,10 +3390,15 @@ static uint8_t contra_get_outdoor_horizontal_bg_collision(
         }
     }
 
+    /* BG_COLLISION_DATA granularity (set_tile_collision, bank7:6222): the ROM
+       classifies ONE pattern tile per 16x16 quadrant -- the quadrant's top-left
+       8x8 tile (odd nametable columns and rows are skipped during the build).
+       Snap the probe to that tile or probes in a quadrant's right/bottom 8px
+       read a tile the ROM never consults. */
     if (!contra_read_level_collision_pattern_index(
             core,
-            (uint16_t)(world_pixel_x >> 3u),
-            (uint8_t)((screen_y - 0x10u) >> 3u),
+            (uint16_t)((world_pixel_x >> 3u) & ~(uint16_t)1u),
+            (uint8_t)(((screen_y - 0x10u) >> 3u) & 0xFEu),
             &pattern_index))
     {
         return 0u;
@@ -3427,21 +3432,47 @@ static uint8_t contra_get_outdoor_bg_collision(
     }
 
     {
-        /* Match the vertical renderer's next-screen-above mapping: the framebuffer
-           top sits `240 - scroll_off` into the two-screen column (upper half = next
-           screen, lower half = current). */
+        /* bg_collision_logic (bank7:6439): $11 = Y + VERTICAL_SCROLL, +0x10 when
+           the 8-bit add carries OR lands in 0xF0..0xFF (skipping the attribute
+           rows). BG_COLLISION_DATA is a 15-row ring updated as the level streams:
+           a row belongs to the NEXT screen once it has fully scrolled in at the
+           window top (row*16 >= VERTICAL_SCROLL), and still holds the CURRENT
+           screen's stale data otherwise -- including rows that have scrolled off
+           the bottom. The waterfall soldier generator depends on the stale rows:
+           probes at y=0..6 wrap to ring row 12 (only partially revealed for the
+           next screen) and find the current screen's lone left-column floor
+           (frame 20968), while freshly streamed top-of-screen soldiers stand on
+           fully-revealed next-screen rows (frame 16121). */
         const uint8_t screen_number = core->ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER];
-        const uint16_t combined =
-            (uint16_t)((240u - (uint16_t)core->ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET]) +
-                       (uint16_t)screen_y);
-        const uint8_t data_screen = (combined < 240u) ? (uint8_t)(screen_number + 1u) : screen_number;
-        const uint16_t row_px = (combined < 240u) ? combined : (uint16_t)(combined - 240u);
-        const uint16_t world_tile_y = (uint16_t)((uint16_t)data_screen * 30u + (row_px >> 3u));
+        const uint8_t vs = core->ram[CONTRA_RAM_VERTICAL_SCROLL];
+        /* the next screen's rows stream in at the window top as the level
+           scrolls; rows at/below 240-scroll_off have been written. At off=0
+           (unscrolled screen) the boundary is 240: no ring row belongs to the
+           next screen yet. */
+        const uint16_t streamed_boundary =
+            (uint16_t)(240u - core->ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET]);
+        const uint16_t sum = (uint16_t)screen_y + vs;
+        uint8_t row_px = (uint8_t)sum;
 
-        if (!contra_read_level_collision_pattern_index(
-                core, (uint16_t)(screen_x >> 3u), world_tile_y, &pattern_index))
+        if ((sum > 0xFFu) || (row_px >= 0xF0u))
         {
-            return 0u;
+            row_px = (uint8_t)(row_px + 0x10u);
+        }
+        /* quadrant snap: BG_COLLISION_DATA samples only the top-left tile of
+           each 16x16 quadrant (set_tile_collision, bank7:6222) */
+        {
+            const uint8_t data_screen = ((uint16_t)(row_px & 0xF0u) >= streamed_boundary)
+                ? (uint8_t)(screen_number + 1u)
+                : screen_number;
+            const uint16_t world_tile_y =
+                (uint16_t)((uint16_t)data_screen * 30u +
+                           (((uint16_t)row_px >> 3u) & ~(uint16_t)1u));
+
+            if (!contra_read_level_collision_pattern_index(
+                    core, (uint16_t)((screen_x >> 3u) & 0x1Eu), world_tile_y, &pattern_index))
+            {
+                return 0u;
+            }
         }
     }
 
