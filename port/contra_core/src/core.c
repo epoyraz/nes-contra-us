@@ -10053,10 +10053,35 @@ static bool contra_rom_create_enemy_bullet_angle_a(
 
 /* animate_wall_cannon (bank7:9319): show the current open/close frame super-tile
    and set the 6-frame step delay. */
-static void contra_rom_animate_wall_cannon(ContraCore *core, uint8_t x)
+/* draw_enemy_supertile_a (bank7:1351 update_nametable_supertile) budget: a
+   full 32x32 super-tile stamp fails when GRAPHICS_BUFFER_OFFSET is already
+   >= 0x40 and costs 0x21 bytes -- the boss-room platings/cannons sharing a
+   deploy beat stagger off each other this way. */
+static bool contra_rom_enemy_supertile_draw_budget(ContraCore *core)
 {
+    uint8_t *const ram = core->ram;
+
+    if (ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] >= 0x40u)
+    {
+        return false;
+    }
+    ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] =
+        (uint8_t)(ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] + 0x21u);
+    return true;
+}
+
+/* animate_wall_cannon (bank7:9399): draw_enemy_supertile_a_set_delay -- a
+   failed draw forces ANIMATION_DELAY=1 (retry next frame) and reports it. */
+static bool contra_rom_animate_wall_cannon(ContraCore *core, uint8_t x)
+{
+    if (!contra_rom_enemy_supertile_draw_budget(core))
+    {
+        core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u;
+        return false;
+    }
     core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x06u;
     core->l2_supertile[x] = core->ram[CONTRA_RAM_ENEMY_FRAME + x];
+    return true;
 }
 
 static void contra_rom_wall_cannon_routine_00(ContraCore *core, uint8_t x)
@@ -10080,7 +10105,10 @@ static void contra_rom_wall_cannon_routine_01(ContraCore *core, uint8_t x)
     {
         return;
     }
-    contra_rom_animate_wall_cannon(core, x); /* draw open frame FRAME */
+    if (!contra_rom_animate_wall_cannon(core, x)) /* draw open frame FRAME */
+    {
+        return; /* buffer full: retry next frame */
+    }
     if (ram[CONTRA_RAM_ENEMY_FRAME + x] < 0x02u)
     {
         ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
@@ -10139,7 +10167,10 @@ static void contra_rom_wall_cannon_routine_03(ContraCore *core, uint8_t x)
     {
         return;
     }
-    contra_rom_animate_wall_cannon(core, x); /* draw closing frame */
+    if (!contra_rom_animate_wall_cannon(core, x)) /* draw closing frame */
+    {
+        return; /* buffer full: retry next frame */
+    }
     if (ram[CONTRA_RAM_ENEMY_FRAME + x] != 0u)
     {
         ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] - 1u);
@@ -10153,12 +10184,17 @@ static void contra_rom_wall_cannon_routine_03(ContraCore *core, uint8_t x)
 
 static void contra_rom_record_destroyed_structure(ContraCore *core, uint8_t x);
 
-/* wall_cannon_routine_04 (bank7:9387-9391): draw destroyed super-tile 0x05, then explode. */
+/* wall_cannon_routine_04 (bank7:9387-9391): draw destroyed super-tile 0x05,
+   then advance into the appended in-place explosion trio (bank7:9351-9353). */
 static void contra_rom_wall_cannon_routine_04(ContraCore *core, uint8_t x)
 {
-    core->l2_supertile[x] = 0x05u; /* destroyed super-tile, then explode */
+    if (!contra_rom_enemy_supertile_draw_budget(core))
+    {
+        return; /* draw failed: the routine re-runs next frame */
+    }
+    core->l2_supertile[x] = 0x05u; /* destroyed super-tile */
     contra_rom_record_destroyed_structure(core, x);
-    contra_rom_begin_enemy_explosion(core, x);
+    contra_rom_advance_enemy_routine(core, x);
 }
 
 /* wall_plating_routine_00 (bank7:9407-9409): set 0x80 deploy delay and advance routine. */
@@ -10179,6 +10215,14 @@ static void contra_rom_wall_plating_routine_01(ContraCore *core, uint8_t x)
         return;
     }
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x04u;
+    if (!contra_rom_enemy_supertile_draw_budget(core))
+    {
+        /* draw_enemy_supertile_a_set_delay failure: retry next frame -- this is
+           what splits the four platings' shared deploy beat into two staggered
+           pairs (only two 0x21-byte stamps fit under the 0x40 check). */
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u;
+        return;
+    }
     core->l2_supertile[x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 0x03u); /* deploy frame */
     ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
     if (ram[CONTRA_RAM_ENEMY_FRAME + x] < 0x02u)
@@ -10208,11 +10252,16 @@ static void contra_rom_record_destroyed_structure(ContraCore *core, uint8_t x)
 
 static void contra_rom_wall_plating_routine_03(ContraCore *core, uint8_t x)
 {
-    core->l2_supertile[x] = 0x05u; /* destroyed super-tile, then explode */
+    if (!contra_rom_enemy_supertile_draw_budget(core))
+    {
+        return; /* draw failed: the routine re-runs next frame */
+    }
+    core->l2_supertile[x] = 0x05u; /* destroyed super-tile */
     contra_rom_record_destroyed_structure(core, x);
     core->ram[CONTRA_RAM_WALL_PLATING_DESTROYED_COUNT] =
         (uint8_t)(core->ram[CONTRA_RAM_WALL_PLATING_DESTROYED_COUNT] + 1u);
-    contra_rom_begin_enemy_explosion(core, x);
+    /* bank7:9523: advance into the appended in-place explosion trio */
+    contra_rom_advance_enemy_routine(core, x);
 }
 
 /* ===== level-2 boss room: boss eye (0x10) + eye projectile (0x1B) ===========
@@ -10381,10 +10430,12 @@ static void contra_rom_boss_eye_routine_02(ContraCore *core, uint8_t x)
 /* boss_eye_routine_03 (bank0:2779): reached on every hit (eye HP=1). Decrement
    the real HP (VAR_1); if it's gone the boss is defeated, otherwise flash and
    resume drifting. */
+/* boss_eye_routine_03 (bank0:2737): one "kill" = one real-HP tick (VAR_1); the
+   metal ting, HP back to 1, flash, and back to the drift -- or, exhausted,
+   advance to boss_defeated_routine. */
 static void contra_rom_boss_eye_routine_03(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
-    int slot;
 
     ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] - 1u);
     if (ram[CONTRA_RAM_ENEMY_VAR_1 + x] != 0u)
@@ -10393,30 +10444,41 @@ static void contra_rom_boss_eye_routine_03(ContraCore *core, uint8_t x)
         {
             ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = 0x52u;
         }
+        contra_play_sound(core, 0x16u); /* bullet on metal */
         ram[CONTRA_RAM_ENEMY_HP + x] = 0x01u;
         ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x20u; /* flash red */
         contra_rom_set_enemy_routine_to_a(core, x, 0x03u); /* -> routine_02 (drift) */
         return;
     }
-    /* boss_defeated_routine (bank7:7536): init the APU and play sound_57 (boss
-       destroyed), then mark defeated, wipe the other enemies, and explode the eye.
-       NOTE: the faithful level_boss_defeated (bank7:8330) also sets DELAY_TIME_LOW=0xFF
-       (the post-boss "auto-move" delay), but the port's indoor end-of-level path
-       (level_routine_08) waits while DELAY==0xFF and nothing decrements it (the ROM
-       does so during a post-boss auto-move phase the port doesn't run for the static
-       boss room), so setting it here STALLS the level. Left out until that auto-move /
-       delay-decrement phase is ported; the level still advances to the next stage. */
+    contra_rom_advance_enemy_routine(core, x); /* -> boss_defeated_routine */
+}
+
+/* boss_defeated_routine (bank7:7566), the eye's RAM routine 05: APU init,
+   sound_57, level_boss_defeated (DELAY_TIME_LOW=0xFF + BOSS_DEFEATED_FLAG),
+   the faithful destroy_all_enemies, then fall into the in-place
+   init_explosion. */
+static void contra_rom_boss_eye_defeated_routine(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
     contra_init_apu_channels(core);
-    contra_play_sound(core, 0x57u);                    /* sound_57: boss destroyed */
+    contra_play_sound(core, 0x57u); /* sound_57: boss destroyed */
+    ram[CONTRA_RAM_DELAY_TIME_LOW_BYTE] = 0xFFu;
     ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] = 0x01u;
-    for (slot = 0x0F; slot >= 0; --slot)
-    {
-        if ((uint8_t)slot != x)
-        {
-            contra_rom_clear_enemy(core, (uint8_t)slot);
-        }
-    }
-    contra_rom_begin_enemy_explosion(core, x);
+    contra_rom_destroy_all_enemies(core, (int)x);
+    contra_rom_enemy_routine_init_explosion_inplace(core, x);
+}
+
+/* boss_eye_routine_06 (bank0:2818): hide the sprite, set the level-end delay
+   to 0x60, and remove the eye (husk kept). */
+static void contra_rom_boss_eye_routine_06(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x00u;
+    ram[CONTRA_RAM_DELAY_TIME_LOW_BYTE] = 0x60u;
+    ram[CONTRA_RAM_DELAY_TIME_HIGH_BYTE] = 0x00u;
+    contra_rom_remove_enemy_offscreen(core, x);
 }
 
 static const uint8_t contra_boss_gemini_sprite_tbl[6] = {0x68u, 0x69u, 0x6Au, 0x68u, 0x6Bu, 0x6Cu};
@@ -15916,7 +15978,12 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                     case 0x02u: contra_rom_boss_eye_routine_01(core, x); break;
                     case 0x03u: contra_rom_boss_eye_routine_02(core, x); break;
                     case 0x04u: contra_rom_boss_eye_routine_03(core, x); break;
-                    default: break; /* defeated/explosion handled in routine_03 */
+                    /* table tail (bank0:2670-2672): boss_defeated_routine,
+                       explosion, boss_eye_routine_06 */
+                    case 0x05u: contra_rom_boss_eye_defeated_routine(core, x); break;
+                    case 0x06u: contra_rom_enemy_routine_explosion_inplace(core, x); break;
+                    case 0x07u: contra_rom_boss_eye_routine_06(core, x); break;
+                    default: break;
                 }
             }
             else if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x02u)
@@ -16035,7 +16102,11 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
             {
                 case 0x01u: contra_rom_eye_projectile_routine_00(core, x); break;
                 case 0x02u: contra_rom_eye_projectile_routine_01(core, x); break;
-                default: break; /* explosion via the 0xFE actor */
+                /* table tail (bank0:2804-2806): the in-place explosion trio */
+                case 0x03u: contra_rom_enemy_routine_init_explosion_inplace(core, x); break;
+                case 0x04u: contra_rom_enemy_routine_explosion_inplace(core, x); break;
+                case 0x05u: contra_rom_enemy_routine_remove_inplace(core, x); break;
+                default: break;
             }
             break;
         case 0x1Cu: /* level-4 boss gemini */
@@ -16503,7 +16574,11 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x03u: contra_rom_wall_cannon_routine_02(core, x); break;
                 case 0x04u: contra_rom_wall_cannon_routine_03(core, x); break;
                 case 0x05u: contra_rom_wall_cannon_routine_04(core, x); break;
-                default: break; /* explosion via the 0xFE actor */
+                /* table tail (bank7:9351-9353): the in-place explosion trio */
+                case 0x06u: contra_rom_enemy_routine_init_explosion_inplace(core, x); break;
+                case 0x07u: contra_rom_enemy_routine_explosion_inplace(core, x); break;
+                case 0x08u: contra_rom_enemy_routine_remove_inplace(core, x); break;
+                default: break;
             }
             break;
         case 0x0Au: /* boss-room wall plating */
@@ -16513,7 +16588,11 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x02u: contra_rom_wall_plating_routine_01(core, x); break;
                 case 0x03u: break; /* routine_02: idle, just a target */
                 case 0x04u: contra_rom_wall_plating_routine_03(core, x); break;
-                default: break; /* explosion via the 0xFE actor */
+                /* table tail (bank7:9483-9485): the in-place explosion trio */
+                case 0x05u: contra_rom_enemy_routine_init_explosion_inplace(core, x); break;
+                case 0x06u: contra_rom_enemy_routine_explosion_inplace(core, x); break;
+                case 0x07u: contra_rom_enemy_routine_remove_inplace(core, x); break;
+                default: break;
             }
             break;
         case 0x19u: /* indoor soldier generator */
@@ -16914,6 +16993,10 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
             else if ((is_indoor_base != 0) && (dead_type == 0x11u))
             {
                 dest_routine = 0x03u; /* roller: nibble $43 low -> init_explosion */
+            }
+            else if ((is_indoor_base != 0) && (dead_type == 0x1Bu))
+            {
+                dest_routine = 0x03u; /* eye sphere: nibble $33 low -> init_explosion */
             }
             else if ((dead_type == 0x15u) && (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x02u))
             {
