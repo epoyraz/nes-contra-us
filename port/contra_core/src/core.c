@@ -7497,7 +7497,7 @@ static void contra_rom_weapon_box_routine_03(ContraCore *core, uint8_t x)
     {
         return; /* buffer full: drawn next frame */
     }
-    contra_rom_clear_enemy(core, x); /* remove_enemy */
+    contra_rom_remove_enemy_offscreen(core, x); /* ROM remove_enemy keeps the husk */
 }
 
 /* Defined later (used by the weapon-item landing code); forward-declared so
@@ -7652,7 +7652,7 @@ static void contra_rom_soldier_routine_01(ContraCore *core, uint8_t x)
     /* @enable_set_vel: require ground #$10 below, else remove */
     if (contra_rom_add_y_to_y_pos_get_bg_collision(core, x, 0x10u) == 0u)
     {
-        contra_rom_clear_enemy(core, x); /* no ground (e.g. destroyed bridge) */
+        contra_rom_remove_enemy_offscreen(core, x); /* ROM remove_enemy keeps the husk */
         return;
     }
     contra_rom_enable_enemy_collision(core, x);
@@ -10851,6 +10851,9 @@ static void contra_rom_red_turret_routine_00(ContraCore *core, uint8_t x)
     }
     core->ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0x06u; /* face left */
     contra_rom_advance_enemy_routine(core, x);
+    /* red_turret_adv_routine FALLS THROUGH into add_scroll_to_enemy_pos
+       (bank0:1008): this routine scrolls TWICE on its frame. */
+    contra_rom_add_scroll_to_enemy_pos(core, x);
 }
 
 /* red_turret_routine_01 (bank0:995-1009): wait for player to approach, then advance. */
@@ -10863,6 +10866,7 @@ static void contra_rom_red_turret_routine_01(ContraCore *core, uint8_t x)
     }
     core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u;
     contra_rom_advance_enemy_routine(core, x);
+    contra_rom_add_scroll_to_enemy_pos(core, x); /* the shared fall-through */
 }
 
 /* red_turret_routine_02 (bank0:1012-1050): emerge super-tile animation, enable collision. */
@@ -10882,11 +10886,13 @@ static void contra_rom_red_turret_routine_02(ContraCore *core, uint8_t x)
         return;
     }
     ram[CONTRA_RAM_ENEMY_VAR_2 + x] = 0x02u;
-    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x28u;
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] =
+        (ram[CONTRA_RAM_GAME_COMPLETION_COUNT] != 0u) ? 0x08u : 0x28u;
     ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
         (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x7Fu); /* enable bullet collision */
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x10u;
     contra_rom_advance_enemy_routine(core, x);
+    contra_rom_add_scroll_to_enemy_pos(core, x); /* red_turret_adv_routine falls into add_scroll */
 }
 
 /* red_turret_routine_03/04/05 (active rotate-and-fire, retract, restore) are
@@ -11350,7 +11356,7 @@ static void contra_rom_rotating_gun_routine_05(ContraCore *core, uint8_t x)
     contra_render_level_1_nametable_update_supertile(
         core, (int)core->ram[CONTRA_RAM_ENEMY_X_POS + x],
         (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + x], 0x03u);
-    contra_rom_clear_enemy(core, x); /* remove_enemy */
+    contra_rom_remove_enemy_offscreen(core, x); /* ROM remove_enemy keeps the husk */
 }
 
 /* rotating_gun_routine_06 (bank0:933): destroyed -- restore the rock background
@@ -11560,7 +11566,7 @@ static void contra_rom_red_turret_routine_04(ContraCore *core, uint8_t x)
     {
         return; /* more frames to play */
     }
-    contra_rom_clear_enemy(core, x);
+    contra_rom_remove_enemy_offscreen(core, x); /* ROM remove_enemy keeps the husk */
 }
 
 /* red_turret_routine_05 (bank0:1172): destroyed -- restore the rocky/metal
@@ -11574,10 +11580,10 @@ static void contra_rom_red_turret_routine_05(ContraCore *core, uint8_t x)
     {
         return;
     }
-    contra_render_level_1_nametable_update_supertile(
-        core, (int)ram[CONTRA_RAM_ENEMY_X_POS + x], (int)ram[CONTRA_RAM_ENEMY_Y_POS + x],
-        ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x01u) != 0u) ? 0x17u : 0x16u);
-    contra_rom_begin_enemy_explosion(core, x);
+    contra_rom_draw_enemy_supertile_a_set_delay(
+        core, x, ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x01u) != 0u) ? 0x17u : 0x16u);
+    /* the ROM advances into its own appended explosion routines, type kept */
+    contra_rom_advance_enemy_routine(core, x);
 }
 
 /* --- weapon item (enemy type 0x00), bank0.asm:144-356 --- */
@@ -16110,7 +16116,11 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x04u: contra_rom_red_turret_routine_03(core, x); break;
                 case 0x05u: contra_rom_red_turret_routine_04(core, x); break;
                 case 0x06u: contra_rom_red_turret_routine_05(core, x); break;
-                default: break; /* explosion via the 0xFE actor */
+                /* routines 7-9: the appended shared explosion trio, type kept */
+                case 0x07u: contra_rom_enemy_routine_init_explosion_inplace(core, x); break;
+                case 0x08u: contra_rom_enemy_routine_explosion_inplace(core, x); break;
+                case 0x09u: contra_rom_enemy_routine_remove_inplace(core, x); break;
+                default: break;
             }
             break;
         case 0x04u: /* rotating gun */
