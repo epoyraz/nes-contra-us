@@ -4313,6 +4313,14 @@ static bool contra_handle_indoor_player_up_input(ContraCore *core, uint8_t playe
     {
         return false;
     }
+    /* handle_d_pad (bank7:4561) shifts RIGHT, LEFT, DOWN out of the pad first;
+       d_pad_up_pressed only runs when UP is the lone direction. UP+LEFT keeps
+       walking and does NOT arm the room advance (frame 29017). */
+    if ((ram[CONTRA_RAM_CONTROLLER_STATE + player_index] &
+         (CONTRA_BUTTON_RIGHT | CONTRA_BUTTON_LEFT | CONTRA_BUTTON_DOWN)) != 0u)
+    {
+        return false;
+    }
 
     ram[CONTRA_RAM_PLAYER_SPRITE_SEQUENCE + player_index] = 0x01u;
     if (ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] == 0u)
