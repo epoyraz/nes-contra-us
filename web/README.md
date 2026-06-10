@@ -67,5 +67,21 @@ Then open <http://localhost:8000/>.
 | Start  | `Enter` | START |
 | Select | `Shift` | SELECT |
 
+## Deploy to GitHub Pages
+
+`baserom.nes` is embedded into the build and is git-ignored, so GitHub Pages
+can't build this in CI. Instead, build locally and publish the artifacts to the
+`gh-pages` branch (served at the branch root):
+
+```powershell
+pwsh web/deploy-pages.ps1               # build + publish to the `fork` remote
+pwsh web/deploy-pages.ps1 -SkipBuild    # reuse the existing web/dist
+pwsh web/deploy-pages.ps1 -Remote origin
+```
+
+It builds (`web/build.ps1`), then commits `index.html` / `styles.css` /
+`controller.js` / `dist/*` / `.nojekyll` to `gh-pages` via a throwaway worktree
+and pushes. One-time setup: enable Pages with source = `gh-pages`, path = `/`.
+
 Debug warps: open `index.html#level2boss` or `index.html#level4`.
 And yes — the controller still hides the original pen's Konami-code easter egg. 🙂
