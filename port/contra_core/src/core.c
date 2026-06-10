@@ -14327,8 +14327,11 @@ static void contra_rom_dragon_arm_orb_routine_03(ContraCore *core, uint8_t x)
     contra_rom_dragon_arm_orb_set_positions(core, x);
 }
 
-/* dragon_arm_orb_routine_04 (bank0:5419): when the red hand is destroyed, count the
-   arm and blow up the whole chain; a non-hand orb just explodes itself. */
+/* dragon_arm_orb_routine_04 (bank0:5419): when the red hand is destroyed, count
+   the arm and route every parent up the chain through set_destroyed_enemy_
+   routine (their nibble is 5 = this routine, so the cascade re-runs in place one
+   frame later and each orb advances into the explosion trio); the orb itself
+   just advances. */
 static void contra_rom_dragon_arm_orb_routine_04(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -14348,10 +14351,10 @@ static void contra_rom_dragon_arm_orb_routine_04(ContraCore *core, uint8_t x)
                 break; /* reached the shoulder */
             }
             cur = parent;
-            contra_rom_begin_enemy_explosion(core, cur);
+            contra_rom_set_destroyed_enemy_routine(core, cur);
         }
     }
-    contra_rom_begin_enemy_explosion(core, x);
+    contra_rom_advance_enemy_routine(core, x);
 }
 
 static void contra_rom_add_to_enemy_y_fract_vel(ContraCore *core, uint8_t x, uint8_t a)
@@ -16566,7 +16569,10 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                     case 0x03u: contra_rom_dragon_arm_orb_routine_02(core, x); break;
                     case 0x04u: contra_rom_dragon_arm_orb_routine_03(core, x); break;
                     case 0x05u: contra_rom_dragon_arm_orb_routine_04(core, x); break;
-                    default: break; /* explosion via the 0xFE actor */
+                    case 0x06u: contra_rom_enemy_routine_init_explosion_inplace(core, x); break;
+                    case 0x07u: contra_rom_enemy_routine_explosion_inplace(core, x); break;
+                    case 0x08u: contra_rom_enemy_routine_remove_inplace(core, x); break;
+                    default: break;
                 }
             }
             else
