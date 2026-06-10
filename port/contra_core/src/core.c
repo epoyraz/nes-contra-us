@@ -3029,6 +3029,14 @@ static void contra_update_flame_bullet(ContraCore *core, size_t bullet_index)
     const uint8_t aim_dir = ram[CONTRA_RAM_PLAYER_BULLET_AIM_DIR + bullet_index];
     const uint8_t swirl_index = (uint8_t)(ram[CONTRA_RAM_PLAYER_BULLET_TIMER + bullet_index] & 0x0Fu);
 
+    if (ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE + bullet_index] >= 0x02u)
+    {
+        /* consumed: the shared player_bullet_collision_routine freezes the
+           impact ring -- without this the dead fireball kept swirling */
+        contra_update_shared_player_bullet(core, bullet_index);
+        return;
+    }
+
     if (ram[CONTRA_RAM_FRAME_SCROLL] != 0u)
     {
         if (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] == 0u)
@@ -7572,8 +7580,16 @@ static void contra_rom_set_enemy_delay_adv_routine(ContraCore *core, uint8_t x, 
 
 /* set_carry_if_past_trigger_point (bank0.asm:947), horizontal: true if the
    enemy has scrolled left past trigger_x (ENEMY_X_POS < trigger_x). */
-static bool contra_rom_past_trigger_x(const ContraCore *core, uint8_t x, uint8_t trigger_x)
+/* set_carry_if_past_trigger_point (bank0:3870): horizontal levels trigger when
+   the enemy X has scrolled left of trigger_x; the vertical level triggers when
+   the enemy Y has scrolled DOWN past trigger_y. */
+static bool contra_rom_past_trigger_x(const ContraCore *core, uint8_t x,
+                                      uint8_t trigger_x, uint8_t trigger_y)
 {
+    if (core->ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u)
+    {
+        return core->ram[CONTRA_RAM_ENEMY_Y_POS + x] >= trigger_y;
+    }
     return core->ram[CONTRA_RAM_ENEMY_X_POS + x] < trigger_x;
 }
 
@@ -7620,11 +7636,11 @@ static void contra_rom_weapon_box_routine_01(ContraCore *core, uint8_t x)
     {
         return;
     }
-    if (!contra_rom_past_trigger_x(core, x, 0xF0u))
+    if (!contra_rom_past_trigger_x(core, x, 0xF0u, 0x30u))
     {
         return; /* not yet at activation point */
     }
-    if (contra_rom_past_trigger_x(core, x, 0x18u))
+    if (contra_rom_past_trigger_x(core, x, 0x18u, 0xC8u))
     {
         contra_rom_set_enemy_routine_to_a(core, x, 0x04u); /* near left edge: close */
         return;
@@ -7649,7 +7665,7 @@ static void contra_rom_weapon_box_routine_02(ContraCore *core, uint8_t x)
     {
         return;
     }
-    if (contra_rom_past_trigger_x(core, x, 0x18u))
+    if (contra_rom_past_trigger_x(core, x, 0x18u, 0xC8u))
     {
         contra_rom_set_enemy_routine_to_a(core, x, 0x04u);
         return;
@@ -7799,9 +7815,10 @@ static void contra_rom_soldier_routine_01(ContraCore *core, uint8_t x)
     if (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u)
     {
         /* Vertical levels first anchor the soldier to terrain scroll, then use
-           the normal one-decrement spawn delay path. */
+           the normal one-decrement spawn delay path. The guard must check the
+           ROUTINE (the husk-keeping remove_enemy leaves the TYPE in place). */
         contra_rom_add_scroll_to_enemy_pos(core, x);
-        if (ram[CONTRA_RAM_ENEMY_TYPE + x] == 0u)
+        if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
         {
             return;
         }
@@ -8053,6 +8070,31 @@ static void contra_rom_soldier_routine_02(ContraCore *core, uint8_t x)
         return;
     }
 
+    /* @continue (bank0:1356): a firing soldier (attribute bits 2-3) starts an
+       attack round when its delay elapses -- the bullet count comes from
+       get_soldier_num_bullets (RNG + weapon strength). */
+    if (((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x0Cu) != 0u) &&
+        (ram[CONTRA_RAM_ENEMY_ATTACK_FLAG] != 0u))
+    {
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+        if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] == 0u)
+        {
+            static const uint8_t soldier_num_bullets_tbl[8] = {
+                0x01u, 0x01u, 0x02u, 0x01u, 0x02u, 0x01u, 0x02u, 0x02u};
+            const uint8_t idx = (uint8_t)((ram[CONTRA_RAM_RANDOM_NUM] & 0x03u) +
+                ((ram[CONTRA_RAM_PLAYER_WEAPON_STRENGTH] & 0x02u) << 1u));
+
+            ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x80u;
+            ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x08u;
+            ram[CONTRA_RAM_ENEMY_VAR_3 + x] = soldier_num_bullets_tbl[idx & 0x07u];
+            contra_rom_advance_enemy_routine(core, x); /* -> soldier_routine_03 */
+            contra_rom_set_soldier_sprite(core, x);
+            contra_rom_update_enemy_pos(core, x);
+            return;
+        }
+    }
+
     /* @continue_walk_routine: advance the 6-frame run animation every 8 ticks */
     ram[CONTRA_RAM_ENEMY_VAR_A + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_A + x] + 1u);
     if ((ram[CONTRA_RAM_ENEMY_VAR_A + x] & 0x07u) == 0u)
@@ -8270,6 +8312,82 @@ static void contra_rom_apply_gravity_to_destroyed_soldier(ContraCore *core, uint
     {
         contra_rom_advance_enemy_routine(core, x);
     }
+}
+
+/* soldier_routine_03 (bank0:1521): the attack round. Stand (attrs&0x0C < 5) or
+   crouch (>= 5, collision box 0x1B) and fire ENEMY_VAR_3+1 bullets on a 0x10
+   beat, skipping shots whose muzzle would start off-screen; then restore the
+   collision box and walk again. */
+static void contra_rom_soldier_routine_03(ContraCore *core, uint8_t x)
+{
+    static const uint8_t soldier_bullet_y_offset[4] = {0xF7u, 0xF7u, 0x0Au, 0x0Au};
+    static const uint8_t soldier_bullet_x_offset[4] = {0xF0u, 0x10u, 0xF0u, 0x10u};
+    static const uint8_t soldier_bullet_type_tbl[2] = {0x06u, 0x00u};
+    uint8_t *const ram = core->ram;
+    uint8_t yidx;
+    uint8_t bullet_x;
+    unsigned sum;
+
+    if ((uint8_t)(ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x0Cu) < 0x05u)
+    {
+        yidx = 0u; /* standing shot */
+        ram[CONTRA_RAM_ENEMY_FRAME + x] = 0x06u;
+    }
+    else
+    {
+        ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = 0x1Bu; /* crouching box */
+        yidx = 2u;
+        ram[CONTRA_RAM_ENEMY_FRAME + x] = 0x07u;
+    }
+
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] != 0u)
+    {
+        goto sprite_scroll_exit;
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_3 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_3 + x] - 1u);
+    if ((ram[CONTRA_RAM_ENEMY_VAR_3 + x] & 0x80u) != 0u)
+    {
+        /* fired all bullets: stand back up and walk again */
+        ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = 0x10u;
+        ram[CONTRA_RAM_ENEMY_VAR_3 + x] = 0x00u;
+        ram[CONTRA_RAM_ENEMY_FRAME + x] = 0x00u;
+        contra_rom_set_soldier_sprite(core, x);
+        contra_rom_add_scroll_to_enemy_pos(core, x);
+        contra_rom_set_enemy_routine_to_a(core, x, 0x03u); /* -> soldier_routine_02 */
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x10u;
+    if (ram[CONTRA_RAM_ENEMY_VAR_2 + x] != 0u)
+    {
+        yidx = (uint8_t)(yidx + 1u); /* running right */
+    }
+
+    sum = (unsigned)soldier_bullet_x_offset[yidx] + ram[CONTRA_RAM_ENEMY_X_POS + x];
+    bullet_x = (uint8_t)sum;
+    if ((soldier_bullet_x_offset[yidx] & 0x80u) != 0u)
+    {
+        if ((sum < 0x100u) || (bullet_x < 0x08u))
+        {
+            goto sprite_scroll_exit; /* muzzle off-screen to the left */
+        }
+    }
+    else if (sum >= 0x100u)
+    {
+        goto sprite_scroll_exit; /* muzzle off-screen to the right */
+    }
+    contra_rom_bullet_generation(
+        core,
+        soldier_bullet_type_tbl[ram[CONTRA_RAM_ENEMY_VAR_2 + x] & 0x01u],
+        0x06u,
+        bullet_x,
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + soldier_bullet_y_offset[yidx]));
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0x06u; /* gun recoil timer */
+
+sprite_scroll_exit:
+    contra_rom_set_soldier_sprite(core, x);
+    contra_rom_add_scroll_to_enemy_pos(core, x);
 }
 
 /* soldier_routine_04 (bank0.asm:1650): hit -- corpse sprite (frame 0x0B), launch. */
@@ -11219,7 +11337,7 @@ static void contra_rom_red_turret_routine_00(ContraCore *core, uint8_t x)
 /* red_turret_routine_01 (bank0:995-1009): wait for player to approach, then advance. */
 static void contra_rom_red_turret_routine_01(ContraCore *core, uint8_t x)
 {
-    if (!contra_rom_past_trigger_x(core, x, 0xF0u))
+    if (!contra_rom_past_trigger_x(core, x, 0xF0u, 0x40u))
     {
         contra_rom_add_scroll_to_enemy_pos(core, x);
         return; /* player not close yet */
@@ -11567,7 +11685,7 @@ static const uint8_t contra_rotating_gun_bullet_offset_tbl[15] = {
 static bool contra_rom_rotating_gun_should_disable(ContraCore *core, uint8_t x)
 {
     contra_rom_add_scroll_to_enemy_pos(core, x);
-    return contra_rom_past_trigger_x(core, x, 0x18u);
+    return contra_rom_past_trigger_x(core, x, 0x18u, 0xC8u);
 }
 
 /* rotating_gun_disable (bank0:811): retract by jumping to routine_05 (ROUTINE 6),
@@ -11597,7 +11715,7 @@ static void contra_rom_rotating_gun_routine_01(ContraCore *core, uint8_t x)
     {
         return;
     }
-    if (!contra_rom_past_trigger_x(core, x, 0xF0u))
+    if (!contra_rom_past_trigger_x(core, x, 0xF0u, 0x30u))
     {
         return; /* not yet at the activation point */
     }
@@ -11830,7 +11948,7 @@ static void contra_rom_red_turret_routine_03(ContraCore *core, uint8_t x)
     {
         return;
     }
-    if (contra_rom_past_trigger_x(core, x, 0x30u))
+    if (contra_rom_past_trigger_x(core, x, 0x30u, 0xC0u))
     {
         ram[CONTRA_RAM_ENEMY_FRAME + x] = 0x02u; /* retract animation start */
         contra_rom_disable_enemy_collision(core, x);
@@ -16666,6 +16784,7 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x01u: contra_rom_soldier_routine_00(core, x); break;
                 case 0x02u: contra_rom_soldier_routine_01(core, x); break;
                 case 0x03u: contra_rom_soldier_routine_02(core, x); break;
+                case 0x04u: contra_rom_soldier_routine_03(core, x); break;
                 case 0x05u: contra_rom_soldier_routine_04(core, x); break;
                 case 0x06u: contra_rom_soldier_routine_05(core, x); break;
                 case 0x07u: contra_rom_enemy_routine_init_explosion_inplace(core, x); break;
