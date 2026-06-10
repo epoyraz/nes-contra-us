@@ -1,0 +1,33 @@
+port/contra_core/src/core.c
+  s_d6f4243e7218de::t_95497a716b226c 8658-8663
+  s_d6f4243e7218de::t_c6dd025c7aa3ce 8555-8556,8559-8562
+  s_d6f4243e7218de::t_be29d7091f75f3 8553-8554,8564
+  s_d6f4243e7218de::t_b276392abd3ee0 4246
+  s_d6f4243e7218de::t_17788b040aa75b 8612-8613
+  s_d6f4243e7218de::t_c85b94af28d971 16416-16427
+  s_d6f4243e7218de::t_ecf5d41ef3f613 8465-8481,8486-8487
+  s_d6f4243e7218de::t_cb95e4a0af71b3 5304,5306-5324,5327,5329-5336,5340,5345-5346,5348-5350,5354-5356,5359,5361-5365
+  s_d6f4243e7218de::t_bf348b6634c405 8514-8519
+  s_d6f4243e7218de::t_3b8657bf3db87b 4160-4165,4170-4172,4174-4175,4178-4184,4187-4194,4197-4198,4200-4202,4204-4211,4216-4219
+  s_d6f4243e7218de::t_814afd592316d0 16304-16308
+  s_d6f4243e7218de::t_5ab7aada1cd97f 16827,16831-16834
+  s_d6f4243e7218de::t_e655d2a47166bc 8723-8726
+  s_d6f4243e7218de::t_1719fca0871fcb 17246-17247
+  s_d6f4243e7218de::t_aa0c51c402e173 16098-16102
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "9197ecefef55dc98f210b09bf2ce6737969327d4",
+  "prompts": {},
+  "sessions": {
+    "s_d6f4243e7218de": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "825b5bf6-c121-4087-8508-1505c9d1a7d5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
