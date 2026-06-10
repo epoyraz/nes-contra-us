@@ -17781,12 +17781,17 @@ static bool contra_rom_soldier_timer_sub_loop(ContraCore *core, uint8_t step, ui
 /* adjust_generation_timer (bank2:1737): TIMER = per-level base, minus
    0x28 * min(GAME_COMPLETION_COUNT, 3), minus 5 * PLAYER_WEAPON_STRENGTH.
    Returns the 6502 carry at exit -- gen_soldier_find_pos's `adc RANDOM_NUM`
-   consumes it. */
-static bool contra_rom_adjust_soldier_generation_timer(ContraCore *core)
+   consumes it. When BOTH adjustments are skipped (first playthrough, weapon
+   strength 0 -- i.e. after a death before any pickup) nothing in the routine
+   touches the carry, so the exit carry is the CALLER'S: clear from
+   soldier_generation_01's borrowing `sbc #$02`, set from the odd-frame
+   scrolling path's `ror` (FC bit 0 = 1). A wrong carry flips the player pick
+   and the spawn column. */
+static bool contra_rom_adjust_soldier_generation_timer(ContraCore *core, bool carry_in)
 {
     uint8_t *const ram = core->ram;
     const uint8_t completions = ram[CONTRA_RAM_GAME_COMPLETION_COUNT];
-    bool carry = true;
+    bool carry = carry_in;
 
     ram[CONTRA_RAM_SOLDIER_GENERATION_TIMER] =
         contra_level_soldier_generation_timer[ram[CONTRA_RAM_CURRENT_LEVEL] & 0x07u];
@@ -17848,10 +17853,10 @@ static bool contra_rom_check_gen_soldier_bg_collision(ContraCore *core, uint8_t 
    top-down, 1/4 bottom-up, 1/2 upward from the player's Y. The initial probe
    at the start position runs unconditionally (its result is ignored but its
    side effects are real -- faithful to the ROM). */
-static void contra_rom_gen_soldier_find_pos(ContraCore *core)
+static void contra_rom_gen_soldier_find_pos(ContraCore *core, bool tick_carry)
 {
     uint8_t *const ram = core->ram;
-    const bool carry0 = contra_rom_adjust_soldier_generation_timer(core);
+    const bool carry0 = contra_rom_adjust_soldier_generation_timer(core, tick_carry);
     const unsigned pick = (unsigned)ram[CONTRA_RAM_FRAME_COUNTER] +
         (unsigned)ram[CONTRA_RAM_RANDOM_NUM] + (carry0 ? 1u : 0u);
     const bool adc_carry = pick > 0xFFu;
@@ -17889,7 +17894,7 @@ static void contra_rom_soldier_generation_00(ContraCore *core)
     {
         return;
     }
-    (void)contra_rom_adjust_soldier_generation_timer(core);
+    (void)contra_rom_adjust_soldier_generation_timer(core, true);
     ram[CONTRA_RAM_SOLDIER_GENERATION_ROUTINE] =
         (uint8_t)(ram[CONTRA_RAM_SOLDIER_GENERATION_ROUTINE] + 1u);
 }
@@ -17909,16 +17914,17 @@ static void contra_rom_soldier_generation_01(ContraCore *core)
         {
             return;
         }
+        /* entry carry: the `ror` that routed here put FC bit 0 (= 1) in it */
+        contra_rom_gen_soldier_find_pos(core, true);
+        return;
     }
-    else
+    ram[CONTRA_RAM_SOLDIER_GENERATION_TIMER] = (uint8_t)(timer - 2u);
+    if (timer >= 2u)
     {
-        ram[CONTRA_RAM_SOLDIER_GENERATION_TIMER] = (uint8_t)(timer - 2u);
-        if (timer >= 2u)
-        {
-            return; /* no borrow */
-        }
+        return; /* no borrow */
     }
-    contra_rom_gen_soldier_find_pos(core);
+    /* entry carry: clear -- the expiring `sbc #$02` borrowed */
+    contra_rom_gen_soldier_find_pos(core, false);
 }
 
 /* create_default_soldiers (bank2:2092): the 1/3-while-scrolling wave -- THREE
