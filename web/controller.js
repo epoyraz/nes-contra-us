@@ -43,9 +43,9 @@
     Enter: BTN.START,
     ShiftLeft: BTN.SELECT,
     ShiftRight: BTN.SELECT,
-    KeyA: BTN.A,   /* fire (NES A) — home-row friendly on QWERTZ */
-    KeyS: BTN.B,   /* jump (NES B) */
-    Space: BTN.A   /* alt fire   */
+    KeyA: BTN.A,   /* jump (NES A) — home-row friendly on QWERTZ */
+    KeyS: BTN.B,   /* fire (NES B) */
+    Space: BTN.A   /* alt jump   */
   };
 
   /* On-screen controller element id -> button bit. */

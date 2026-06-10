@@ -135,7 +135,8 @@ body {
   /* keep on-screen taps from selecting text / scrolling / zooming */
   user-select: none;
   -webkit-user-select: none;
-  touch-action: manipulation;
+  -webkit-touch-callout: none;
+  touch-action: none;
 }
 
 #inset-area {
@@ -557,11 +558,40 @@ body {
   to   { opacity: 0; }
 }
 
-/* Scale the fixed-width controller down on narrow screens. */
+/* ----------------------------------------------------------------------- */
+/* Mobile / narrow viewports                                               */
+/* ----------------------------------------------------------------------- */
+
+/* Tighten the page chrome and let the game canvas use the full width. */
+@media (max-width: 700px) {
+  body { overflow-x: hidden; }
+  .stage { padding: 18px 8px 36px; }
+  .title { font-size: 11vw; letter-spacing: 3px; text-shadow: 2px 2px 0 #000; }
+  .subtitle { font-size: 12px; margin: 4px 0 16px; }
+  .tv { padding: 10px; border-radius: 10px; }
+  .tv-screen { max-width: 94vw; }
+  .hint { font-size: 12px; line-height: 1.9; margin: 16px 0 22px; }
+}
+
+/* The NES controller is a fixed 600x250px layout, so it can't reflow — scale
+   it to fit the viewport at a few breakpoints. margin-bottom reclaims the
+   blank space the transform leaves behind: 250px * (1 - scale). */
 @media (max-width: 640px) {
   #controller {
     transform: scale(0.62);
     transform-origin: top center;
-    margin-bottom: -95px; /* reclaim the space the scale leaves behind */
+    margin-bottom: -95px;  /* 250 * 0.38 */
+  }
+}
+@media (max-width: 420px) {
+  #controller {
+    transform: scale(0.5);
+    margin-bottom: -125px; /* 250 * 0.50 */
+  }
+}
+@media (max-width: 340px) {
+  #controller {
+    transform: scale(0.44);
+    margin-bottom: -140px; /* 250 * 0.56 */
   }
 }
