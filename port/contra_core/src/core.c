@@ -16880,7 +16880,10 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x01u: contra_rom_scuba_soldier_routine_00(core, x); break;
                 case 0x02u: contra_rom_scuba_soldier_routine_01(core, x); break;
                 case 0x03u: contra_rom_scuba_soldier_routine_02(core, x); break;
-                default: break; /* explosion via the 0xFE actor */
+                case 0x04u: contra_rom_enemy_routine_init_explosion_inplace(core, x); break;
+                case 0x05u: contra_rom_enemy_routine_explosion_inplace(core, x); break;
+                case 0x06u: contra_rom_enemy_routine_remove_inplace(core, x); break;
+                default: break;
             }
             break;
         case 0x0Bu: /* mortar shot */
@@ -17191,6 +17194,11 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
                      ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u) && (dead_type == 0x10u)))
             {
                 dest_routine = 0x04u;
+            }
+            else if ((dead_type == 0x0Bu) || (dead_type == 0x0Cu))
+            {
+                dest_routine = 0x04u; /* mortar shot / scuba diver: nibbles $44/$4x
+                                         (bank7:8104-8105) -> init_explosion */
             }
             else if ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x00u) && (dead_type == 0x10u))
             {
