@@ -13883,9 +13883,11 @@ static void contra_rom_dragon_arm_orb_fire_projectile(ContraCore *core, uint8_t 
     }
     ram[CONTRA_RAM_ENEMY_VAR_A + x] = 0x90u;
     hand = ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x]; /* shoulder stored the hand slot */
+    /* the ROM byte #$80 is TYPE<<5: bullet type 4, the dragon fireball --
+       its larger collision box (code 2) and sprite_79 hang off VAR_1 */
     contra_rom_aim_and_create_enemy_bullet(
         core, ram[CONTRA_RAM_ENEMY_X_POS + hand], ram[CONTRA_RAM_ENEMY_Y_POS + hand],
-        0x80u, 0x05u, contra_quadrant_aim_dir_01);
+        0x04u, 0x05u, contra_quadrant_aim_dir_01);
 }
 
 /* @timer_logic (bank0:5284): apply one orb's rotation-timer adjustment to its
