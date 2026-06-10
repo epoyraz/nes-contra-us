@@ -4407,48 +4407,157 @@ static void contra_update_player_edge_fall(ContraCore *core, uint8_t player_inde
     contra_set_player_x_velocity_from_code(core, player_index, ram[CONTRA_RAM_EDGE_FALL_CODE + player_index]);
 }
 
+/* set_frame_scroll_if_appropriate (bank7:5141-5266), per player, called from
+   inside calc_player_x_vel between the d-pad velocity and the move: when the
+   player is at/past the scroll point, CONSUME the X velocity into FRAME_SCROLL
+   (so the move that follows applies zero and the player stays put). */
+static void contra_set_frame_scroll_if_appropriate(ContraCore *core, uint8_t player_index)
+{
+    uint8_t *const ram = core->ram;
+    static const uint8_t horizontal_scroll_point_tbl[3] = {0x80u, 0x80u, 0xB0u};
+    unsigned accum;
+
+    if (((uint8_t)(ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] |
+                   ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] |
+                   ram[CONTRA_RAM_AUTO_SCROLL_TIMER_01]) != 0u) ||
+        (ram[CONTRA_RAM_PLAYER_STATE + player_index] != 0x01u))
+    {
+        return;
+    }
+
+    if (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u)
+    {
+        /* set_vertical_level_frame_scroll (bank7:5236): while jumping up past
+           Y 0x50, scroll the screen by the jump velocity instead of moving the
+           player. Reached from the horizontal move on vertical levels too --
+           the ROM's double-application "platform skip" quirk is faithful. */
+        unsigned coeff;
+        uint8_t new_y;
+
+        if ((ram[CONTRA_RAM_SPRITE_Y_POS + player_index] >= 0x50u) ||
+            ((ram[CONTRA_RAM_PLAYER_Y_FAST_VELOCITY + player_index] & 0x80u) == 0u))
+        {
+            return;
+        }
+        if (contra_rom_set_boss_auto_scroll(core))
+        {
+            return;
+        }
+        coeff = (unsigned)ram[CONTRA_RAM_PLAYER_JUMP_COEFFICIENT + player_index] +
+            ram[CONTRA_RAM_PLAYER_Y_FRACT_VELOCITY + player_index];
+        ram[CONTRA_RAM_PLAYER_JUMP_COEFFICIENT + player_index] = (uint8_t)coeff;
+        new_y = (uint8_t)(ram[CONTRA_RAM_SPRITE_Y_POS + player_index] +
+                          ram[CONTRA_RAM_PLAYER_Y_FAST_VELOCITY + player_index] +
+                          (uint8_t)(coeff >> 8u));
+        ram[CONTRA_RAM_FRAME_SCROLL] =
+            (uint8_t)(ram[CONTRA_RAM_SPRITE_Y_POS + player_index] - new_y);
+        ram[CONTRA_RAM_PLAYER_FRAME_SCROLL + player_index] = 0x01u;
+        return;
+    }
+
+    if ((ram[CONTRA_RAM_LEVEL_STOP_SCROLL] & 0x80u) != 0u)
+    {
+        return; /* boss auto-scroll has latched */
+    }
+    if (ram[CONTRA_RAM_SPRITE_X_POS + player_index] <
+        horizontal_scroll_point_tbl[ram[CONTRA_RAM_PLAYER_GAME_OVER_BIT_FIELD] % 3u])
+    {
+        return;
+    }
+    if (ram[CONTRA_RAM_PLAYER_GAME_OVER_BIT_FIELD] == 0x02u)
+    {
+        /* both players active: the other player at the left edge blocks the
+           scroll AND stops the scroller (@stop_player_x_velocity) */
+        if (ram[CONTRA_RAM_SPRITE_X_POS + (player_index ^ 1u)] < 0x21u)
+        {
+            ram[CONTRA_RAM_INDOOR_TRANSITION_X_FRACT_VEL + player_index] = 0x00u;
+            ram[CONTRA_RAM_PLAYER_X_VELOCITY + player_index] = 0x00u;
+            return;
+        }
+    }
+    if (contra_rom_set_boss_auto_scroll(core))
+    {
+        return;
+    }
+
+    /* @set_horizontal_level_frame_scroll: consume the velocity into the scroll */
+    accum = (unsigned)ram[CONTRA_RAM_INDOOR_TRANSITION_X_ACCUM + player_index] +
+        ram[CONTRA_RAM_INDOOR_TRANSITION_X_FRACT_VEL + player_index];
+    ram[CONTRA_RAM_INDOOR_TRANSITION_X_ACCUM + player_index] = (uint8_t)accum;
+    ram[CONTRA_RAM_FRAME_SCROLL] =
+        (uint8_t)(ram[CONTRA_RAM_PLAYER_X_VELOCITY + player_index] + (accum >> 8u));
+    ram[CONTRA_RAM_PLAYER_FRAME_SCROLL + player_index] = 0x01u;
+    ram[CONTRA_RAM_INDOOR_TRANSITION_X_FRACT_VEL + player_index] = 0x00u;
+    ram[CONTRA_RAM_PLAYER_X_VELOCITY + player_index] = 0x00u;
+}
+
+/* calc_player_x_vel (bank7:4357-4438): apply the X velocity. The scroll check
+   runs INSIDE the rightward branch (after the solid/right-edge/boss-max gates)
+   and may consume the velocity, in which case the add below applies zero.
+   Once the level boss is defeated (BOSS_DEFEATED_FLAG bit 7, the scripted
+   end-of-level walk) the geometry gates are skipped so the player can walk
+   past the boss-screen solids. */
 static void contra_move_player_horizontally(ContraCore *core, uint8_t player_index)
 {
     uint8_t *const ram = core->ram;
-    int8_t x_velocity;
+    static const uint8_t lvl_boss_max_x_scroll_tbl[8] = {
+        0x90u, 0xFFu, 0xFFu, 0xFFu, 0xA0u, 0xD0u, 0xB0u, 0xB0u};
     const uint8_t screen_type = contra_get_level_screen_type(core);
     const uint8_t right_edge = (screen_type == 0u) ? 0xE6u : ((screen_type == 1u) ? 0xE0u : 0xD0u);
     const uint8_t left_edge = (screen_type == 0u) ? 0x1Au : ((screen_type == 1u) ? 0x20u : 0x30u);
-    /* calc_player_x_vel (bank7): once the level boss is defeated the engine sets
-       bit 7 of BOSS_DEFEATED_FLAG (0x81) to flag the scripted end-of-level walk.
-       While that bit is set the player auto-walks past the boss-screen geometry:
-       the positive-velocity path skips the solid-bg/right-edge clamp entirely (the
-       lvl-1 fortress door is a solid bg object at x #$88 the player must pass to
-       reach the tunnel), and the negative-velocity path skips the left-edge clamp.
-       Without this the scripted walk stalls at the door and the jump-into-building
-       step never fires. */
     const bool boss_defeated_walk = (ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] & 0x80u) != 0u;
+    uint8_t velocity;
+    unsigned accum;
 
-    /* calc_player_x_vel (bank7:4357-4360): fold in the velocity boost from riding a
-       moving platform so the player carries along with it. */
+    /* fold in the velocity boost from riding a moving platform */
     ram[CONTRA_RAM_PLAYER_X_VELOCITY + player_index] =
         (uint8_t)(ram[CONTRA_RAM_PLAYER_X_VELOCITY + player_index] +
                   ram[CONTRA_RAM_PLAYER_FAST_X_VEL_BOOST + player_index]);
-    x_velocity = (int8_t)ram[CONTRA_RAM_PLAYER_X_VELOCITY + player_index];
+    velocity = ram[CONTRA_RAM_PLAYER_X_VELOCITY + player_index];
 
-    if (x_velocity > 0)
+    if ((uint8_t)(velocity | ram[CONTRA_RAM_INDOOR_TRANSITION_X_FRACT_VEL + player_index]) == 0u)
     {
-        if (boss_defeated_walk ||
-            ((ram[CONTRA_RAM_SPRITE_X_POS + player_index] < right_edge) &&
-             !contra_player_has_solid_collision_ahead(core, player_index, 8)))
+        return;
+    }
+
+    if ((velocity & 0x80u) == 0u)
+    {
+        if (!boss_defeated_walk)
         {
-            ram[CONTRA_RAM_SPRITE_X_POS + player_index] =
-                (uint8_t)(ram[CONTRA_RAM_SPRITE_X_POS + player_index] + 1u);
+            if (contra_player_has_solid_collision_ahead(core, player_index, 8) ||
+                (ram[CONTRA_RAM_SPRITE_X_POS + player_index] >= right_edge))
+            {
+                return;
+            }
+            if ((ram[CONTRA_RAM_BOSS_AUTO_SCROLL_COMPLETE] != 0u) &&
+                (ram[CONTRA_RAM_SPRITE_X_POS + player_index] >=
+                 lvl_boss_max_x_scroll_tbl[ram[CONTRA_RAM_CURRENT_LEVEL] & 0x07u]))
+            {
+                return;
+            }
+        }
+        contra_set_frame_scroll_if_appropriate(core, player_index);
+        velocity = ram[CONTRA_RAM_PLAYER_X_VELOCITY + player_index];
+    }
+    else
+    {
+        if (contra_player_has_solid_collision_ahead(core, player_index, -8))
+        {
+            return;
+        }
+        if (!boss_defeated_walk &&
+            (ram[CONTRA_RAM_SPRITE_X_POS + player_index] < left_edge))
+        {
+            return;
         }
     }
-    else if ((x_velocity < 0) &&
-             !contra_player_has_solid_collision_ahead(core, player_index, -8) &&
-             (boss_defeated_walk ||
-              (ram[CONTRA_RAM_SPRITE_X_POS + player_index] > left_edge)))
-    {
-        ram[CONTRA_RAM_SPRITE_X_POS + player_index] =
-            (uint8_t)(ram[CONTRA_RAM_SPRITE_X_POS + player_index] - 1u);
-    }
+
+    /* @apply_vel_to_player_x_pos */
+    accum = (unsigned)ram[CONTRA_RAM_INDOOR_TRANSITION_X_ACCUM + player_index] +
+        ram[CONTRA_RAM_INDOOR_TRANSITION_X_FRACT_VEL + player_index];
+    ram[CONTRA_RAM_INDOOR_TRANSITION_X_ACCUM + player_index] = (uint8_t)accum;
+    ram[CONTRA_RAM_SPRITE_X_POS + player_index] =
+        (uint8_t)(ram[CONTRA_RAM_SPRITE_X_POS + player_index] + velocity + (accum >> 8u));
 }
 
 static void contra_handle_player_fall_out(ContraCore *core, uint8_t player_index)
@@ -4946,97 +5055,6 @@ static void contra_load_bank_2_set_players_paused_sprite_attr(ContraCore *core)
     contra_set_player_sprite_and_attrs(core, 1u);
 }
 
-static void contra_apply_outdoor_horizontal_frame_scroll(ContraCore *core, uint8_t active_players)
-{
-    uint8_t *const ram = core->ram;
-    const uint8_t trigger_x = (active_players == 0x03u) ? 0xB0u : 0x80u;
-    int scroller = -1;
-
-    /* set_frame_scroll_if_appropriate (bank7:5141-5151): bail on indoor levels,
-       while a boss-reveal auto-scroll timer is already running, or once the
-       boss-reveal auto-scroll has latched LEVEL_STOP_SCROLL to #$FF (bit 7). The
-       auto-scroll itself is *started* by contra_rom_set_boss_auto_scroll below
-       (bank7:5172). */
-    if ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u) ||
-        (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u) ||
-        ((uint8_t)(ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] | ram[CONTRA_RAM_AUTO_SCROLL_TIMER_01]) != 0u) ||
-        ((ram[CONTRA_RAM_LEVEL_STOP_SCROLL] & 0x80u) != 0u))
-    {
-        return;
-    }
-
-    /* The ROM's check (bank7:5160) is `SPRITE_X_POS >= point` but runs INLINE
-       in the player state routine between the d-pad velocity and the move, on
-       the PRE-move X; this port-side check runs after the player already
-       moved, so `>` on the post-move X is the equivalent boundary (verified:
-       `>=` here scrolls one frame early on the level's first scroll). Known
-       residual: a player landing in water exactly on the scroll point converts
-       motion to movement instead of scroll for one frame (ROM scrolls). */
-    if (((active_players & 0x01u) != 0u) &&
-        (ram[CONTRA_RAM_PLAYER_STATE + 0u] == 0x01u) &&
-        (ram[CONTRA_RAM_PLAYER_X_VELOCITY + 0u] == 0x01u) &&
-        (ram[CONTRA_RAM_SPRITE_X_POS + 0u] > trigger_x))
-    {
-        scroller = 0;
-    }
-
-    if (((active_players & 0x02u) != 0u) &&
-        (ram[CONTRA_RAM_PLAYER_STATE + 1u] == 0x01u) &&
-        (ram[CONTRA_RAM_PLAYER_X_VELOCITY + 1u] == 0x01u) &&
-        (ram[CONTRA_RAM_SPRITE_X_POS + 1u] > trigger_x))
-    {
-        if ((scroller < 0) || (ram[CONTRA_RAM_SPRITE_X_POS + 1u] > ram[CONTRA_RAM_SPRITE_X_POS + (size_t)scroller]))
-        {
-            scroller = 1;
-        }
-    }
-
-    if (scroller < 0)
-    {
-        return;
-    }
-
-    if ((active_players == 0x03u) && (ram[CONTRA_RAM_SPRITE_X_POS + (size_t)(scroller ^ 1)] < 0x21u))
-    {
-        ram[CONTRA_RAM_PLAYER_X_VELOCITY + (size_t)scroller] = 0x00u;
-        if (ram[CONTRA_RAM_SPRITE_X_POS + (size_t)scroller] > trigger_x)
-        {
-            ram[CONTRA_RAM_SPRITE_X_POS + (size_t)scroller] =
-                (uint8_t)(ram[CONTRA_RAM_SPRITE_X_POS + (size_t)scroller] - 1u);
-        }
-        return;
-    }
-
-    /* @set_horizontal_level_frame_scroll (bank7:5172-5173): start the boss-reveal
-       auto-scroll if the player has reached the boss screen. If it takes over,
-       skip the player-driven scroll this frame (the ASM's `beq @exit`). */
-    if (contra_rom_set_boss_auto_scroll(core))
-    {
-        return;
-    }
-
-    ram[CONTRA_RAM_FRAME_SCROLL] = 0x01u;
-    ram[CONTRA_RAM_PLAYER_FRAME_SCROLL + (size_t)scroller] = 0x01u;
-    ram[CONTRA_RAM_PLAYER_X_VELOCITY + (size_t)scroller] = 0x00u;
-
-    if (ram[CONTRA_RAM_SPRITE_X_POS + (size_t)scroller] != 0u)
-    {
-        ram[CONTRA_RAM_SPRITE_X_POS + (size_t)scroller] =
-            (uint8_t)(ram[CONTRA_RAM_SPRITE_X_POS + (size_t)scroller] - 1u);
-    }
-
-    if (active_players == 0x03u)
-    {
-        const size_t other_player = (size_t)(scroller ^ 1);
-
-        if (ram[CONTRA_RAM_SPRITE_X_POS + other_player] != 0u)
-        {
-            ram[CONTRA_RAM_SPRITE_X_POS + other_player] =
-                (uint8_t)(ram[CONTRA_RAM_SPRITE_X_POS + other_player] - 1u);
-        }
-    }
-}
-
 static void contra_scroll_vertical_non_scrolling_player(ContraCore *core, uint8_t active_players)
 {
     uint8_t *const ram = core->ram;
@@ -5512,6 +5530,12 @@ static void contra_load_palettes_color_to_cpu(ContraCore *core, uint8_t num_colo
 
             palette_buffer[write_offset++] = color;
         }
+
+        /* load_palette_colors_to_cpu (bank7:3520) leaves the game_palettes
+           pointer low byte in the $06 zero-page temp each slot. The leftover
+           from the LAST slot is consumed as junk by create_default_soldiers'
+           ledge-handling bit on the next frame, so the temp must be mirrored. */
+        core->ram[0x06u] = (uint8_t)((uint8_t)(palette_index * 3u) + 0x27u);
 
         ++palette_index_offset;
     }
@@ -6324,11 +6348,6 @@ static void contra_set_frame_scroll_draw_player_bullets(ContraCore *core)
     if (core->ram[CONTRA_RAM_INDOOR_SCROLL] >= 0x02u)
     {
         core->ram[CONTRA_RAM_INDOOR_SCROLL] = 0x00u;
-    }
-
-    if (core->ram[CONTRA_RAM_FRAME_SCROLL] == 0u)
-    {
-        contra_apply_outdoor_horizontal_frame_scroll(core, active_players);
     }
 
     contra_update_player_bullets(core);
@@ -16915,22 +16934,24 @@ static void contra_rom_soldier_generation_01(ContraCore *core)
 /* create_default_soldiers (bank2:2092): the 1/3-while-scrolling wave -- THREE
    soldiers in one frame at the found spawn point, with staggered spawn delays
    (ENEMY_ATTRIBUTES bits 4-5 = 2,1,0 -> soldier_initial_anim_delay_tbl). The
-   ROM mixes bit 1 from an uninitialized zero-page temp ($06 leftovers); the
-   port uses the loop counter, which matches the common case. */
+   ledge-handling bit (bit 1) comes from incrementing the $06 zero-page temp,
+   whose entry value is whatever the previous frame's logic left there (usually
+   the palette-pointer low byte, mirrored in contra_load_palettes_color_to_cpu);
+   the temp lives in ram[0x06] so the junk chain is reproduced. */
 static void contra_rom_create_default_soldiers(ContraCore *core)
 {
     uint8_t *const ram = core->ram;
     const uint8_t dir = (ram[CONTRA_RAM_SOLDIER_GENERATION_X_POS] < 0x80u) ? 0x01u : 0x00u;
-    uint8_t counter = 0u;
     int y;
 
+    ram[0x07u] = dir; /* the ROM keeps the direction in the $07 temp */
     for (y = 2; y >= 0; --y)
     {
         const int slot = contra_rom_find_next_enemy_slot_6_to_0(core);
         uint8_t s;
         uint8_t attr;
 
-        ++counter;
+        ram[0x06u] = (uint8_t)(ram[0x06u] + 1u);
         if (slot < 0)
         {
             break;
@@ -16940,7 +16961,7 @@ static void contra_rom_create_default_soldiers(ContraCore *core)
         contra_rom_initialize_enemy(core, s);
         ram[CONTRA_RAM_ENEMY_Y_POS + s] = ram[CONTRA_RAM_SOLDIER_GENERATION_Y_POS];
         ram[CONTRA_RAM_ENEMY_X_POS + s] = ram[CONTRA_RAM_SOLDIER_GENERATION_X_POS];
-        attr = (uint8_t)((uint8_t)((uint8_t)y << 4u) + (uint8_t)(counter & 0x02u));
+        attr = (uint8_t)((uint8_t)((uint8_t)y << 4u) + (uint8_t)(ram[0x06u] & 0x02u));
         ram[CONTRA_RAM_ENEMY_ATTRIBUTES + s] = (uint8_t)(attr | dir);
     }
     ram[CONTRA_RAM_SOLDIER_GENERATION_ROUTINE] = 0x00u;
