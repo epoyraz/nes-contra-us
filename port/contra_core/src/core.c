@@ -111,6 +111,8 @@ static void contra_rom_add_10_to_enemy_y_fract_vel(ContraCore *core, uint8_t x);
 static void contra_rom_add_a_to_enemy_y_fract_vel(ContraCore *core, uint8_t x, uint8_t a);
 static uint8_t contra_rom_get_bg_collision_far(const ContraCore *core, uint8_t x, uint8_t y);
 static void contra_rom_create_explosion_at(ContraCore *core, uint8_t px, uint8_t py);
+static void contra_rom_create_explosion_sequence(
+    ContraCore *core, uint8_t px, uint8_t py, uint8_t state_width, uint8_t routine);
 static void contra_load_next_supertiles_screen_indexes(ContraCore *core);
 static void contra_rom_reverse_enemy_x_direction(ContraCore *core, uint8_t x);
 static uint8_t contra_rom_player_enemy_x_dist(const ContraCore *core, uint8_t x);
@@ -8647,45 +8649,20 @@ static void contra_rom_wall_core_routine_04(ContraCore *core, uint8_t x)
    inline-runs the explosion (sprites 0x38..0x3a). Faithful to init_explosion: set
    STATE_WIDTH |= 0x81 (bit7 lets bullets pass, bit0 skips player-body collision) and
    force sprite palette 2 ((attr & 0xFC) | 0x06), the explosion's orange/yellow. */
-static const uint8_t contra_wall_core_explosion_sprite_tbl[3] = {0x38u, 0x39u, 0x3Au};
-
+/* wall_core_routine_05 (bank7:7557): the shared init_explosion (invisible
+   sprite, delay 1, sound when sw bit 1), then ENEMY_FRAME overwritten to 0 --
+   so the explosion that follows skips its first sprite AND one of its beats
+   (31 ticks instead of 41 for the 4-sprite variant). */
 static void contra_rom_wall_core_routine_05(ContraCore *core, uint8_t x)
 {
-    uint8_t *const ram = core->ram;
-
-    ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
-        (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] | 0x81u);
-    ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] =
-        (uint8_t)((ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] & 0xFCu) | 0x06u);
-    ram[CONTRA_RAM_ENEMY_FRAME + x] = 0u;
-    ram[CONTRA_RAM_ENEMY_SPRITES + x] = contra_wall_core_explosion_sprite_tbl[0];
-    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x0Au;
-    contra_rom_advance_enemy_routine(core, x); /* -> routine_06 */
+    contra_rom_enemy_routine_init_explosion_inplace(core, x);
+    core->ram[CONTRA_RAM_ENEMY_FRAME + x] = 0x00u;
 }
 
-/* wall_core_routine_06 (bank7:7616-7670 enemy_routine_explosion, 3-frame variant):
-   scroll with the background each frame, then step the explosion sprites; on the last
-   frame advance to routine_07. */
+/* wall core RAM routine 07 is the SHARED enemy_routine_explosion (bank0:3134). */
 static void contra_rom_wall_core_routine_06(ContraCore *core, uint8_t x)
 {
-    uint8_t *const ram = core->ram;
-
-    contra_rom_add_scroll_to_enemy_pos(core, x);
-    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
-        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
-    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
-    {
-        return;
-    }
-    ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
-    if (ram[CONTRA_RAM_ENEMY_FRAME + x] >= 0x03u)
-    {
-        contra_rom_advance_enemy_routine(core, x); /* -> routine_07 */
-        return;
-    }
-    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x0Au;
-    ram[CONTRA_RAM_ENEMY_SPRITES + x] =
-        contra_wall_core_explosion_sprite_tbl[ram[CONTRA_RAM_ENEMY_FRAME + x]];
+    contra_rom_enemy_routine_explosion_inplace(core, x);
 }
 
 /* wall_core_routine_07 (bank0:3333): one fewer core to destroy; if this was the
@@ -8693,23 +8670,16 @@ static void contra_rom_wall_core_routine_06(ContraCore *core, uint8_t x)
 static void contra_rom_wall_core_routine_07(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
-    int slot;
 
     ram[CONTRA_RAM_WALL_CORE_REMAINING] =
         (uint8_t)(ram[CONTRA_RAM_WALL_CORE_REMAINING] - 1u);
     if (ram[CONTRA_RAM_WALL_CORE_REMAINING] != 0u)
     {
-        contra_rom_clear_enemy(core, x); /* not the last core -- just remove it */
+        contra_rom_remove_enemy_offscreen(core, x); /* remove_enemy keeps the husk */
         return;
     }
     ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x00u; /* hide the core */
-    for (slot = 0x0F; slot >= 0; --slot)
-    {
-        if ((uint8_t)slot != x)
-        {
-            contra_rom_clear_enemy(core, (uint8_t)slot); /* destroy_all_enemies */
-        }
-    }
+    contra_rom_destroy_all_enemies(core, (int)x);
     ram[CONTRA_RAM_ENEMY_VAR_3 + x] = 0x03u; /* quadrant index 3..0 */
     contra_rom_set_enemy_delay_adv_routine(core, x, 0x04u); /* -> routine_08 */
 }
@@ -8726,10 +8696,27 @@ static void contra_rom_wall_core_routine_08(ContraCore *core, uint8_t x)
         (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
     if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
     {
+        /* wall_core_wait_play_sound: the small boom on the last waiting tick */
+        if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] == 0x01u)
+        {
+            contra_play_sound(core, 0x25u);
+        }
         return;
     }
+    /* move the core to the quadrant being blown open, stamp the destroyed
+       super-tile, and pop a single-round 0x89 explosion above it
+       (create_explosion_89: the -12px offset for the top row quadrants,
+       -4px for the bottom row). */
     q = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_3 + x] & 0x03u);
+    ram[CONTRA_RAM_ENEMY_Y_POS + x] = contra_level_2_wall_core_update_y_tbl[q];
+    ram[CONTRA_RAM_ENEMY_X_POS + x] = contra_level_2_wall_core_update_x_tbl[q];
     core->l2_blowopen_quadrants = (uint8_t)(core->l2_blowopen_quadrants | (uint8_t)(1u << q));
+    contra_rom_create_explosion_sequence(
+        core,
+        contra_level_2_wall_core_update_x_tbl[q],
+        (uint8_t)(contra_level_2_wall_core_update_y_tbl[q] +
+                  (((q & 0x02u) != 0u) ? 0xF4u : 0xFCu)),
+        0x89u, 0x09u);
     ram[CONTRA_RAM_ENEMY_VAR_3 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_3 + x] - 1u);
     if ((ram[CONTRA_RAM_ENEMY_VAR_3 + x] & 0x80u) != 0u)
     {
@@ -8752,7 +8739,7 @@ static void contra_rom_wall_core_routine_09(ContraCore *core, uint8_t x)
         return;
     }
     ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] = 0x01u;
-    contra_rom_clear_enemy(core, x);
+    contra_rom_remove_enemy_offscreen(core, x); /* remove_enemy keeps the husk */
 }
 
 /* ===== level-2 indoor soldiers (0x15) + their generator (0x19) ==============
@@ -8917,13 +8904,13 @@ static bool contra_rom_apply_indoor_velocity(ContraCore *core, uint8_t x)
     {
         if (newx < 0x50u)
         {
-            contra_rom_clear_enemy(core, x);
+            contra_rom_remove_enemy_offscreen(core, x); /* remove_enemy keeps the husk */
             return true;
         }
     }
     else if (newx >= 0xB0u)
     {
-        contra_rom_clear_enemy(core, x);
+        contra_rom_remove_enemy_offscreen(core, x); /* remove_enemy keeps the husk */
         return true;
     }
 
@@ -12114,6 +12101,27 @@ static void contra_rom_play_explosion_sound(ContraCore *core, uint8_t x)
     ram[CONTRA_RAM_ENEMY_TYPE + x] = 0x00u; /* now a weapon item */
 }
 
+/* jumping_soldier_routine_04 (bank0:3637): a red jumping soldier that dies
+   mid-room (0x64 <= x < 0x9C, attribute bit 7 clear) pops the explosion and
+   becomes the weapon item it carries (attributes >> 2 -> play_explosion_sound);
+   otherwise it just advances into the shared explosion tail. */
+static void contra_rom_jumping_soldier_routine_04(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t attrs = ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x];
+
+    if (((attrs & 0x02u) != 0u) &&
+        (ram[CONTRA_RAM_ENEMY_X_POS + x] >= 0x64u) &&
+        (ram[CONTRA_RAM_ENEMY_X_POS + x] < 0x9Cu) &&
+        ((attrs & 0x80u) == 0u))
+    {
+        ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] = (uint8_t)(attrs >> 2u);
+        contra_rom_play_explosion_sound(core, x);
+        return;
+    }
+    contra_rom_advance_enemy_routine(core, x);
+}
+
 /* weapon_box_routine_04 (bank0:627): the pill box was destroyed -- draw the
    restored background super-tile, then drop a weapon item via play_explosion_sound. */
 static void contra_rom_weapon_box_routine_04(ContraCore *core, uint8_t x)
@@ -12145,33 +12153,76 @@ static void contra_rom_flying_capsule_routine_02(ContraCore *core, uint8_t x)
 }
 
 /* destroy_all_enemies (bank7:8096): set every live, damageable enemy to its
-   destroyed routine -- here the shared 0xFE explosion actor -- skipping the pill
-   box (0x02), flying capsule (0x03), and no-damage (HP 0xF0) enemies. keep_slot is
-   the caller's own enemy slot (the boss door running boss_defeated_routine, or the
-   falcon item), which is preserved: the ROM routes it via set_destroyed_enemy_
-   routine, a no-op there since its destroyed routine is <= its current routine, so
-   it keeps running its own cascade instead of becoming an explosion. Pass -1 for
-   no exception. */
+   destroyed routine via set_destroyed_enemy_routine -- skipping the pill box
+   (0x02), flying capsule (0x03), and no-damage (HP 0xF0) enemies. The caller's
+   own slot needs no exemption (keep_slot kept for the call sites' clarity):
+   its destroyed nibble is <= its current routine, so the `>=`-only rule below
+   leaves it running its own cascade, exactly like the ROM. */
+
+/* set_destroyed_enemy_routine (bank7:8029): raise ENEMY_ROUTINE to the type's
+   destroyed-routine nibble. The per-level tables (bank7:8097-8146) are entry
+   points into ONE continuous nibble array -- a level's rows deliberately run
+   into the next label's bytes. Types < 0x10 use the common (level-1) base. */
+static void contra_rom_set_destroyed_enemy_routine(ContraCore *core, uint8_t x)
+{
+    static const uint8_t nibbles[38] = {
+        /* @0  routine_00 (level 1 + common types < 0x10) */
+        0x04u, 0x53u,
+        /* @2  routine_01 (levels 2 and 4) */
+        0x75u, 0x56u, 0x50u, 0x44u, 0x44u, 0x43u, 0x33u, 0x20u, 0x43u,
+        /* @11 routine_02 (level 3) */
+        0x45u, 0x53u, 0x33u,
+        /* @14 routine_03 (level 5) */
+        0x43u, 0x33u, 0x43u, 0x54u,
+        /* @18 routine_04 (level 6) */
+        0x30u, 0x22u, 0x24u,
+        /* @21 routine_05 (level 7) */
+        0x65u, 0x33u, 0x50u, 0xA5u, 0x20u,
+        /* @26 routine_06 (level 8) */
+        0x00u, 0x07u, 0x30u, 0x05u, 0x30u, 0x44u, 0x35u, 0x50u,
+        0x43u, 0x34u, 0x63u, 0x40u};
+    static const uint8_t level_base[8] = {0u, 2u, 11u, 2u, 14u, 18u, 21u, 26u};
+    uint8_t *const ram = core->ram;
+    const uint8_t type = ram[CONTRA_RAM_ENEMY_TYPE + x];
+    const uint8_t base = (type < 0x10u)
+        ? 0u
+        : level_base[ram[CONTRA_RAM_CURRENT_LEVEL] & 0x07u];
+    const unsigned idx = (unsigned)base + (type >> 1u);
+    uint8_t nib;
+
+    if (idx >= sizeof nibbles)
+    {
+        return;
+    }
+    nib = ((type & 0x01u) != 0u)
+        ? (uint8_t)(nibbles[idx] & 0x0Fu)
+        : (uint8_t)(nibbles[idx] >> 4u);
+    if (nib >= ram[CONTRA_RAM_ENEMY_ROUTINE + x])
+    {
+        ram[CONTRA_RAM_ENEMY_ROUTINE + x] = nib;
+    }
+}
+
 static void contra_rom_destroy_all_enemies(ContraCore *core, int keep_slot)
 {
     int s;
 
+    (void)keep_slot;
     for (s = 0x0F; s >= 0; --s)
     {
         const uint8_t ss = (uint8_t)s;
         const uint8_t type = core->ram[CONTRA_RAM_ENEMY_TYPE + ss];
 
-        if ((s == keep_slot) ||
-            (core->ram[CONTRA_RAM_ENEMY_ROUTINE + ss] == 0u) ||
+        if ((core->ram[CONTRA_RAM_ENEMY_ROUTINE + ss] == 0u) ||
             (core->ram[CONTRA_RAM_ENEMY_SPRITES + ss] == 0u) ||
             (type == 0x02u) || (type == 0x03u) ||
             (core->ram[CONTRA_RAM_ENEMY_HP + ss] == 0xF0u))
         {
             continue;
         }
+        contra_rom_set_destroyed_enemy_routine(core, ss);
         core->ram[CONTRA_RAM_ENEMY_ATTRIBUTES + ss] =
             (uint8_t)(core->ram[CONTRA_RAM_ENEMY_ATTRIBUTES + ss] | 0x80u);
-        contra_rom_begin_enemy_explosion(core, ss);
     }
 }
 
@@ -16052,7 +16103,12 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                     case 0x02u: contra_rom_indoor_soldier_routine_01(core, x); break;
                     case 0x03u: contra_rom_shared_indoor_soldier_hit_routine_00(core, x); break;
                     case 0x04u: contra_rom_shared_indoor_soldier_hit_routine_01(core, x); break;
-                    default: break; /* hit/explosion via the 0xFE actor */
+                    /* table tail (bank0:3423-3425): init_explosion,
+                       shared_enemy_routine_03 (explosion_type_02), remove_enemy */
+                    case 0x05u: contra_rom_enemy_routine_init_explosion_step(core, x); break;
+                    case 0x06u: contra_rom_enemy_routine_explosion_step(core, x); break;
+                    case 0x07u: contra_rom_enemy_routine_remove_inplace(core, x); break;
+                    default: break;
                 }
             }
             break;
@@ -16094,10 +16150,10 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                     case 0x02u: contra_rom_jumping_soldier_routine_01(core, x); break;
                     case 0x03u: contra_rom_shared_indoor_soldier_hit_routine_00(core, x); break;
                     case 0x04u: contra_rom_shared_indoor_soldier_hit_routine_01(core, x); break;
-                    case 0x05u: contra_rom_advance_enemy_routine(core, x); break; /* jumping_soldier_routine_04, non-red path */
+                    case 0x05u: contra_rom_jumping_soldier_routine_04(core, x); break;
                     case 0x06u: contra_rom_enemy_routine_init_explosion_step(core, x); break;
                     case 0x07u: contra_rom_enemy_routine_explosion_step(core, x); break;
-                    case 0x08u: contra_rom_clear_enemy(core, x); break;
+                    case 0x08u: contra_rom_enemy_routine_remove_inplace(core, x); break; /* remove_enemy keeps the husk */
                     default: break; /* hit/explosion via the 0xFE actor */
                 }
             }
@@ -16262,7 +16318,9 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
             {
                 case 0x01u: contra_rom_indoor_soldier_gen_routine_00(core, x); break;
                 case 0x02u: contra_rom_indoor_soldier_gen_routine_01(core, x); break;
-                default: break; /* removed via clear once the cycles are done */
+                /* table entry 2 (bank0:2409) is remove_enemy itself */
+                case 0x03u: contra_rom_remove_enemy_offscreen(core, x); break;
+                default: break;
             }
             break;
         case 0x07u: /* red turret */

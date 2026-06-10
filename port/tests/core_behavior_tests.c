@@ -754,6 +754,17 @@ static bool test_level1_forced_boss_clear_hands_off_to_level2(void)
     CHECK(saw_boss_flag_81);
     CHECK(saw_boss_flag_02);
     CHECK(reached_level2);
+    /* CURRENT_LEVEL increments while LEVEL_ROUTINE_INDEX is still 5: the ROM
+       busy-loads the next stage's intro graphics for a few video frames before
+       flipping the routine index to 0 (frame_stall_frames). */
+    for (frame = 0u; frame < 16u; ++frame)
+    {
+        if (core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] <= 0x02u)
+        {
+            break;
+        }
+        step_no_input(&core);
+    }
     CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] <= 0x02u);
     return true;
 }
