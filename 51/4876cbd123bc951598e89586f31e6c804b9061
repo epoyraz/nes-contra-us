@@ -1,0 +1,25 @@
+"docs/Parity Pipeline Improvements.md"
+  s_d6f4243e7218de::t_04e429c5401f5f 1-120
+port/contra_core/src/core.c
+  s_d6f4243e7218de::t_d58db39fbcb7e1 3393-3397,3400-3401
+  s_d6f4243e7218de::t_91287ebdc307d5 3461-3462
+  s_d6f4243e7218de::t_931ebf60201233 3435-3436,3455-3460,3467,3469-3475
+  s_d6f4243e7218de::t_7f1cb5ea065880 3437-3445,3447,3454,3465-3466,3468
+  s_d6f4243e7218de::t_e68b6afc32168b 3448-3453,3464
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "514876cbd123bc951598e89586f31e6c804b9061",
+  "prompts": {},
+  "sessions": {
+    "s_d6f4243e7218de": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "825b5bf6-c121-4087-8508-1505c9d1a7d5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
