@@ -8681,7 +8681,11 @@ static void contra_rom_aim_and_create_enemy_bullet(
     else
     {
         tx = ram[CONTRA_RAM_SPRITE_X_POS + idx];
-        ty = (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u)
+        /* get_quadrant_aim_dir_for_player (bank7:10541) tests location with
+           `lsr` -- bit 0 only: indoor rooms (0x01) aim at the fixed 0xB0, but
+           the BOSS SCREEN (0x80) takes the outdoor branch and aims at the
+           player's real Y. */
+        ty = ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] & 0x01u) != 0u)
             ? 0xB0u
             : ram[CONTRA_RAM_SPRITE_Y_POS + idx];
     }
@@ -11636,7 +11640,11 @@ static uint8_t contra_rom_get_quadrant_aim_dir_for_player(
     else
     {
         tx = ram[CONTRA_RAM_SPRITE_X_POS + idx];
-        ty = (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u)
+        /* get_quadrant_aim_dir_for_player (bank7:10541) tests location with
+           `lsr` -- bit 0 only: indoor rooms (0x01) aim at the fixed 0xB0, but
+           the BOSS SCREEN (0x80) takes the outdoor branch and aims at the
+           player's real Y. */
+        ty = ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] & 0x01u) != 0u)
             ? 0xB0u
             : ram[CONTRA_RAM_SPRITE_Y_POS + idx];
     }
