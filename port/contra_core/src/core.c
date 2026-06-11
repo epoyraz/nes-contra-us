@@ -10913,29 +10913,21 @@ static const uint8_t contra_spinning_bullet_vel_tbl[60] = {
     0x82u, 0xFEu, 0x8Eu, 0xFEu, 0xB5u, 0xFEu, 0xF1u, 0xFEu, 0x40u, 0xFFu, 0x9Du, 0xFFu,
     0x00u, 0x00u, 0x63u, 0x00u, 0xC0u, 0x00u, 0x0Fu, 0x01u, 0x4Bu, 0x01u, 0x72u, 0x01u};
 
-static uint8_t contra_rom_spinning_bubble_aim_dir(ContraCore *core, uint8_t x)
-{
-    uint8_t quadrant;
-    uint8_t aim = contra_rom_aim_at_player(
-        core,
-        core->ram[CONTRA_RAM_ENEMY_X_POS + x],
-        core->ram[CONTRA_RAM_ENEMY_Y_POS + x],
-        contra_quadrant_aim_dir_01,
-        &quadrant);
+static uint8_t contra_rom_get_quadrant_aim_dir_for_player(
+    ContraCore *core, uint8_t sx, uint8_t sy, uint8_t player_idx,
+    const uint8_t *tbl, uint8_t *quadrant);
+static uint8_t contra_rom_get_rotate_dir(
+    ContraCore *core, uint8_t x, uint8_t aim, uint8_t quadrant, uint8_t table_idx,
+    uint8_t *target_out);
+static bool contra_rom_aim_var_1(ContraCore *core, uint8_t x, uint8_t table_idx, uint8_t player_idx);
 
-    aim = (uint8_t)(aim % 12u);
-    if ((quadrant & 0x02u) != 0u)
-    {
-        aim = (uint8_t)((12u - aim) % 12u);
-    }
-    return aim;
-}
-
+/* spinning_bullet_vel_tbl (bank0:5784): the X velocity reads the SAME table 12
+   bytes (6 directions = 90 degrees) ahead of the Y read -- a shared sine table.
+   The wheel is 24 directions (ENEMY_VAR_1 0-23), so the table runs 0x3C bytes. */
 static void contra_rom_set_spinning_bubble_velocity_from_var1(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
-    const uint8_t dir = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] % 12u);
-    const size_t y = (size_t)dir * 2u;
+    const size_t y = (size_t)ram[CONTRA_RAM_ENEMY_VAR_1 + x] * 2u;
     const size_t xoff = y + 12u;
 
     ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = contra_spinning_bullet_vel_tbl[y];
@@ -10949,14 +10941,36 @@ static void contra_rom_set_spinning_bubble_velocity_from_var1(ContraCore *core, 
 static void contra_rom_spinning_bubbles_routine_00(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
+    const uint8_t player = contra_rom_player_enemy_x_dist(core, x);
+    const uint8_t speed =
+        contra_spinning_bubbles_speed_tbl[ram[CONTRA_RAM_FRAME_COUNTER] & 0x03u];
+    uint8_t quadrant = 0u;
+    uint8_t aim;
+    uint8_t target = 0u;
 
-    ram[CONTRA_RAM_ENEMY_VAR_2 + x] =
-        (ram[CONTRA_RAM_SPRITE_X_POS] <= ram[CONTRA_RAM_ENEMY_X_POS + x]) ? 0u : 1u;
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = player;
     ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] = (uint8_t)(ram[CONTRA_RAM_FRAME_COUNTER] & 0x03u);
-    ram[CONTRA_RAM_ENEMY_VAR_A + x] =
-        contra_spinning_bubbles_speed_tbl[ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x03u];
-    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = contra_rom_spinning_bubble_aim_dir(core, x);
-    contra_rom_set_spinning_bubble_velocity_from_var1(core, x);
+    aim = contra_rom_get_quadrant_aim_dir_for_player(
+        core, ram[CONTRA_RAM_ENEMY_X_POS + x], ram[CONTRA_RAM_ENEMY_Y_POS + x],
+        player, contra_quadrant_aim_dir_01, &quadrant);
+    /* set_bullet_velocities (bank7:9976): the aim nibble's base velocity scaled
+       by the speed code (0.75x..1.62x), negated per quadrant */
+    {
+        const uint8_t idx = contra_bullet_fract_vel_dir_lookup_tbl[aim % 24u];
+        uint16_t xv = contra_rom_adjust_bullet_velocity(contra_bullet_fract_vel_tbl[idx + 1u], speed);
+        uint16_t yv = contra_rom_adjust_bullet_velocity(contra_bullet_fract_vel_tbl[idx], speed);
+
+        if ((quadrant & 0x01u) != 0u) { yv = (uint16_t)(0u - yv); }
+        if ((quadrant & 0x02u) != 0u) { xv = (uint16_t)(0u - xv); }
+        ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] = (uint8_t)(yv >> 8u);
+        ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = (uint8_t)yv;
+        ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] = (uint8_t)(xv >> 8u);
+        ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x] = (uint8_t)xv;
+    }
+    /* get_rotate_dir folds the nibble + quadrant into the 24-step wheel; only
+       the target direction ($0c) is kept as the spin origin */
+    (void)contra_rom_get_rotate_dir(core, x, aim, quadrant, 1u, &target);
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = target;
     ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x20u;
     contra_rom_advance_enemy_routine(core, x);
 }
@@ -10989,23 +11003,15 @@ static void contra_rom_spinning_bubbles_routine_01(ContraCore *core, uint8_t x)
     }
     ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x08u;
     ram[CONTRA_RAM_ENEMY_VAR_3 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_3 + x] + 1u);
+    /* aim_var_1_for_quadrant_aim_dir_01: rotate VAR_1 one step on the 24-dir
+       wheel toward the ORIGINAL closest player (VAR_2). The ROM's carry exits
+       without retuning when no rotation was needed OR the step landed exactly
+       on the target; only an in-progress rotation re-reads the sine table. */
+    if (!contra_rom_aim_var_1(core, x, 1u, ram[CONTRA_RAM_ENEMY_VAR_2 + x]))
     {
-        const uint8_t target = contra_rom_spinning_bubble_aim_dir(core, x);
-
-        if (target != ram[CONTRA_RAM_ENEMY_VAR_1 + x])
-        {
-            ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] =
-                (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] | 0x03u);
-            if (((target - ram[CONTRA_RAM_ENEMY_VAR_1 + x]) & 0x0Fu) < 6u)
-            {
-                ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)((ram[CONTRA_RAM_ENEMY_VAR_1 + x] + 1u) % 12u);
-            }
-            else
-            {
-                ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)((ram[CONTRA_RAM_ENEMY_VAR_1 + x] + 11u) % 12u);
-            }
-            contra_rom_set_spinning_bubble_velocity_from_var1(core, x);
-        }
+        ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] | 0x03u);
+        contra_rom_set_spinning_bubble_velocity_from_var1(core, x);
     }
 }
 
