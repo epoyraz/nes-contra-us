@@ -10742,8 +10742,10 @@ static void contra_rom_boss_gemini_routine_01(ContraCore *core, uint8_t x)
         return;
     }
     ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0xA0u;
+    /* enable_bullet_enemy_collision: clears ONLY bit 7 -- bit 0 (player
+       collision skip) stays set (sw 0x8F -> 0x0F) */
     ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
-        (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x7Eu);
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x7Fu);
     contra_rom_set_enemy_delay_adv_routine(core, x, 0x20u);
 }
 
