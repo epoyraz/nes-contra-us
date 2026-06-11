@@ -42,7 +42,7 @@ Cite the ASM range whenever you faithfully port a routine.
 Current numbers (2026-06-11):
 
 ```
-bank0  91.7%  ( 9639/10511)  enemy routines
+bank0  92.5%  ( 9727/10511)  enemy routines
 bank1  43.6%  ( 3138/ 7196)  sprite data + decode (the sound engine is the 0%)
 bank2  98.4%  ( 3026/ 3074)  level/spawn data, player sprites, soldier gen
 bank3  96.9%  ( 1541/ 1590)  supertile data, end-of-level routines
@@ -50,7 +50,7 @@ bank4  95.2%  (  767/  806)  graphic data, game-end/credits
 bank5  89.0%  (  235/  264)  graphic data, demo input
 bank6  98.3%  ( 1886/ 1919)  text data, player weapons/bullets
 bank7  76.1%  ( 8222/10800)  engine core, collision, dispatch
-TOTAL  78.7%  (28454/36160 assembly lines)
+TOTAL  78.9%  (28542/36160 assembly lines)
 ```
 
 The total excluding the out-of-scope bank 1 sound engine (lines 1-4058) is
@@ -66,27 +66,16 @@ a different layer, plus the deferred items below.
   (e.g. the renderer) rather than a 1:1 translation of the PPU plumbing.
 - `Not ported`: listed under Known gaps.
 
-## Bank 0 — enemy routines (91.7%)
+## Bank 0 — enemy routines (92.5%)
 
 `Ported`: every enemy and boss for all 8 levels, including this milestone's
 L5 tank, L5 boss UFO set (carrier/saucers/bombs), L8 alien guardian, and all
 shared helpers (explosion trios, husk-keeping removes, the destroyed-routine
 nibble routing, supertile stamping on the graphics budget).
 
-Known gaps (the missing 8%):
+Known gaps (the missing ~7%):
 
-- `Not ported`: soldier water-landing splash (`soldier_routine_09/0a`,
-  bank0:1615-1640) — a soldier corpse falling into water freezes instead of
-  splashing/removing. Never exercised by the reference recording.
-- `Not ported`: fire-beam nametable draw (`draw_fire_beam_if_anim_elapsed` /
-  `draw_fire_beam_tiles`, bank0:7389-7447) — the L6 beam state machine,
-  timing, and collision are ported, but the beam graphic isn't drawn.
-- Approximation: `wall_core_routine_03` fires horizontally at the nearest
-  player instead of the ROM's diagonal aim solve (bank0:3265 area). Unverified
-  by the recording (the core died before firing).
-- `Not ported`: the L4 boss-screen red soldier's weapon drop on death (it
-  dies via the generic explosion).
-- Small uncited leaf helpers.
+- Small uncited leaf helpers inside already-ported systems.
 
 ## Bank 1 — audio engine + sprite data (43.6%)
 
@@ -134,12 +123,6 @@ Known gaps (the missing 8%):
   spawn/velocity/update, F swirl, S spread, L laser) — continuously verified
   through the `pbul` digest field across all four recorded stages.
 
-Known gap:
-
-- Laser pass-through: the port consumes the L bullet on its first hit; the
-  ROM's laser continues through enemies. (The gap is in the bank 7 collision
-  consumption, but it is the laser's behavior.)
-
 ## Bank 7 — engine core (76.1%)
 
 - `Ported`: game/level routine state machines (00-0A + game_routine_06),
@@ -161,26 +144,26 @@ Known gaps (the missing 24%):
 - `Modeled differently`: the BG_COLLISION_DATA ring **writer**
   (`set_supertile_bg_collisions`, 8218-8317) — runtime collision rewrites go
   through the override list.
-- `Not ported`: landing on rideable enemies (`check_players_collision` tail).
 - Unused/dead ROM labels and small uncited helpers.
 
 ## Known gaps, consolidated (the honest backlog)
 
-1. Bank 1 sound engine (out of scope by design).
-2. Laser pass-through.
-3. Landing on rideable enemies.
-4. Soldier water-landing splash routines.
-5. L6 fire-beam nametable draw (visual only).
-6. Red soldier weapon drop on death.
-7. Wall core diagonal aim (horizontal approximation, unverified).
-8. A few kill tails still route to the 0xFE explosion actor where the ROM
-   runs in-place routines (jumping-soldier default and similar).
-9. RNG is an approximation by design (the busy-loop iteration count is not
+(2026-06-11 sweep: the laser pass-through, rideable-enemy landing and the
+carts' land/collide gate, soldier water splash, L6 fire-beam tile draw, L3/
+L6/L7 kill-tail nibble routing, the 2P horizontal scroll_player branch, and
+the wall-core aim were all closed; the items below are what remains.)
+
+1. Bank 1 sound engine (out of scope by design — the port records sound
+   codes only).
+2. RNG is an approximation by design (the busy-loop iteration count is not
    reproducible without cycle accuracy); the replay pipeline injects the
    recorded RNG, so parity testing is unaffected.
-10. Three renderer findings from the frame-diff sweep (frame 3000 corner +
-    weapon-box supertile, frame 6500 phantom pill-box overlay) — see the
-    memory/pipeline notes; game state is identical, pixels differ.
+3. Three renderer findings from the frame-diff sweep (frame 3000 corner +
+   weapon-box supertile, frame 6500 phantom pill-box overlay) — see the
+   memory/pipeline notes; game state is identical, pixels differ.
+4. bank7 PPU plumbing modeled natively rather than translated: the NMI
+   graphics-buffer group drain and the BG_COLLISION_DATA ring writer
+   (runtime collision rewrites go through the world-anchored override list).
 
 ## Tracking plan
 
