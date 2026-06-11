@@ -39,6 +39,11 @@ EXCLUDE = {
     # RANDOM_NUM is cycle-timing dependent in the ROM (busy-loop between
     # frames) and injected from the recording during replay -- never a signal.
     "rng",
+    # schema v5 inspection-only side data (see tools/structural_check.py)
+    "rampg", "bgcol", "oam",
+    # zp ($06-$0F) is mid-frame ROM scratch -- end-of-frame values depend on
+    # which subroutine ran last; inspection-only like ram_hash
+    "zp",
 }
 
 INPUT_FIELDS = {"controller", "p2_controller", "controller_diff", "p2_controller_diff"}

@@ -27,13 +27,37 @@
 --                                      DPCM controller glitches -- with the current
 --                                      schema's extra fields)
 --   CONTRA_MESEN_PLAY_DUMP_FRAME       with the paths below, dump state at one frame
+--   CONTRA_MESEN_PLAY_DUMP_FRAMES      comma-separated frame list; each dump file gets
+--                                      a ".<frame>" suffix appended to the path
 --   CONTRA_MESEN_PLAY_RAM_DUMP_PATH / OAM / NAMETABLE / PALETTE / FRAMEBUFFER _DUMP_PATH
+--   CONTRA_MESEN_PLAY_HEAVY            "1" adds the heavy per-frame fields (bgcol,
+--                                      rampg) during LIVE recording; they are always
+--                                      on in headless re-trace mode. Heavy fields cost
+--                                      ~2200 extra RAM reads per frame -- fine
+--                                      headless, may lag a live session.
+--
+-- Schema v5 (this recorder) adds per row: score/p2_score (P1/P2 score16),
+-- wstr ($2F), atkflag ($8E), gen (soldier-generator timer:routine:x:y:
+-- genscreen:count), zp ($06-$0F hex), lag (FRAME_COUNTER froze vs previous
+-- row), and in heavy mode bgcol (BG_COLLISION_DATA $0680-$06FF hex) and
+-- rampg (16 FNV-1a hashes over 128-byte RAM pages). All v4 fields keep
+-- their names, so v4 tooling keeps working.
 
 local output_path = os.getenv("CONTRA_MESEN_PLAY_RECORDING_JSONL") or "contra_play_recording.jsonl"
 local max_frame = tonumber(os.getenv("CONTRA_MESEN_PLAY_MAX_FRAME") or "0")
 local no_reset = os.getenv("CONTRA_MESEN_PLAY_NO_RESET") == "1"
 local replay_path = os.getenv("CONTRA_MESEN_PLAY_REPLAY_JSONL")
 local dump_frame = tonumber(os.getenv("CONTRA_MESEN_PLAY_DUMP_FRAME") or "0")
+local dump_frames = {}
+do
+    local list = os.getenv("CONTRA_MESEN_PLAY_DUMP_FRAMES")
+    if list ~= nil then
+        for f in string.gmatch(list, "(%d+)") do
+            dump_frames[tonumber(f)] = true
+        end
+    end
+end
+local heavy = (os.getenv("CONTRA_MESEN_PLAY_HEAVY") == "1")
 local ram_dump_path = os.getenv("CONTRA_MESEN_PLAY_RAM_DUMP_PATH")
 local oam_dump_path = os.getenv("CONTRA_MESEN_PLAY_OAM_DUMP_PATH")
 local nametable_dump_path = os.getenv("CONTRA_MESEN_PLAY_NAMETABLE_DUMP_PATH")
@@ -116,6 +140,7 @@ if replay_path ~= nil then
     if max_frame == 0 then
         max_frame = #replay_p1
     end
+    heavy = true -- headless re-trace: always produce the full v5 field set
 end
 
 local function buttons_from_byte(value)
@@ -191,14 +216,25 @@ local function dump_region(path, memory_type, length)
     dump:close()
 end
 
-local function dump_state()
-    dump_region(ram_dump_path, RAM, 0x800)
-    dump_region(oam_dump_path, OAM, 0x100)
-    dump_region(nametable_dump_path, NAMETABLE, 0x800)
-    dump_region(palette_dump_path, PALETTE, 0x20)
+local function dump_state(suffix)
+    local function with_suffix(path)
+        if path == nil then
+            return nil
+        end
+        if suffix == nil then
+            return path
+        end
+        return path .. "." .. suffix
+    end
 
-    if framebuffer_dump_path ~= nil then
-        local dump = io.open(framebuffer_dump_path, "wb")
+    dump_region(with_suffix(ram_dump_path), RAM, 0x800)
+    dump_region(with_suffix(oam_dump_path), OAM, 0x100)
+    dump_region(with_suffix(nametable_dump_path), NAMETABLE, 0x800)
+    dump_region(with_suffix(palette_dump_path), PALETTE, 0x20)
+
+    local framebuffer_path = with_suffix(framebuffer_dump_path)
+    if framebuffer_path ~= nil then
+        local dump = io.open(framebuffer_path, "wb")
 
         if dump ~= nil then
             local screen = emu.getScreenBuffer()
@@ -216,12 +252,27 @@ local function dump_state()
     end
 end
 
+-- 32-bit FNV-1a, matching play_replay_trace.c's fnv1a_bytes
+local function fnv1a_ram(start, length)
+    local hash = 2166136261
+    for offset = 0, length - 1 do
+        hash = hash ~ read_ram(start + offset)
+        hash = (hash * 16777619) & 0xFFFFFFFF
+    end
+    return hash
+end
+
+local prev_frame_counter = -1
+
 local function emit_frame()
     local enemies = {}
     local pbullets = {}
 
     if dump_frame ~= 0 and frame == dump_frame then
-        dump_state()
+        dump_state(nil)
+    end
+    if dump_frames[frame] then
+        dump_state(tostring(frame))
     end
 
     -- Per-frame enemy / player-bullet digests; must match
@@ -272,6 +323,53 @@ local function emit_frame()
         pending_rng = read_ram(0x34)
     end
 
+    -- v5 additions ----------------------------------------------------------
+    local fc_now = read_ram(0x1A)
+    local lag = (fc_now == prev_frame_counter) and 1 or 0
+    prev_frame_counter = fc_now
+
+    local zp = {}
+    for addr = 0x06, 0x0F do
+        zp[#zp + 1] = string.format("%02X", read_ram(addr))
+    end
+
+    local gen = string.format(
+        "%02X:%02X:%u:%u:%02X:%02X",
+        read_ram(0x7A), read_ram(0x79), read_ram(0x7B), read_ram(0x7C),
+        read_ram(0x195), read_ram(0x196))
+
+    local heavy_fields = ""
+    if heavy then
+        local bgcol = {}
+        for addr = 0x680, 0x6FF do
+            bgcol[#bgcol + 1] = string.format("%02X", read_ram(addr))
+        end
+        local pages = {}
+        for page = 0, 15 do
+            pages[#pages + 1] = string.format("%08x", fnv1a_ram(page * 0x80, 0x80))
+        end
+        local oam = {}
+        for addr = 0x200, 0x2FF do
+            oam[#oam + 1] = string.format("%02X", read_ram(addr))
+        end
+        heavy_fields = string.format(
+            ",\"bgcol\":\"%s\",\"rampg\":\"%s\",\"oam\":\"%s\"",
+            table.concat(bgcol), table.concat(pages, ":"), table.concat(oam))
+    end
+
+    local v5_fields = string.format(
+        ",\"score\":%u,\"p2_score\":%u,\"wstr\":%u,\"atkflag\":%u," ..
+        "\"gen\":\"%s\",\"zp\":\"%s\",\"lag\":%u%s",
+        read_ram(0x7E2) + (read_ram(0x7E3) << 8),
+        read_ram(0x7E4) + (read_ram(0x7E5) << 8),
+        read_ram(0x2F),
+        read_ram(0x8E),
+        gen,
+        table.concat(zp),
+        lag,
+        heavy_fields)
+    ---------------------------------------------------------------------------
+
     output:write(string.format(
         "{\"frame\":%u,\"p1_raw\":%u,\"p2_raw\":%u,\"polls\":%u,\"rng\":%u," ..
         "\"weapon\":%u,\"p2_weapon\":%u," ..
@@ -295,7 +393,7 @@ local function emit_frame()
         "\"lives\":%u,\"game_over\":%u,\"p2_game_over\":%u,\"demo_end\":%u," ..
         "\"oam_offset\":%u,\"enemies\":\"%s\",\"pbul\":\"%s\"," ..
         "\"ram_hash\":\"00000000\",\"pattern_hash\":\"00000000\",\"nametable_hash\":\"00000000\"," ..
-        "\"palette_hash\":\"00000000\",\"framebuffer_hash\":\"00000000\"}\n",
+        "\"palette_hash\":\"00000000\",\"framebuffer_hash\":\"00000000\"%s}\n",
         frame,
         pending_raw[1],
         pending_raw[2],
@@ -363,7 +461,8 @@ local function emit_frame()
         read_ram(0x1F),
         read_ram(0x35),
         table.concat(enemies),
-        table.concat(pbullets)
+        table.concat(pbullets),
+        v5_fields
     ))
     -- live recording flushes every frame for crash-safety; the headless
     -- input-replay re-trace flushes sparsely for speed
@@ -426,7 +525,7 @@ if not no_reset and (booted_frames == nil or booted_frames > 10) then
 end
 
 output:write(string.format(
-    "{\"meta\":1,\"recorder\":\"mesen_play_recorder\",\"raw_source\":\"%s\"}\n",
+    "{\"meta\":1,\"recorder\":\"mesen_play_recorder\",\"schema\":5,\"raw_source\":\"%s\"}\n",
     raw_source
 ))
 output:flush()

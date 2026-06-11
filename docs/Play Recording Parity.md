@@ -108,12 +108,55 @@ drive player 2, it clobbers port 0 (the replay mode skips P2 frames of 0 for
 this reason). `Debug/ScriptWindow/AllowIoOsAccess` must be true and
 `ScriptTimeout` ~60s in settings.json.
 
+## Schema v5
+
+The recorder emits `"schema":5` in the meta row and adds per-frame fields on
+top of v4 (all v4 field names are unchanged, so older traces and tools keep
+working — the comparators diff the field INTERSECTION across schemas):
+
+| Field | Source | Compared? |
+|---|---|---|
+| `score`, `p2_score` | $07E2/3, $07E4/5 (16-bit) | structural |
+| `wstr` | PLAYER_WEAPON_STRENGTH $2F | structural |
+| `atkflag` | ENEMY_ATTACK_FLAG $8E | structural |
+| `gen` | soldier generator `timer:routine:x:y:genscreen:count` ($7A,$79,$7B,$7C,$195,$196) | structural |
+| `lag` | FRAME_COUNTER froze vs previous row | structural |
+| `zp` | $06–$0F hex | inspection only (mid-frame ROM scratch) |
+| `bgcol` | BG_COLLISION_DATA $0680–$06FF hex | inspection only (native has no mirror yet) |
+| `rampg` | 16× FNV-1a over 128-byte RAM pages | inspection only |
+| `oam` | OAM shadow $0200–$02FF hex | inspection only (rotating buffer) |
+
+`bgcol`/`rampg`/`oam` are "heavy" (~2400 extra reads/frame): always on in
+headless re-trace mode, opt-in for live recording via
+`CONTRA_MESEN_PLAY_HEAVY=1`. `CONTRA_MESEN_PLAY_DUMP_FRAMES=f1,f2,...` dumps
+state at multiple frames in one run (files get a `.<frame>` suffix).
+
+## Fast iteration
+
+- `tools/frontier.sh [RECORDING [OUT]]` — build + replay + structural report
+  in one command; it owns the stdout redirection and refuses raw recordings
+  (the two historical foot-guns).
+- `tools/structural_check.py` — per-stage structural report with an automatic
+  per-slot diff of the first divergent `enemies`/`pbul` field;
+  `--frame N` prints the full diff at one frame.
+- Core snapshots: `CONTRA_NATIVE_PLAY_SNAPSHOT_EVERY=N` +
+  `CONTRA_NATIVE_PLAY_SNAPSHOT_DIR=dir` write the flat `ContraCore` during a
+  replay; `CONTRA_NATIVE_PLAY_RESUME=dir/core_F.bin` resumes mid-recording so
+  a deep frontier iterates in seconds (pair with `CONTRA_NATIVE_PLAY_MAX_FRAME`).
+  Snapshots are invalidated by any `ContraCore` layout change (size-checked).
+  Always run the FULL replay before trusting/committing a fix.
+
 ## Caveats
 
 - Record from power-on (the script handles this). Mid-session recordings can't
   be replayed: the native core can't be seeded with mid-game state.
-- OAM, nametable, palette and scroll fields are the visual ground truth.
-  Mid-frame raster effects (the status-bar scroll split) can't diverge in this
+- **The comparison is frame-by-frame over GAME STATE, not pixels.** The
+  framebuffer/nametable/pattern/palette hashes are excluded by design (the
+  port renders through its own compositor), so background rendering bugs are
+  invisible to this pipeline even at ALL GREEN. The v5 `oam` field narrows the
+  gap on the sprite side (inspection); background glitches still need
+  eyeballing or a future renderer-level check.
+- Mid-frame raster effects (the status-bar scroll split) can't diverge in this
   comparison even when rendering differs — those still need eyeballing.
 - During attract demo segments the game generates its own input; recorded
   input is ignored there by both sides, so demos stay comparable.

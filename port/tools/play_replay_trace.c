@@ -52,6 +52,16 @@ enum
     ALIGNMENT_MAX_SHIFT = 3
 };
 
+#define SNAPSHOT_MAGIC 0x504E5343u /* "CSNP" little-endian */
+
+typedef struct SnapshotHeader
+{
+    uint32_t magic;
+    uint32_t version;
+    uint32_t frame;
+    uint32_t core_size;
+} SnapshotHeader;
+
 static uint32_t fnv1a_bytes(const void *data, size_t length)
 {
     const uint8_t *bytes = (const uint8_t *)data;
@@ -291,6 +301,17 @@ int main(int argc, char **argv)
        pairs with the recorder's CONTRA_MESEN_PLAY_SCORE_TRACE_PATH */
     const char *const score_trace_path = getenv("CONTRA_NATIVE_PLAY_SCORE_TRACE_PATH");
     FILE *score_trace = (score_trace_path != NULL) ? fopen(score_trace_path, "w") : NULL;
+    /* core snapshots: write the flat ContraCore every N frames; resume from a
+       snapshot to iterate at a deep frontier in seconds instead of replaying
+       from power-on (full replay still required before trusting/committing) */
+    const char *const snapshot_every_text = getenv("CONTRA_NATIVE_PLAY_SNAPSHOT_EVERY");
+    const char *const snapshot_dir = getenv("CONTRA_NATIVE_PLAY_SNAPSHOT_DIR");
+    const char *const resume_path = getenv("CONTRA_NATIVE_PLAY_RESUME");
+    const unsigned snapshot_every =
+        (snapshot_every_text != NULL) ? (unsigned)strtoul(snapshot_every_text, NULL, 10) : 0u;
+    unsigned resume_frame = 0u;
+    uint8_t prev_fc = 0u;
+    bool prev_fc_valid = false;
     const bool rng_free = (rng_mode_text != NULL) && (strcmp(rng_mode_text, "free") == 0);
     const bool use_latched = (input_mode_text != NULL) && (strcmp(input_mode_text, "latched") == 0);
     const long input_offset = (input_offset_text != NULL) ? strtol(input_offset_text, NULL, 10) : 0;
@@ -328,7 +349,35 @@ int main(int argc, char **argv)
 
     contra_core_init(&core);
 
-    for (frame = 1u; frame <= max_frame; ++frame)
+    if (resume_path != NULL)
+    {
+        FILE *const snap = fopen(resume_path, "rb");
+        SnapshotHeader header;
+
+        if ((snap == NULL) ||
+            (fread(&header, sizeof(header), 1u, snap) != 1u) ||
+            (header.magic != SNAPSHOT_MAGIC) || (header.version != 1u) ||
+            (header.core_size != (uint32_t)sizeof(core)) ||
+            (fread(&core, sizeof(core), 1u, snap) != 1u))
+        {
+            fprintf(stderr, "FAIL: cannot resume from %s (missing/version/size mismatch -- "
+                            "snapshots are invalidated by ContraCore layout changes)\n",
+                    resume_path);
+            if (snap != NULL)
+            {
+                fclose(snap);
+            }
+            free(rows);
+            return 1;
+        }
+        fclose(snap);
+        resume_frame = header.frame;
+        /* skip the power-on alignment report -- it needs the first frames */
+        native_fc_count = ALIGNMENT_WINDOW;
+        fprintf(stderr, "resumed from snapshot at frame %u\n", resume_frame);
+    }
+
+    for (frame = resume_frame + 1u; frame <= max_frame; ++frame)
     {
         const long source = (long)frame + input_offset;
         const uint8_t *const ram = core.ram;
@@ -503,7 +552,7 @@ int main(int argc, char **argv)
             "\"lives\":%u,\"game_over\":%u,\"p2_game_over\":%u,\"demo_end\":%u,"
             "\"oam_offset\":%u,\"enemies\":\"%s\",\"pbul\":\"%s\","
             "\"ram_hash\":\"%08X\",\"pattern_hash\":\"%08X\",\"nametable_hash\":\"%08X\","
-            "\"palette_hash\":\"%08X\",\"framebuffer_hash\":\"%08X\"}\n",
+            "\"palette_hash\":\"%08X\",\"framebuffer_hash\":\"%08X\"",
             frame,
             (unsigned)p1_fed,
             (unsigned)p2_fed,
@@ -578,10 +627,68 @@ int main(int argc, char **argv)
             fnv1a_bytes(core.framebuffer, sizeof(core.framebuffer))
         );
 
+        /* schema v5 tail: mirror of the recorder's v5 additions. bgcol is
+           empty -- the native core computes collision from level data and has
+           no BG_COLLISION_DATA mirror (yet); the comparator excludes it. */
+        {
+            const uint8_t fc_now = ram[CONTRA_RAM_FRAME_COUNTER];
+            unsigned i;
+
+            printf(",\"score\":%u,\"p2_score\":%u,\"wstr\":%u,\"atkflag\":%u,"
+                   "\"gen\":\"%02X:%02X:%u:%u:%02X:%02X\",\"zp\":\"",
+                   (unsigned)ram[0x7E2u] + ((unsigned)ram[0x7E3u] << 8u),
+                   (unsigned)ram[0x7E4u] + ((unsigned)ram[0x7E5u] << 8u),
+                   (unsigned)ram[CONTRA_RAM_PLAYER_WEAPON_STRENGTH],
+                   (unsigned)ram[CONTRA_RAM_ENEMY_ATTACK_FLAG],
+                   (unsigned)ram[CONTRA_RAM_SOLDIER_GENERATION_TIMER],
+                   (unsigned)ram[0x79u],
+                   (unsigned)ram[0x7Bu],
+                   (unsigned)ram[0x7Cu],
+                   (unsigned)ram[CONTRA_RAM_SOLDIER_GEN_SCREEN],
+                   (unsigned)ram[CONTRA_RAM_SCREEN_GEN_SOLDIERS]);
+            for (i = 0x06u; i <= 0x0Fu; ++i)
+            {
+                printf("%02X", (unsigned)ram[i]);
+            }
+            printf("\",\"lag\":%u,\"bgcol\":\"\",\"rampg\":\"",
+                   (prev_fc_valid && (fc_now == prev_fc)) ? 1u : 0u);
+            for (i = 0u; i < 16u; ++i)
+            {
+                printf("%s%08x", (i != 0u) ? ":" : "",
+                       fnv1a_bytes(core.ram + (i * 0x80u), 0x80u));
+            }
+            printf("\",\"oam\":\"");
+            for (i = 0u; i < 0x100u; ++i)
+            {
+                printf("%02X", (unsigned)core.latched_oam[i]);
+            }
+            printf("\"}\n");
+            prev_fc = fc_now;
+            prev_fc_valid = true;
+        }
+
         if (score_trace != NULL)
         {
             fprintf(score_trace, "%u %u\n", frame,
                     (unsigned)ram[0x7E2u] + ((unsigned)ram[0x7E3u] << 8u));
+        }
+
+        if ((snapshot_every != 0u) && (snapshot_dir != NULL) &&
+            ((frame % snapshot_every) == 0u))
+        {
+            char snap_path[1024];
+            FILE *snap;
+
+            snprintf(snap_path, sizeof(snap_path), "%s/core_%u.bin", snapshot_dir, frame);
+            snap = fopen(snap_path, "wb");
+            if (snap != NULL)
+            {
+                const SnapshotHeader header = {SNAPSHOT_MAGIC, 1u, frame, (uint32_t)sizeof(core)};
+
+                fwrite(&header, sizeof(header), 1u, snap);
+                fwrite(&core, sizeof(core), 1u, snap);
+                fclose(snap);
+            }
         }
     }
 
