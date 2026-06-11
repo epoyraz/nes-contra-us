@@ -104,18 +104,22 @@ typedef struct ContraCore
        the level supertile data and has no per-tile collision array like the ROM's
        BG_COLLISION_DATA, so cleared cells are recorded here and consulted by the
        outdoor collision lookup. Reset on level load. */
-    uint16_t l1_bridge_gap_world_x[24];
-    uint8_t l1_bridge_gap_screen_y[24];
+    uint16_t l1_bridge_gap_world_x[48];
+    uint8_t l1_bridge_gap_screen_y[48];
     /* Destroyed-bridge super-tile index drawn for each cleared cell. The native
        background re-composes from the level supertile data every frame and does
        not persist nametable writes, so (like the level-2 wall structures) the
        destroyed super-tiles must be re-drawn each frame from this record or the
-       intact bridge re-appears over the gap. */
-    uint8_t l1_bridge_gap_tile[24];
-    /* Replacement collision nibble for the cell (set_supertile_bg_collision's
-       left-column code: bits 0-1 = top 16px, bits 2-3 = bottom 16px). The
-       bridge clears to 0x00; the boss-door tunnel cells use 0x00 or 0x04. */
-    uint8_t l1_bridge_gap_coll[24];
+       intact bridge re-appears over the gap. 0 = collision-only entry (the
+       level-7 spiked walls draw through the L7 overlay cache instead). */
+    uint8_t l1_bridge_gap_tile[48];
+    /* Replacement collision codes for the cell, one nibble per 16px half:
+       low nibble = left half, high nibble = right half (set_supertile_bg_
+       collisions takes separate left/right column codes). Within a nibble,
+       bits 0-1 = top 16px row, bits 2-3 = bottom row. The bridge clears to
+       0x00; boss-door tunnel cells use 0x00/0x44; the risen spiked wall is
+       0x00 left / 0x0F right (the wall column fills the cell's right half). */
+    uint8_t l1_bridge_gap_coll[48];
     uint8_t l1_bridge_gap_count;
     /* Render cache for faithful level-1 background super-tile enemies (red turret
        0x07, rotating gun 0x04, door tunnel, etc.). Like the level-2 wall
@@ -156,5 +160,13 @@ void contra_core_debug_warp_level2_boss(ContraCore *core);
 /* DEBUG (not part of the faithful port): fast-forward an initialized core straight to
    Level 4 gameplay so a front-end can launch directly on Level 4. */
 void contra_core_debug_warp_level4(ContraCore *core);
+
+/* DEBUG (not part of the faithful port): fast-forward an initialized core straight to
+   Level 5 (snow field) gameplay so a front-end can launch directly on Level 5. */
+void contra_core_debug_warp_level5(ContraCore *core);
+
+/* DEBUG (not part of the faithful port): fast-forward an initialized core straight to
+   Level 7 (hangar) gameplay so a front-end can launch directly on Level 7. */
+void contra_core_debug_warp_level7(ContraCore *core);
 
 #endif

@@ -142,6 +142,14 @@ int main(int argc, char **argv)
     {
         contra_core_debug_warp_level4(&core);
     }
+    else if (getenv("CONTRA_START_LEVEL5") != NULL)
+    {
+        contra_core_debug_warp_level5(&core);
+    }
+    else if (getenv("CONTRA_START_LEVEL7") != NULL)
+    {
+        contra_core_debug_warp_level7(&core);
+    }
 
     previous_counter = (uint64_t)SDL_GetPerformanceCounter();
     counter_frequency = (double)SDL_GetPerformanceFrequency();
