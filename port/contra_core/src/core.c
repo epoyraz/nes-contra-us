@@ -5486,22 +5486,41 @@ static void contra_load_bank_2_set_players_paused_sprite_attr(ContraCore *core)
     contra_set_player_sprite_and_attrs(core, 1u);
 }
 
+/* scroll_player (bank7:4012-4050): keep the player who is NOT driving the
+   scroll at their on-screen position. Horizontal levels walk them back 1px
+   (the ROM assumes 1px scroll/frame -- including its documented moving-cart
+   2px bug); vertical levels carry them down by FRAME_SCROLL. */
 static void contra_scroll_vertical_non_scrolling_player(ContraCore *core, uint8_t active_players)
 {
     uint8_t *const ram = core->ram;
     size_t scrolled_player;
 
-    if ((active_players != 0x03u) ||
-        (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u) ||
-        (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] == 0u) ||
-        (ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] != 0u) ||
-        (ram[CONTRA_RAM_FRAME_SCROLL] == 0u) ||
+    if ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u) ||
         (ram[CONTRA_RAM_PLAYER_FRAME_SCROLL + 0u] == ram[CONTRA_RAM_PLAYER_FRAME_SCROLL + 1u]))
     {
         return;
     }
-
     scrolled_player = (ram[CONTRA_RAM_PLAYER_FRAME_SCROLL + 0u] < ram[CONTRA_RAM_PLAYER_FRAME_SCROLL + 1u]) ? 0u : 1u;
+
+    if (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] == 0u)
+    {
+        /* Horizontal: the ROM decs unconditionally and relies on the
+           game-over path re-parking a dead player's sprite afterwards; the
+           port skips the dec for them instead (same NMI-visible state). */
+        if (ram[CONTRA_RAM_P1_GAME_OVER_STATUS + scrolled_player] == 0u)
+        {
+            ram[CONTRA_RAM_SPRITE_X_POS + scrolled_player] =
+                (uint8_t)(ram[CONTRA_RAM_SPRITE_X_POS + scrolled_player] - 1u);
+        }
+        return;
+    }
+
+    if ((active_players != 0x03u) ||
+        (ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] != 0u) ||
+        (ram[CONTRA_RAM_FRAME_SCROLL] == 0u))
+    {
+        return;
+    }
     ram[CONTRA_RAM_SPRITE_Y_POS + scrolled_player] =
         (uint8_t)(ram[CONTRA_RAM_SPRITE_Y_POS + scrolled_player] + ram[CONTRA_RAM_FRAME_SCROLL]);
     if (ram[CONTRA_RAM_SPRITE_Y_POS + scrolled_player] < ram[CONTRA_RAM_FRAME_SCROLL])
