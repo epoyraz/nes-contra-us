@@ -106,15 +106,61 @@ The asymmetry is the core problem: native RAM can be dumped at any frame
   regression in an already-green stage is caught at commit time rather than
   at the next manual full verify.
 
-## Known state when this was written
+## Known state (updated after the all-green milestone)
 
-- Stages 1-2 structurally green; stage 3 frontier at frame 20968 (48.9%).
-- In-flight diagnosis: the port's outdoor collision lookup reads level-3
-  screen 5/6's left column (x=0x0A) as all-empty at VERTICAL_SCROLL=0xC9
-  while the ROM finds floor there — this flips two soldier-generation search
-  outcomes and shifts the spawn phase by 4 frames. The quadrant-snap fix
-  (sample the 16x16 quadrant's top-left tile, matching `set_tile_collision`)
-  is already applied and kept stages 1-2 green but did not resolve the
-  left-column reads; the screen-seam/nametable mapping of the vertical
-  lookup is the remaining suspect. Probe instrumentation (env
-  `CONTRA_PROBE_SOLDIER_GEN`) is in the working tree, uncommitted.
+- **ALL FOUR STAGES STRUCTURALLY GREEN**: the full 39,970-frame reference
+  recording replays with zero structural divergence.
+- The recording only exercises stages 1-4. Stages 5-8 gameplay is untested by
+  this bench — the single highest-value next step is recording play of the
+  remaining levels (which is also where the per-level-recordings item pays off).
+- Remaining cleanup: 410 cosmetic sprite-only somersault frames at 2339+; the
+  barrier touch-kill path skips score/set_destroyed_enemy_routine; the L3
+  boss_mouth_routine_08 supertile draws are budget-only (no visual cache);
+  stale test goldens (3 attract_level1_* + the checkpoint_trace suites) should
+  be regenerated now that the port is known-good.
+
+## Proven since this doc was written
+
+- **Side-channel scalar traces work.** The score trace pair
+  (`CONTRA_MESEN_PLAY_SCORE_TRACE_PATH` / `CONTRA_NATIVE_PLAY_SCORE_TRACE_PATH`,
+  one "frame value" line per frame, no schema change) found six missing
+  1,000-point weapon-pickup awards in minutes after RAM-state archaeology had
+  stalled. The pattern generalizes: any invisible scalar (attack flag,
+  generator timer, plating count) can get the same cheap treatment without
+  re-recording the reference.
+- **Paired RAM dumps localize anything.** A Mesen headless re-trace dump plus a
+  native dump at the same frame, diffed over the enemy arrays, pinpointed the
+  grenade-beat parity bug in one comparison. Headless Mesen re-traces to frame
+  N are fast with `CONTRA_MESEN_PLAY_MAX_FRAME=N+epsilon`.
+- **Trap: Mesen's CWD is not the shell's.** All `CONTRA_MESEN_*` env-var paths
+  must be ABSOLUTE or the recorder exits 1 before booting the ROM.
+- **Trap: enemy array addresses.** `ENEMY_VAR_1` is `$5B8` (the `$4xx` range is
+  unrelated). `src/ram.asm` is the only authority; an hour was lost to dumps
+  read at guessed addresses.
+
+## Recurring 6502 bug classes (port-review checklist)
+
+Nearly every late-stage divergence fell into one of five classes. When porting
+or reviewing an enemy routine, check each:
+
+1. **Chained carry into `adc`/`sbc`.** The ROM rarely clears carry before
+   arithmetic; the carry left by the PREVIOUS instruction (a `cmp` equality, a
+   borrowing `sbc`, a `ror`, an `asl` chain) is part of the math. Examples:
+   soldier-gen player pick (expiry-tick carry), dragon arm hook delay
+   ((RN+FC+1)&3 from the equality cmp), gemini attack delay ((RN+FC)>>1 on the
+   stored sum).
+2. **`lsr` bit-0 location tests.** `LEVEL_LOCATION_TYPE` is tested with `lsr`
+   (bit 0 only): indoor rooms are 0x01, but the BOSS SCREEN is 0x80 and takes
+   the OUTDOOR branch (aim Y, jump velocity, collision boxes).
+3. **`enable_bullet_enemy_collision` vs `enable_enemy_collision`.** Bit 7 only
+   vs bits 7+0. A wrong variant flips sw 0x0F/0x0E and changes player-touch
+   behavior invisibly until a graze.
+4. **Husk semantics.** Table tails end in `remove_enemy` (routine+sprites
+   cleared, TYPE KEPT) — never `clear_enemy`. Slot reuse and the digest both
+   key on it. Zombie tails: routines keep executing after mid-routine removal;
+   only `advance_enemy_routine`'s routine==0 guard stops the advance.
+5. **Dispatch table tails + kill nibble routing.** Every enemy's routine table
+   has appended init_explosion/explosion/remove entries, and kills route
+   through set_destroyed_enemy_routine's nibble (raise-only). The 0xFE
+   explosion-actor fallback is never faithful: it wipes TYPE and skips the
+   in-place cascade that destroy_all and chained deaths rely on.
