@@ -16430,9 +16430,10 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x02u: contra_rom_blue_soldier_routine_01(core, x); break;
                 case 0x03u: contra_rom_blue_soldier_routine_02(core, x); break;
                 case 0x04u: contra_rom_blue_soldier_routine_03(core, x); break;
-                case 0x05u: contra_rom_enemy_routine_init_explosion_step(core, x); break;
-                case 0x06u: contra_rom_enemy_routine_explosion_step(core, x); break;
-                case 0x07u: contra_rom_clear_enemy(core, x); break;
+                case 0x05u: contra_rom_enemy_routine_init_explosion_inplace(core, x); break;
+                case 0x06u: contra_rom_enemy_routine_explosion_inplace(core, x); break;
+                /* enemy_routine_remove_enemy: the husk keeps its TYPE */
+                case 0x07u: contra_rom_enemy_routine_remove_inplace(core, x); break;
                 default: break;
             }
             break;
@@ -16442,9 +16443,10 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x01u: contra_rom_red_blue_soldier_routine_00(core, x); break;
                 case 0x02u: contra_rom_red_soldier_routine_01(core, x); break;
                 case 0x03u: contra_rom_red_soldier_routine_02(core, x); break;
-                case 0x04u: contra_rom_enemy_routine_init_explosion_step(core, x); break;
-                case 0x05u: contra_rom_enemy_routine_explosion_step(core, x); break;
-                case 0x06u: contra_rom_clear_enemy(core, x); break;
+                case 0x04u: contra_rom_enemy_routine_init_explosion_inplace(core, x); break;
+                case 0x05u: contra_rom_enemy_routine_explosion_inplace(core, x); break;
+                /* enemy_routine_remove_enemy: the husk keeps its TYPE */
+                case 0x06u: contra_rom_enemy_routine_remove_inplace(core, x); break;
                 default: break;
             }
             break;
