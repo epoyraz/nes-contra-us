@@ -97,8 +97,8 @@
  * routine but not always the line range) or ROM-backed (the port reads the
  * original data bytes from the ROM image at runtime). Known NOT ported and
  * deliberately absent from this ledger: the bank1 APU sound engine (1-4058);
- * bank0 soldier_routine_09/0a (water-landing splash, 1615-1640) and the fire
- * beam nametable draw (draw_fire_beam_if_anim_elapsed/draw_fire_beam_tiles,
+ * the bank0 fire beam nametable draw
+ * (draw_fire_beam_if_anim_elapsed/draw_fire_beam_tiles,
  * 7389-7447); bank7 NMI/sound plumbing (232-441), the NMI graphics-buffer
  * drain (write_cpu_graphics_buffer_to_ppu, 2666-2785), and the
  * BG_COLLISION_DATA ring writer (set_supertile_bg_collisions, 8218-8317 --
@@ -8690,6 +8690,45 @@ static void contra_rom_soldier_routine_05(ContraCore *core, uint8_t x)
     contra_rom_apply_gravity_to_destroyed_soldier(core, x);
 }
 
+/* soldier_routine_09 (bank0:1615-1626): landed in water -- splash sprite
+   (frame 8), sink 0x10, then the splash animation. */
+static void contra_rom_soldier_routine_09(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = 0x08u;
+    ram[CONTRA_RAM_ENEMY_Y_POS + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + 0x10u);
+    contra_rom_set_soldier_sprite(core, x);
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x08u);
+}
+
+/* soldier_routine_0a (bank0:1627-1640): step the splash to the puddle (frame 9,
+   sinking 8 more) on an 8-frame beat, then remove the soldier. */
+static void contra_rom_soldier_routine_0a(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        contra_rom_set_soldier_sprite(core, x);
+        contra_rom_add_scroll_to_enemy_pos(core, x);
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x08u;
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+    if (ram[CONTRA_RAM_ENEMY_FRAME + x] >= 0x0Au)
+    {
+        contra_rom_remove_enemy(core, x);
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_Y_POS + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + 0x08u);
+    contra_rom_set_soldier_sprite(core, x);
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+}
+
 /* sniper_routine_04 (bank0.asm:2021): hit -- corpse sprite (frame 0x06), launch. */
 static void contra_rom_sniper_routine_04(ContraCore *core, uint8_t x)
 {
@@ -9127,10 +9166,9 @@ static void contra_rom_wall_core_routine_02(ContraCore *core, uint8_t x)
 }
 
 /* wall_core_routine_03 (bank0:3265): once enough soldier attack rounds have
-   happened and the core is open (unplated) and high enough, fire at the player on
-   a cadence. The ROM aims diagonally (aim_and_create_enemy_bullet); the exact
-   diagonal solve is RNG/aim-table bound, so fire horizontally at the nearest
-   player as an approximation (bullet type 0x03, speed code 0x05). */
+   happened and the core is open (unplated) and high enough, fire at the closest
+   player on a 0x28 cadence through the quadrant aim solve
+   (aim_and_create_enemy_bullet, type 3, speed code 5). */
 static void contra_rom_wall_core_routine_03(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -10066,7 +10104,8 @@ static const int8_t contra_jumping_soldier_y_vel_tbl[20] = {
 /* jumping_soldier_routine_00 (bank0:3548): decide whether this is the room's one
    red weapon-dropping soldier (only after the first attack round, one per room;
    others get their red bit cleared), then init position/velocity. The red
-   weapon DROP on death is deferred -- red soldiers die via the generic explosion. */
+   weapon drop on death is jumping_soldier_routine_04 (mid-room kills become
+   the carried weapon item via play_explosion_sound). */
 static void contra_rom_jumping_soldier_routine_00(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -18042,7 +18081,11 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                     case 0x01u: contra_rom_falling_rock_routine_00(core, x); break;
                     case 0x02u: contra_rom_falling_rock_routine_01(core, x); break;
                     case 0x03u: contra_rom_falling_rock_routine_02(core, x); break;
-                    default: break; /* explosion via the 0xFE actor */
+                    /* table tail (bank0:4397-4399): the in-place explosion trio */
+                    case 0x04u: contra_rom_enemy_routine_init_explosion_inplace(core, x); break;
+                    case 0x05u: contra_rom_enemy_routine_explosion_inplace(core, x); break;
+                    case 0x06u: contra_rom_enemy_routine_remove_inplace(core, x); break;
+                    default: break;
                 }
             }
             else
@@ -18559,8 +18602,9 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x07u: contra_rom_enemy_routine_init_explosion_inplace(core, x); break;
                 case 0x08u: contra_rom_enemy_routine_explosion_inplace(core, x); break;
                 case 0x09u: contra_rom_enemy_routine_remove_inplace(core, x); break;
-                default: break; /* 0x0A/0x0B (soldier_routine_09/0a, the
-                                   water-landing splash) are not ported */
+                case 0x0Au: contra_rom_soldier_routine_09(core, x); break;
+                case 0x0Bu: contra_rom_soldier_routine_0a(core, x); break;
+                default: break;
             }
             break;
         case 0x02u: /* pill box / weapon box */
@@ -18756,8 +18800,8 @@ static void contra_rom_add_enemy_score(ContraCore *core, uint8_t slot, uint8_t p
 /* bullet_enemy_collision_test (bank7.asm:6928) + set_enemy_collision_box +
    bullet_collision_logic, outdoor path: test each live player bullet against the
    enemy's bullet hitbox; on a hit subtract HP (HP >= 0xF0 is invulnerable, e.g.
-   the open pill box) and remove the enemy when HP reaches 0.
-   DEFERRED: laser pass-through (the bullet is consumed on any hit). */
+   the open pill box) and remove the enemy when HP reaches 0. Laser hits consume
+   the beam's oldest segment (pass-through). */
 static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slot)
 {
     uint8_t *const ram = core->ram;
@@ -18831,8 +18875,26 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
            bullet is consumed (routine 2) even against a dead/invulnerable
            enemy. */
         hp = ram[CONTRA_RAM_ENEMY_HP + slot];
-        ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE + b] = 0x02u;
-        ram[CONTRA_RAM_PLAYER_BULLET_TIMER + b] = 0x06u;
+        if (ram[CONTRA_RAM_PLAYER_BULLET_SLOT + b] == 0x05u)
+        {
+            /* laser (bank7:7013-7032): consume the beam's OLDEST in-flight
+               segment (the owner's first slot in routine 1) instead of the
+               hit one -- the beam collapses from the tail while a long
+               overlap keeps damaging each frame (the pass-through). */
+            unsigned s = (b < 0x0Au) ? 0u : 0x0Au;
+
+            while ((s != b) && (ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE + s] != 0x01u))
+            {
+                ++s;
+            }
+            ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE + s] = 0x02u;
+            ram[CONTRA_RAM_PLAYER_BULLET_TIMER + s] = 0x06u;
+        }
+        else
+        {
+            ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE + b] = 0x02u;
+            ram[CONTRA_RAM_PLAYER_BULLET_TIMER + b] = 0x06u;
+        }
         if ((hp == 0u) || (hp >= 0xF0u))
         {
             return; /* already dead, or invulnerable this frame */
@@ -18878,6 +18940,31 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
                 {
                     dest_routine = l8_kill_routine[dead_type - 0x10u];
                 }
+            }
+            else if ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x06u) &&
+                     (dead_type >= 0x11u) && (dead_type <= 0x18u))
+            {
+                /* L7 nibbles (bank7:8138-8142): rising spiked wall $05 low,
+                   spiked wall $30 high, moving/immobile cart $44, armored
+                   door $35 high, mortar $35 low, soldier generator $50 high */
+                static const uint8_t l7_kill_routine[8] = {
+                    0x05u, 0x03u, 0x00u, 0x04u, 0x04u, 0x03u, 0x05u, 0x05u};
+
+                dest_routine = l7_kill_routine[dead_type - 0x11u];
+            }
+            else if ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x05u) && (dead_type == 0x13u))
+            {
+                dest_routine = 0x07u; /* L6 giant robot: nibble $07 low (bank7:8137)
+                                         -> boss_giant_soldier_routine_06 */
+            }
+            else if ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x05u) && (dead_type == 0x14u))
+            {
+                dest_routine = 0x03u; /* L6 spiked disk: nibble $30 high -> clear */
+            }
+            else if ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x02u) && (dead_type == 0x13u))
+            {
+                dest_routine = 0x04u; /* L3 falling rock: nibble $24 low (bank7:8133)
+                                         -> its appended init_explosion */
             }
             else if ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u) && (dead_type == 0x14u))
             {
@@ -18981,7 +19068,7 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
             {
                 dest_routine = 0x03u; /* flying capsule -> routine_02 (drop weapon item) */
             }
-            else if ((dead_type == 0x11u) && !is_indoor_base)
+            else if ((dead_type == 0x11u) && (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x00u))
             {
                 dest_routine = 0x03u; /* L1 fortress boss door -> boss_defeated_routine */
             }
