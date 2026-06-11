@@ -1,0 +1,26 @@
+port/contra_core/src/core.c
+  s_d6f4243e7218de::t_432aa0294c1a62 18543-18544
+  s_d6f4243e7218de::t_52600691a4ac67 94-250
+  s_d6f4243e7218de::t_11d1e9466ff44a 8291-8293
+  s_d6f4243e7218de::t_c7a5ab1b15a907 9646-9647
+  s_d6f4243e7218de::t_68214fdc44d007 11645-11646
+  s_d6f4243e7218de::t_5c28250e302951 12775-12778,12783
+"docs/Native Port Coverage.md"
+  s_d6f4243e7218de::t_78464cb3d8df90 3,7-16,18-29,37-40,42,44-54,56-192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "72498936ff20e610886b0d4acded9430d57321d7",
+  "prompts": {},
+  "sessions": {
+    "s_d6f4243e7218de": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "825b5bf6-c121-4087-8508-1505c9d1a7d5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
