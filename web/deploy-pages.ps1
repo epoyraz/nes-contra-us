@@ -40,6 +40,7 @@ if ($SkipBuild) {
 # Files that make up the served site.
 $RuntimeFiles = @("index.html", "styles.css", "controller.js")
 $DistFiles    = @("contra.js", "contra.wasm", "contra.data")
+$WorkflowTemplate = Join-Path $ScriptDir "pages-workflow.yml"
 
 foreach ($f in $RuntimeFiles) {
   if (-not (Test-Path (Join-Path $ScriptDir $f))) { throw "Missing web/$f" }
@@ -47,6 +48,7 @@ foreach ($f in $RuntimeFiles) {
 foreach ($f in $DistFiles) {
   if (-not (Test-Path (Join-Path $DistDir $f))) { throw "Missing web/dist/$f (build first)" }
 }
+if (-not (Test-Path $WorkflowTemplate)) { throw "Missing web/pages-workflow.yml" }
 
 # 2. Prepare an isolated worktree for the gh-pages branch so the current
 #    checkout is never disturbed.
@@ -73,6 +75,8 @@ try {
   New-Item -ItemType Directory -Force -Path (Join-Path $Wt "dist") | Out-Null
   foreach ($f in $RuntimeFiles) { Copy-Item (Join-Path $ScriptDir $f) $Wt }
   foreach ($f in $DistFiles)    { Copy-Item (Join-Path $DistDir $f) (Join-Path $Wt "dist") }
+  New-Item -ItemType Directory -Force -Path (Join-Path $Wt ".github/workflows") | Out-Null
+  Copy-Item $WorkflowTemplate (Join-Path $Wt ".github/workflows/pages.yml")
   # .nojekyll: serve files as-is (no Jekyll processing).
   New-Item -ItemType File -Path (Join-Path $Wt ".nojekyll") -Force | Out-Null
 
