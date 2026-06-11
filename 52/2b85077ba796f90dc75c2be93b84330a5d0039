@@ -1,0 +1,21 @@
+"docs/Native Port Coverage.md"
+  s_d6f4243e7218de::t_106e4e79c00ee2 69
+  s_d6f4243e7218de::t_fd9691a61d8aa9 45,53
+  s_d6f4243e7218de::t_5d80ddbd81c4fe 76-78,151-158,161-166
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "522b85077ba796f90dc75c2be93b84330a5d0039",
+  "prompts": {},
+  "sessions": {
+    "s_d6f4243e7218de": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "825b5bf6-c121-4087-8508-1505c9d1a7d5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
