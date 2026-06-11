@@ -453,6 +453,8 @@ static const uint16_t contra_level_2_4_boss_nametable_update_palette_data_addr =
 static const uint16_t contra_level_3_nametable_update_supertile_data_addr = 0x9368u;
 static const uint16_t contra_level_3_nametable_update_palette_data_addr = 0x965Fu;
 static const uint16_t contra_level_7_tile_animation_addr = 0xA56Eu;
+static const uint16_t contra_level_5_nametable_update_supertile_data_addr = 0x9BA8u;
+static const uint16_t contra_level_5_nametable_update_palette_data_addr = 0x9DB9u;
 static const uint16_t contra_level_7_nametable_update_supertile_data_addr = 0xABEAu;
 static const uint16_t contra_level_7_nametable_update_palette_data_addr = 0xAD4Au;
 static const uint16_t contra_demo_input_pointer_table_addr = 0xB3D2u;
@@ -14542,14 +14544,15 @@ static void contra_rom_ice_grenade_routine_01(ContraCore *core, uint8_t x)
 }
 
 /* ice_separator_routine_00 (bank0:7143-7156): pipe joint sprite; when the tank's
-   scroll flag is set it moves left by the frame scroll, otherwise it is terrain-
-   anchored through add_scroll_to_enemy_pos. */
+   ICE-JOINT scroll flag ($7F, set for the tank's whole visit) is set it moves
+   left by one whenever the frame scrolls, otherwise it is terrain-anchored
+   through add_scroll_to_enemy_pos. */
 static void contra_rom_ice_separator_routine_00(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
 
     ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0xC4u;
-    if (ram[CONTRA_RAM_TANK_AUTO_SCROLL] != 0u)
+    if (ram[CONTRA_RAM_TANK_ICE_JOINT_SCROLL_FLAG] != 0u)
     {
         if (ram[CONTRA_RAM_FRAME_SCROLL] != 0u)
         {
@@ -14559,6 +14562,413 @@ static void contra_rom_ice_separator_routine_00(ContraCore *core, uint8_t x)
         return;
     }
     contra_rom_add_scroll_to_enemy_pos(core, x);
+}
+
+/* ===== level-5 tank (type 0x12), bank0:6250-6650 ===========================
+   The tank is BACKGROUND super-tiles, not a sprite: it scrolls itself onto the
+   screen with TANK_AUTO_SCROLL, redraws its tires/turret as nametable
+   super-tiles on the graphics budget, and tracks its own visibility in
+   ENEMY_X_VEL_ACCUM (0x01 = off right, 0x00 = visible, 0xFF = off left). */
+static const uint8_t contra_tank_wheel_supertile_tbl[4] = {0x10u, 0x11u, 0x14u, 0x15u};
+static const uint8_t contra_tank_attack_delay_tbl[2] = {0x00u, 0xF8u};
+static const uint8_t contra_tank_turret_supertile_tbl[3] = {0x13u, 0x12u, 0x0Fu};
+static const uint8_t contra_tank_palette_tbl[5] = {0x61u, 0x60u, 0x5Fu, 0x3Fu, 0x3Fu};
+/* {x off, y off, bullet type|angle} per turret direction 0x0A..0x0C */
+static const uint8_t contra_tank_bullet_pos_vel_tbl[9] = {
+    0x24u, 0x03u, 0x09u,
+    0x29u, 0x09u, 0x0Au,
+    0x2Eu, 0x14u, 0x0Cu};
+/* {visibility add, blank-tile x, blank-tile y, explosion x, explosion y} */
+static const uint8_t contra_tank_destroy_tbl[30] = {
+    0x00u, 0x16u, 0x04u, 0x1Cu, 0x0Eu,
+    0x00u, 0x16u, 0xE4u, 0x1Cu, 0xF2u,
+    0xFFu, 0xF6u, 0x04u, 0x00u, 0x0Eu,
+    0xFFu, 0xF6u, 0xE4u, 0x00u, 0xF2u,
+    0xFFu, 0xD6u, 0x04u, 0xE4u, 0x0Eu,
+    0xFFu, 0xD6u, 0xE4u, 0xE4u, 0xF2u};
+
+static void contra_level7_record_supertile_update(ContraCore *core, int x, int y, uint8_t supertile_index);
+
+/* load_bank_3_update_nametable_supertile on level 5: a full super-tile stamp on
+   the 0x40 graphics budget; the drawn cell is recorded in the (generic)
+   position-keyed overlay cache so the native renderer persists it. Returns
+   false when the budget rejects the draw (the ROM's carry-set). */
+static bool contra_rom_level5_draw_nametable_supertile(
+    ContraCore *core, uint8_t px, uint8_t py, uint8_t code)
+{
+    if (!contra_rom_enemy_supertile_draw_budget(core))
+    {
+        return false;
+    }
+    contra_level7_record_supertile_update(core, (int)px, (int)py, (uint8_t)(code & 0x7Fu));
+    return true;
+}
+
+/* tank_update_pos (bank0:6359): X -= FRAME_SCROLL + TANK_AUTO_SCROLL; an
+   underflow steps the visibility state down (appearing from the right, or
+   leaving to the left) and -- while the tank has HP -- TOGGLES the bullet
+   collision bits (sw ^= 0x81): on for the visible crossing, back off for the
+   exit crossing. */
+static void contra_rom_tank_update_pos(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t scroll =
+        (uint8_t)(ram[CONTRA_RAM_FRAME_SCROLL] + ram[CONTRA_RAM_TANK_AUTO_SCROLL]);
+    const uint8_t old_x = ram[CONTRA_RAM_ENEMY_X_POS + x];
+
+    ram[CONTRA_RAM_ENEMY_X_POS + x] = (uint8_t)(old_x - scroll);
+    if (old_x >= scroll)
+    {
+        return; /* no underflow */
+    }
+    ram[CONTRA_RAM_ENEMY_X_VEL_ACCUM + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_X_VEL_ACCUM + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_HP + x] == 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] ^ 0x81u);
+}
+
+/* tank_check_removal (bank0:6520): once the tank is off-screen left
+   (visibility negative) and X wraps below 0xD0, remove it and restore the
+   scroll/palette flags. Returns false when removed (the ROM's carry-clear). */
+static bool contra_rom_tank_check_removal(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    if ((ram[CONTRA_RAM_ENEMY_X_VEL_ACCUM + x] & 0x80u) == 0u)
+    {
+        return true;
+    }
+    if (ram[CONTRA_RAM_ENEMY_X_POS + x] >= 0xD0u)
+    {
+        return true;
+    }
+    contra_rom_remove_enemy(core, x);
+    ram[CONTRA_RAM_TANK_AUTO_SCROLL] = 0x00u;
+    ram[CONTRA_RAM_PAUSE_PALETTE_CYCLE] = 0x00u;
+    ram[CONTRA_RAM_TANK_ICE_JOINT_SCROLL_FLAG] = 0x00u;
+    return false;
+}
+
+/* tank_set_palette (bank0:6634): palette row 2 follows HP in 16-point steps. */
+static void contra_rom_tank_set_palette(ContraCore *core, uint8_t x)
+{
+    core->ram[CONTRA_RAM_LEVEL_PALETTE_INDEX + 2u] =
+        contra_tank_palette_tbl[(core->ram[CONTRA_RAM_ENEMY_HP + x] >> 4u) & 0x07u];
+    contra_load_palettes_color_to_cpu(core, 0x10u);
+}
+
+/* tank_move_logic + the tire redraw (bank0:6300-6356). */
+static void contra_rom_tank_move_logic(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t tire_x;
+    uint8_t vis;
+
+    if (ram[CONTRA_RAM_ENEMY_HP + x] != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] - 1u);
+        if (ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] == 0u)
+        {
+            contra_play_sound(core, 0x1Eu); /* tank engine */
+            ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x06u;
+        }
+    }
+
+    {
+        const uint8_t supertile =
+            contra_tank_wheel_supertile_tbl[ram[CONTRA_RAM_FRAME_COUNTER] & 0x03u];
+
+        if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x01u) == 0u)
+        {
+            /* front tire: X - 0x0C, the borrow chains into the visibility check */
+            const uint8_t ex = ram[CONTRA_RAM_ENEMY_X_POS + x];
+
+            tire_x = (uint8_t)(ex - 0x0Cu);
+            vis = (uint8_t)(ram[CONTRA_RAM_ENEMY_X_VEL_ACCUM + x] -
+                            ((ex < 0x0Cu) ? 1u : 0u));
+        }
+        else
+        {
+            /* back tire: X + 0x14, the carry chains into the visibility check */
+            const unsigned sum = (unsigned)ram[CONTRA_RAM_ENEMY_X_POS + x] + 0x14u;
+
+            tire_x = (uint8_t)sum;
+            vis = (uint8_t)(ram[CONTRA_RAM_ENEMY_X_VEL_ACCUM + x] + (sum >> 8u));
+        }
+        if (vis == 0u)
+        {
+            (void)contra_rom_level5_draw_nametable_supertile(
+                core, tire_x, ram[CONTRA_RAM_ENEMY_Y_POS + x], supertile);
+        }
+    }
+}
+
+/* tank_routine_00 (bank0:6258): seat the tank off-screen right, freeze the
+   palette cycle, flag the pipe joints, and override the level palettes. */
+static void contra_rom_tank_routine_00(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_X_POS + x] = 0x30u;
+    ram[CONTRA_RAM_ENEMY_X_VEL_ACCUM + x] = 0x01u; /* off-screen to the right */
+    ram[CONTRA_RAM_ENEMY_Y_POS + x] = 0x90u;
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0x0Cu; /* turret aimed straight left */
+    ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x06u;
+    ram[CONTRA_RAM_PAUSE_PALETTE_CYCLE] = 0x3Fu;
+    ram[CONTRA_RAM_TANK_ICE_JOINT_SCROLL_FLAG] = 0x3Fu;
+    ram[CONTRA_RAM_LEVEL_PALETTE_INDEX + 2u] = 0x3Fu;
+    ram[CONTRA_RAM_LEVEL_PALETTE_INDEX + 3u] = 0x41u;
+    contra_load_palettes_color_to_cpu(core, 0x10u);
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+/* tank_routine_01 (bank0:6286): drive left (auto-scrolling every other frame)
+   until fully visible and within 0xA0 of the left, then arm the stop. */
+static void contra_rom_tank_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_TANK_AUTO_SCROLL] = (uint8_t)(ram[CONTRA_RAM_FRAME_COUNTER] & 0x01u);
+    contra_rom_tank_update_pos(core, x);
+    if ((ram[CONTRA_RAM_ENEMY_X_VEL_ACCUM + x] == 0u) &&
+        (ram[CONTRA_RAM_ENEMY_X_POS + x] < 0xA0u))
+    {
+        /* tank_stop (bank0:6342) */
+        ram[CONTRA_RAM_TANK_AUTO_SCROLL] = 0x00u;
+        ram[CONTRA_RAM_ENEMY_VAR_4 + x] =
+            contra_tank_attack_delay_tbl[ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x01u];
+        ram[CONTRA_RAM_ENEMY_HP + x] = 0x47u;
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x08u;
+        contra_rom_advance_enemy_routine(core, x);
+        return;
+    }
+    contra_rom_tank_move_logic(core, x);
+}
+
+/* tank_routine_02 (bank0:6385): stopped -- count the stop timer down on even
+   frames, slowly swing the turret toward the player (aim wheel clamped to
+   0x0A..0x0C), redraw the turret super-tile, and fire 3-round bursts. */
+static void contra_rom_tank_routine_02(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_tank_set_palette(core, x);
+    contra_rom_tank_update_pos(core, x);
+    if (!contra_rom_tank_check_removal(core, x))
+    {
+        return;
+    }
+    if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x01u) == 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_VAR_4 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_4 + x] - 1u);
+        if (ram[CONTRA_RAM_ENEMY_VAR_4 + x] == 0u)
+        {
+            contra_rom_advance_enemy_routine(core, x);
+            return;
+        }
+    }
+    if ((ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x80u) != 0u)
+    {
+        return; /* not yet hittable -> not yet firing */
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+
+    if (ram[CONTRA_RAM_ENEMY_VAR_3 + x] != 0u)
+    {
+        /* burst in progress: spawn a bullet from the turret muzzle */
+        const uint8_t dir = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] - 0x0Au);
+        const uint8_t *const e = &contra_tank_bullet_pos_vel_tbl[dir * 3u];
+        const uint8_t ex = ram[CONTRA_RAM_ENEMY_X_POS + x];
+        const uint8_t bx = (uint8_t)(ex - e[0]);
+        const uint8_t vis = (uint8_t)(ram[CONTRA_RAM_ENEMY_X_VEL_ACCUM + x] -
+                                      ((ex < e[0]) ? 1u : 0u));
+
+        if ((vis & 0x80u) != 0u)
+        {
+            return; /* muzzle off-screen left */
+        }
+        contra_rom_create_enemy_bullet_angle_a(
+            core, e[2], ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x], bx,
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] - e[1]));
+        ram[CONTRA_RAM_ENEMY_VAR_3 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_3 + x] - 1u);
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x20u;
+        return;
+    }
+
+    {
+        /* re-aim one wheel step; out-of-range targets keep the old direction */
+        const uint8_t prev = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
+        const uint8_t player = contra_rom_player_enemy_x_dist(core, x);
+        bool aimed;
+        uint8_t v1;
+
+        /* aim source is (X, Y - 0x0C) */
+        {
+            const uint8_t sy = (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] - 0x0Cu);
+            const uint8_t sx = ram[CONTRA_RAM_ENEMY_X_POS + x];
+            uint8_t quadrant = 0u;
+            uint8_t target = 0u;
+            uint8_t rot;
+
+            rot = contra_rom_get_quadrant_aim_dir_for_player(
+                core, sx, sy, player, contra_quadrant_aim_dir_01, &quadrant);
+            rot = contra_rom_get_rotate_dir(core, x, rot, quadrant, 1u, &target);
+            if ((rot & 0x80u) != 0u)
+            {
+                aimed = true;
+            }
+            else
+            {
+                uint8_t v = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
+
+                if (rot != 0u)
+                {
+                    v = (uint8_t)(v - 1u);
+                    if ((v & 0x80u) != 0u)
+                    {
+                        v = 0x17u;
+                    }
+                }
+                else
+                {
+                    v = (uint8_t)(v + 1u);
+                    if (v >= 0x18u)
+                    {
+                        v = 0u;
+                    }
+                }
+                ram[CONTRA_RAM_ENEMY_VAR_1 + x] = v;
+                aimed = (v == target);
+            }
+            v1 = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
+            if ((v1 < 0x0Au) || (v1 >= 0x0Du))
+            {
+                ram[CONTRA_RAM_ENEMY_VAR_1 + x] = prev; /* clamp to the turret arc */
+                aimed = true;                           /* $0c is overwritten too */
+            }
+        }
+        if (aimed)
+        {
+            ram[CONTRA_RAM_ENEMY_VAR_3 + x] = 0x03u; /* next round: 3 bullets */
+        }
+        /* redraw the turret super-tile at (X-0x2C, Y-0x1C) */
+        {
+            const uint8_t ex = ram[CONTRA_RAM_ENEMY_X_POS + x];
+            const uint8_t tx = (uint8_t)(ex - 0x2Cu);
+            const uint8_t ty = (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] - 0x1Cu);
+            const uint8_t vis = (uint8_t)(ram[CONTRA_RAM_ENEMY_X_VEL_ACCUM + x] -
+                                          ((ex < 0x2Cu) ? 1u : 0u));
+
+            if (vis != 0u)
+            {
+                return;
+            }
+            if (!contra_rom_level5_draw_nametable_supertile(
+                    core, tx, ty,
+                    contra_tank_turret_supertile_tbl[
+                        ram[CONTRA_RAM_ENEMY_VAR_1 + x] - 0x0Au]))
+            {
+                ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u; /* retry */
+                return;
+            }
+            ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x30u;
+        }
+    }
+}
+
+/* tank_routine_03 (bank0:6506): resume driving left until removed. */
+static void contra_rom_tank_routine_03(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_TANK_AUTO_SCROLL] = (uint8_t)(ram[CONTRA_RAM_FRAME_COUNTER] & 0x01u);
+    contra_rom_tank_set_palette(core, x);
+    contra_rom_tank_update_pos(core, x);
+    if (!contra_rom_tank_check_removal(core, x))
+    {
+        return;
+    }
+    contra_rom_tank_move_logic(core, x);
+}
+
+/* tank_routine_04 (bank0:6545): destroyed -- arm the 6-step demolition. */
+static void contra_rom_tank_routine_04(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_tank_update_pos(core, x);
+    contra_rom_disable_enemy_collision(core, x);
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0x05u;
+    contra_play_sound(core, 0x55u); /* tank destroyed */
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x00u);
+}
+
+/* tank_routine_05 (bank0:6560): walk the demolition table -- blank each
+   visible super-tile cell (budget-gated, retried) and burst a two-round 0x89
+   explosion there; off-screen cells are skipped. */
+static void contra_rom_tank_routine_05(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_TANK_AUTO_SCROLL] = (uint8_t)(ram[CONTRA_RAM_FRAME_COUNTER] & 0x01u);
+    contra_rom_tank_update_pos(core, x);
+    if (!contra_rom_tank_check_removal(core, x))
+    {
+        return;
+    }
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+        return;
+    }
+    if ((ram[CONTRA_RAM_ENEMY_VAR_1 + x] & 0x80u) != 0u)
+    {
+        return; /* demolition finished; waits for check_removal */
+    }
+    {
+        const uint8_t *const e =
+            &contra_tank_destroy_tbl[(size_t)ram[CONTRA_RAM_ENEMY_VAR_1 + x] * 5u];
+        const unsigned bsum = (unsigned)ram[CONTRA_RAM_ENEMY_X_POS + x] + e[1];
+        const uint8_t blank_x = (uint8_t)bsum;
+        const uint8_t vis = (uint8_t)(ram[CONTRA_RAM_ENEMY_X_VEL_ACCUM + x] + e[0] +
+                                      (uint8_t)(bsum >> 8u));
+
+        if (vis != 0u)
+        {
+            /* that part of the tank is off-screen: skip its demolition step */
+            ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] - 1u);
+            return;
+        }
+        /* the ROM's Y add inherits the visibility adc's carry */
+        {
+            const unsigned ysum = (unsigned)ram[CONTRA_RAM_ENEMY_Y_POS + x] + e[2] +
+                                  (((unsigned)ram[CONTRA_RAM_ENEMY_X_VEL_ACCUM + x] + e[0] +
+                                    (bsum >> 8u)) >> 8u);
+            const uint8_t blank_y = (uint8_t)ysum;
+
+            if (!contra_rom_level5_draw_nametable_supertile(core, blank_x, blank_y, 0x9Bu))
+            {
+                return; /* retry next frame */
+            }
+        }
+        contra_rom_create_explosion_at(
+            core,
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] + e[3]),
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + e[4]));
+        ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] - 1u);
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x04u;
+    }
 }
 
 static const uint8_t contra_fire_beam_anim_delay_tbl[4] = {0x00u, 0x20u, 0x40u, 0x60u};
@@ -16825,8 +17235,16 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
             }
             else if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u)
             {
-                /* TODO: port level-5 tank (bank0:6250). Do not route it through
-                   level-3 rock cave or level-2 grenade behavior. */
+                switch (routine) /* level-5 tank (bank0:6250) */
+                {
+                    case 0x01u: contra_rom_tank_routine_00(core, x); break;
+                    case 0x02u: contra_rom_tank_routine_01(core, x); break;
+                    case 0x03u: contra_rom_tank_routine_02(core, x); break;
+                    case 0x04u: contra_rom_tank_routine_03(core, x); break;
+                    case 0x05u: contra_rom_tank_routine_04(core, x); break;
+                    case 0x06u: contra_rom_tank_routine_05(core, x); break;
+                    default: break;
+                }
             }
             else if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x00u)
             {
@@ -17377,6 +17795,11 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
             {
                 dest_routine = 0x03u; /* spinning bubble: nibble $43 low -> its
                                          appended init_explosion */
+            }
+            else if ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u) && (dead_type == 0x12u))
+            {
+                dest_routine = 0x05u; /* L5 tank: nibble $50 high (bank7:8128)
+                                         -> tank_routine_04 (demolition) */
             }
             else if (dead_type == 0x04u)
             {
@@ -19561,6 +19984,15 @@ static void contra_render_level_7_tile_animation(ContraCore *core, int x, int y,
 
 static void contra_render_level_7_nametable_writes(ContraCore *core)
 {
+    /* level 5 (the tank) records into the same position-keyed overlay cache;
+       only the source data tables differ */
+    const bool level5 = (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u);
+    const uint16_t supertile_addr = level5
+        ? contra_level_5_nametable_update_supertile_data_addr
+        : contra_level_7_nametable_update_supertile_data_addr;
+    const uint16_t palette_addr = level5
+        ? contra_level_5_nametable_update_palette_data_addr
+        : contra_level_7_nametable_update_palette_data_addr;
     uint8_t i;
 
     for (i = 0u; i < core->l7_supertile_update_count; ++i)
@@ -19570,15 +20002,15 @@ static void contra_render_level_7_nametable_writes(ContraCore *core)
 
         contra_write_overlay_supertile_to_ppu(
             core,
-            contra_level_7_nametable_update_supertile_data_addr,
-            contra_level_7_nametable_update_palette_data_addr,
+            supertile_addr,
+            palette_addr,
             x,
             y,
             core->l7_supertile_update_index[i]);
         contra_render_overlay_supertile(
             core,
-            contra_level_7_nametable_update_supertile_data_addr,
-            contra_level_7_nametable_update_palette_data_addr,
+            supertile_addr,
+            palette_addr,
             x,
             y,
             core->l7_supertile_update_index[i]);
@@ -19611,6 +20043,12 @@ static void contra_render_native_enemies(ContraCore *core)
     {
         contra_render_level_7_nametable_writes(core);
         return;
+    }
+    if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u)
+    {
+        /* level-5 tank: background super-tile overlays (tires/turret/blanks);
+           other L5 enemies are sprites and render via the normal path */
+        contra_render_level_7_nametable_writes(core);
     }
     if (contra_is_native_level_2_active(core))
     {
