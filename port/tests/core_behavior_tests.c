@@ -1794,7 +1794,7 @@ static bool test_level5_ice_grenade_generator_spawns_ice_grenade(void)
     return true;
 }
 
-static bool test_level5_specific_types_do_not_use_indoor_handlers(void)
+static bool test_level5_specific_types_use_level5_handlers(void)
 {
     ContraCore core;
     const size_t slot = 0u;
@@ -1802,6 +1802,7 @@ static bool test_level5_specific_types_do_not_use_indoor_handlers(void)
     force_level5_gameplay(&core);
     CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x04u);
 
+    /* pipe joint: ice_separator_routine_00 redraws sprite $c4 in place */
     core.ram[CONTRA_RAM_ENEMY_TYPE + slot] = 0x13u;
     core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] = 0x01u;
     core.ram[CONTRA_RAM_ENEMY_SPRITES + slot] = 0x00u;
@@ -1812,6 +1813,7 @@ static bool test_level5_specific_types_do_not_use_indoor_handlers(void)
     CHECK(core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x01u);
     CHECK(core.ram[CONTRA_RAM_ENEMY_SPRITES + slot] == 0xC4u);
 
+    /* tank: tank_routine_00 places the tank off-screen right and advances */
     core.ram[CONTRA_RAM_ENEMY_TYPE + slot] = 0x12u;
     core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] = 0x01u;
     core.ram[CONTRA_RAM_ENEMY_SPRITES + slot] = 0x00u;
@@ -1819,8 +1821,23 @@ static bool test_level5_specific_types_do_not_use_indoor_handlers(void)
     core.ram[CONTRA_RAM_ENEMY_Y_POS + slot] = 0x30u;
     step_no_input(&core);
     CHECK(core.ram[CONTRA_RAM_ENEMY_TYPE + slot] == 0x12u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x02u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_X_POS + slot] == 0x30u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_Y_POS + slot] == 0x90u);
+
+    /* flying saucer: mini_ufo_routine_00 spins the 0x7c..0x7e sprites, NOT
+       the indoor running soldier this type means on levels 2/4 */
+    core.ram[CONTRA_RAM_ENEMY_TYPE + slot] = 0x15u;
+    core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] = 0x01u;
+    core.ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + slot] = 0x09u;
+    core.ram[CONTRA_RAM_ENEMY_SPRITES + slot] = 0x7Cu;
+    core.ram[CONTRA_RAM_ENEMY_X_POS + slot] = 0x80u;
+    core.ram[CONTRA_RAM_ENEMY_Y_POS + slot] = 0x40u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_TYPE + slot] == 0x15u);
     CHECK(core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x01u);
-    CHECK(core.ram[CONTRA_RAM_ENEMY_SPRITES + slot] == 0x00u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + slot] == 0x08u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_SPRITES + slot] == 0x7Du);
     return true;
 }
 
@@ -2832,7 +2849,7 @@ int main(void)
         {"level4_boss_gemini_defeat_sets_boss_flag", test_level4_boss_gemini_defeat_sets_boss_flag},
         {"level5_ice_grenade_generator_uses_rom_props", test_level5_ice_grenade_generator_uses_rom_props},
         {"level5_ice_grenade_generator_spawns_ice_grenade", test_level5_ice_grenade_generator_spawns_ice_grenade},
-        {"level5_specific_types_do_not_use_indoor_handlers", test_level5_specific_types_do_not_use_indoor_handlers},
+        {"level5_specific_types_use_level5_handlers", test_level5_specific_types_use_level5_handlers},
         {"level6_fire_beam_uses_rom_props_and_init", test_level6_fire_beam_uses_rom_props_and_init},
         {"level6_left_and_right_beams_do_not_use_old_handlers", test_level6_left_and_right_beams_do_not_use_old_handlers},
         {"level6_boss_robot_not_misrouted_to_level3_or_level2", test_level6_boss_robot_not_misrouted_to_level3_or_level2},

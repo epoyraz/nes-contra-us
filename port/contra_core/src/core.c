@@ -13319,20 +13319,27 @@ static uint8_t contra_rom_player_enemy_x_dist(const ContraCore *core, uint8_t x)
 
 /* generate_enemy_at_pos (bank7:8676) with a relative (x,y) offset from the
    generating enemy's position. */
-static void contra_rom_generate_enemy_at_offset(ContraCore *core, uint8_t gen_slot,
-                                                uint8_t type, uint8_t x_off, uint8_t y_off)
+static int contra_rom_generate_enemy_at_offset_slot(ContraCore *core, uint8_t gen_slot,
+                                                    uint8_t type, uint8_t x_off, uint8_t y_off)
 {
     uint8_t *const ram = core->ram;
     const int slot = contra_rom_find_next_enemy_slot(core);
 
     if (slot < 0)
     {
-        return;
+        return -1;
     }
     ram[CONTRA_RAM_ENEMY_TYPE + slot] = type;
     contra_rom_initialize_enemy(core, (uint8_t)slot);
     ram[CONTRA_RAM_ENEMY_Y_POS + slot] = (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + gen_slot] + y_off);
     ram[CONTRA_RAM_ENEMY_X_POS + slot] = (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + gen_slot] + x_off);
+    return slot;
+}
+
+static void contra_rom_generate_enemy_at_offset(ContraCore *core, uint8_t gen_slot,
+                                                uint8_t type, uint8_t x_off, uint8_t y_off)
+{
+    (void)contra_rom_generate_enemy_at_offset_slot(core, gen_slot, type, x_off, y_off);
 }
 
 /* scuba_soldier_routine_00 (bank7:9534): wait the initial pre-attack delay. */
@@ -14969,6 +14976,459 @@ static void contra_rom_tank_routine_05(ContraCore *core, uint8_t x)
         ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] - 1u);
         ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x04u;
     }
+}
+
+/* ===== level-5 boss UFO (0x14) + flying saucer (0x15) + drop bomb (0x16),
+   bank0:6652-7160. The carrier is pure background super-tiles: it fades in at
+   a random spot, opens its blue top, spawns saucers/bombs on a cadence,
+   closes, blanks itself and teleports -- all on the graphics budget. ====== */
+static int contra_rom_generate_enemy_at_offset_slot(ContraCore *core, uint8_t gen_slot,
+                                                    uint8_t type, uint8_t x_off, uint8_t y_off);
+
+static const uint8_t contra_boss_ufo_x_pos_tbl[4] = {0x40u, 0x60u, 0x80u, 0x80u};
+static const uint8_t contra_boss_ufo_supertile_tbl[4] = {0x0Du, 0x0Eu, 0x07u, 0x08u};
+/* relative {x,y} of the four carrier quadrants */
+static const uint8_t contra_boss_ufo_pos_tbl[8] = {
+    0xE4u, 0xE4u, 0x04u, 0xE4u, 0xE4u, 0x04u, 0x04u, 0x04u};
+/* {right,left} pairs for the top-bay animation, index = ENEMY_VAR_1 */
+static const uint8_t contra_boss_ufo_top_tbl[8] = {
+    0x0Bu, 0x05u, 0x0Au, 0x04u, 0x09u, 0x03u, 0x0Du, 0x0Eu};
+/* {left,right, half-left,half-right} thruster super-tiles */
+static const uint8_t contra_boss_ufo_thruster_tbl[4] = {0x07u, 0x08u, 0x0Cu, 0x06u};
+/* {type, rel x, x fast vel, sprite} per generation beat */
+static const uint8_t contra_boss_ufo_gen_tbl[16] = {
+    0x15u, 0x14u, 0x01u, 0x7Cu,
+    0x16u, 0x00u, 0x00u, 0x22u,
+    0x15u, 0xECu, 0xFEu, 0x7Cu,
+    0x16u, 0x00u, 0x00u, 0x22u};
+static const uint8_t contra_boss_ufo_explosion_pos_tbl[10] = {
+    0xE0u, 0x00u, 0x00u, 0x20u, 0x20u, 0x00u, 0xF0u, 0xF0u, 0x00u, 0x00u};
+/* {x, y, supertile} for the boss-door blow-open after the defeat */
+static const uint8_t contra_boss_ufo_door_tbl[9] = {
+    0xC0u, 0x80u, 0x96u, 0xC0u, 0xA0u, 0x97u, 0xD0u, 0xC0u, 0x98u};
+
+/* boss_ufo_draw_supertile_a (bank0:6700): draw super-tile `code` at quadrant
+   pos_idx, then unconditionally count ENEMY_ANIMATION_DELAY down; when it
+   underflows, prep the top-bay animation (VAR_1=2, delay 0x60) and advance. */
+static void contra_rom_boss_ufo_draw_supertile_a(
+    ContraCore *core, uint8_t x, uint8_t code, uint8_t pos_idx)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t px = (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] +
+                                 contra_boss_ufo_pos_tbl[pos_idx * 2u]);
+    const uint8_t py = (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] +
+                                 contra_boss_ufo_pos_tbl[pos_idx * 2u + 1u]);
+
+    (void)contra_rom_level5_draw_nametable_supertile(core, px, py, code);
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if ((ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] & 0x80u) == 0u)
+    {
+        return; /* more quadrants to draw */
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0x02u;
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x60u);
+}
+
+/* boss_ufo_draw_blue_top (bank0:6760): two top quadrants from the bay table. */
+static void contra_rom_boss_ufo_draw_blue_top(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t idx = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] & 0x03u);
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x0Au;
+    contra_rom_boss_ufo_draw_supertile_a(core, x, contra_boss_ufo_top_tbl[idx * 2u], 0u);
+    contra_rom_boss_ufo_draw_supertile_a(core, x, contra_boss_ufo_top_tbl[idx * 2u + 1u], 1u);
+}
+
+/* boss_ufo_draw_thrusters (bank0:6843): on (delay & 7) == 3 frames, redraw the
+   bottom quadrants alternating full/half throttle by delay bit 3; the delay is
+   parked at 2 during the two draws so they can never advance the routine. */
+static void contra_rom_boss_ufo_draw_thrusters(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t saved = ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x];
+    uint8_t idx;
+
+    if ((saved & 0x07u) != 0x03u)
+    {
+        return;
+    }
+    idx = ((saved & 0x08u) != 0u) ? 0u : 2u;
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x02u;
+    contra_rom_boss_ufo_draw_supertile_a(core, x, contra_boss_ufo_thruster_tbl[idx], 2u);
+    contra_rom_boss_ufo_draw_supertile_a(core, x, contra_boss_ufo_thruster_tbl[idx + 1u], 3u);
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = saved;
+}
+
+static void contra_rom_boss_ufo_routine_00(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_Y_POS + x] = 0x10u;
+    ram[CONTRA_RAM_BG_PALETTE_ADJ_TIMER] = 0x10u; /* fade-in window */
+    contra_load_palettes_color_to_cpu(core, 0x10u);
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+static void contra_rom_boss_ufo_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t y;
+
+    ram[CONTRA_RAM_ENEMY_X_POS + x] =
+        contra_boss_ufo_x_pos_tbl[ram[CONTRA_RAM_RANDOM_NUM] & 0x03u];
+    y = (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + 0x20u);
+    if (y >= 0x71u)
+    {
+        y = 0x30u;
+    }
+    ram[CONTRA_RAM_ENEMY_Y_POS + x] = y;
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x03u); /* quadrant index */
+}
+
+static void contra_rom_boss_ufo_routine_02(ContraCore *core, uint8_t x)
+{
+    const uint8_t idx = (uint8_t)(core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] & 0x03u);
+
+    contra_rom_boss_ufo_draw_supertile_a(
+        core, x, contra_boss_ufo_supertile_tbl[idx], idx);
+}
+
+static void contra_rom_boss_ufo_routine_03(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        contra_rom_boss_ufo_draw_thrusters(core, x);
+        return;
+    }
+    contra_rom_enable_enemy_collision(core, x);
+    contra_rom_boss_ufo_draw_blue_top(core, x);
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] - 1u);
+    if ((ram[CONTRA_RAM_ENEMY_VAR_1 + x] & 0x80u) == 0u)
+    {
+        return;
+    }
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x00u);
+}
+
+/* boss_ufo_routine_04 (bank0:6790): the 0x100-tick attack window (delay wraps
+   0x00->0xFF): every 16 ticks spawn from the generation table (beat picked by
+   delay bits 4-5), thrusters animate between beats. */
+static void contra_rom_boss_ufo_routine_04(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t delay;
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    delay = ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x];
+    if (delay == 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0x01u;
+        contra_rom_set_enemy_delay_adv_routine(core, x, 0x08u);
+        return;
+    }
+    if ((delay & 0x0Fu) != 0u)
+    {
+        contra_rom_boss_ufo_draw_thrusters(core, x);
+        return;
+    }
+    {
+        const uint8_t off = (uint8_t)((delay >> 2u) & 0x0Cu);
+        const uint8_t *const e = &contra_boss_ufo_gen_tbl[off];
+        const int slot = contra_rom_generate_enemy_at_offset_slot(
+            core, x, e[0], e[1], 0xF4u);
+
+        if (slot < 0)
+        {
+            return;
+        }
+        ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + slot] = e[2];
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + slot] = 0x10u;
+        ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + slot] = 0x02u;
+        if ((off & 0x04u) == 0u)
+        {
+            ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + slot] = 0x80u; /* saucer .5 */
+        }
+        ram[CONTRA_RAM_ENEMY_SPRITES + slot] = e[3];
+    }
+}
+
+static void contra_rom_boss_ufo_routine_05(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        contra_rom_boss_ufo_draw_thrusters(core, x);
+        return;
+    }
+    contra_rom_boss_ufo_draw_blue_top(core, x);
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] + 1u);
+    if (ram[CONTRA_RAM_ENEMY_VAR_1 + x] != 0x04u)
+    {
+        return;
+    }
+    contra_rom_disable_enemy_collision(core, x);
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x20u);
+}
+
+static void contra_rom_boss_ufo_routine_06(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        contra_rom_boss_ufo_draw_thrusters(core, x);
+        return;
+    }
+    ram[CONTRA_RAM_BG_PALETTE_ADJ_TIMER] = 0x18u; /* black-out + fade back in */
+    contra_load_palettes_color_to_cpu(core, 0x10u);
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x03u);
+}
+
+static void contra_rom_boss_ufo_routine_07(ContraCore *core, uint8_t x)
+{
+    contra_rom_boss_ufo_draw_supertile_a(
+        core, x, 0x9Bu, (uint8_t)(core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] & 0x03u));
+}
+
+static void contra_rom_boss_ufo_routine_08(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    contra_rom_set_enemy_routine_to_a(core, x, 0x02u); /* back to routine_01 */
+}
+
+static void contra_rom_boss_ufo_routine_09(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_init_apu_channels(core);
+    contra_play_sound(core, 0x55u);
+    contra_rom_disable_enemy_collision(core, x);
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0x04u;
+    contra_rom_destroy_all_enemies(core, (int)x);
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x10u);
+}
+
+static void contra_rom_boss_ufo_routine_0a(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+        return;
+    }
+    if ((ram[CONTRA_RAM_ENEMY_VAR_1 + x] & 0x80u) != 0u)
+    {
+        /* all five blast points done -> the door blow-open */
+        ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0x02u;
+        contra_rom_set_enemy_delay_adv_routine(core, x, 0x04u);
+        return;
+    }
+    {
+        const uint8_t idx = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] * 2u);
+
+        ram[CONTRA_RAM_ENEMY_X_POS + x] = (uint8_t)(
+            ram[CONTRA_RAM_ENEMY_X_POS + x] + contra_boss_ufo_explosion_pos_tbl[idx]);
+        ram[CONTRA_RAM_ENEMY_Y_POS + x] = (uint8_t)(
+            ram[CONTRA_RAM_ENEMY_Y_POS + x] + contra_boss_ufo_explosion_pos_tbl[idx + 1u]);
+        (void)contra_rom_level5_draw_nametable_supertile(
+            core, ram[CONTRA_RAM_ENEMY_X_POS + x], ram[CONTRA_RAM_ENEMY_Y_POS + x], 0x9Bu);
+        ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] - 1u);
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x08u;
+        contra_rom_create_explosion_at(
+            core, ram[CONTRA_RAM_ENEMY_X_POS + x], ram[CONTRA_RAM_ENEMY_Y_POS + x]);
+    }
+}
+
+static void contra_rom_boss_ufo_routine_0b(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+        return;
+    }
+    if ((ram[CONTRA_RAM_ENEMY_VAR_1 + x] & 0x80u) != 0u)
+    {
+        /* level_boss_defeated + set_delay_remove_enemy(0x30) */
+        contra_play_sound(core, 0xFFu); /* the ROM's stale A -- the US version's
+                                           level_boss_defeated quirk */
+        ram[CONTRA_RAM_DELAY_TIME_LOW_BYTE] = 0xFFu;
+        ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] = 0x01u;
+        ram[CONTRA_RAM_DELAY_TIME_LOW_BYTE] = 0x30u;
+        ram[CONTRA_RAM_DELAY_TIME_HIGH_BYTE] = 0x00u;
+        contra_rom_remove_enemy(core, x);
+        return;
+    }
+    {
+        const uint8_t *const e =
+            &contra_boss_ufo_door_tbl[(size_t)ram[CONTRA_RAM_ENEMY_VAR_1 + x] * 3u];
+
+        ram[CONTRA_RAM_ENEMY_X_POS + x] = e[0];
+        ram[CONTRA_RAM_ENEMY_Y_POS + x] = e[1];
+        if (!contra_rom_level5_draw_nametable_supertile(core, e[0], e[1], e[2]))
+        {
+            return; /* retry next frame */
+        }
+        ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] - 1u);
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x08u;
+        contra_rom_create_explosion_at(core, e[0], e[1]);
+    }
+}
+
+/* update_enemy_x_pos_rem_off_screen / set_enemy_y_vel_rem_off_screen
+   (bank7:7780/7796): one-axis sub-pixel moves with the screen-edge removal. */
+static bool contra_rom_update_enemy_x_pos_rem_off_screen(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const unsigned f = (unsigned)ram[CONTRA_RAM_ENEMY_X_VEL_ACCUM + x] +
+                       ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x];
+
+    ram[CONTRA_RAM_ENEMY_X_VEL_ACCUM + x] = (uint8_t)f;
+    ram[CONTRA_RAM_ENEMY_X_POS + x] = (uint8_t)(
+        ram[CONTRA_RAM_ENEMY_X_POS + x] + ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] + (f >> 8u));
+    if (ram[CONTRA_RAM_ENEMY_X_POS + x] < 0x08u)
+    {
+        contra_rom_remove_enemy(core, x);
+        return false;
+    }
+    return true;
+}
+
+static bool contra_rom_set_enemy_y_vel_rem_off_screen(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const unsigned f = (unsigned)ram[CONTRA_RAM_ENEMY_Y_VEL_ACCUM + x] +
+                       ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x];
+
+    ram[CONTRA_RAM_ENEMY_Y_VEL_ACCUM + x] = (uint8_t)f;
+    ram[CONTRA_RAM_ENEMY_Y_POS + x] = (uint8_t)(
+        ram[CONTRA_RAM_ENEMY_Y_POS + x] + ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] + (f >> 8u));
+    if (ram[CONTRA_RAM_ENEMY_Y_POS + x] >= 0xE8u)
+    {
+        contra_rom_remove_enemy(core, x);
+        return false;
+    }
+    return true;
+}
+
+/* set_mini_ufo_sprite (bank0:7100): spin sprites 0x7C..0x7E every 4 ticks. */
+static void contra_rom_set_mini_ufo_sprite(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    if ((ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] & 0x03u) != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_SPRITES + x] + 1u);
+    if (ram[CONTRA_RAM_ENEMY_SPRITES + x] >= 0x7Fu)
+    {
+        ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x7Cu;
+    }
+}
+
+static void contra_rom_mini_ufo_tick_sprite(ContraCore *core, uint8_t x)
+{
+    core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    contra_rom_set_mini_ufo_sprite(core, x);
+}
+
+static void contra_rom_mini_ufo_routine_00(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] == 0u)
+    {
+        contra_rom_advance_enemy_routine(core, x);
+        return;
+    }
+    contra_rom_set_mini_ufo_sprite(core, x);
+}
+
+static void contra_rom_mini_ufo_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_mini_ufo_tick_sprite(core, x);
+    if (!contra_rom_update_enemy_x_pos_rem_off_screen(core, x))
+    {
+        return;
+    }
+    if ((ram[CONTRA_RAM_ENEMY_X_POS + x] >= 0x20u) &&
+        (ram[CONTRA_RAM_ENEMY_X_POS + x] < 0xE0u))
+    {
+        return; /* not yet at a descent edge */
+    }
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = 0x80u;
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] = 0x01u; /* descend at 1.5 */
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+static void contra_rom_mini_ufo_routine_02(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_mini_ufo_tick_sprite(core, x);
+    if (!contra_rom_set_enemy_y_vel_rem_off_screen(core, x))
+    {
+        return;
+    }
+    if (ram[CONTRA_RAM_ENEMY_Y_POS + x] < 0xA8u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_Y_POS + x] = 0xA9u;
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] =
+        ((ram[CONTRA_RAM_ENEMY_X_POS + x] & 0x80u) == 0u) ? 0x01u : 0xFEu;
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + x] = 0x80u;
+    contra_rom_set_enemy_y_velocity_to_0(core, x);
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+static void contra_rom_mini_ufo_routine_03(ContraCore *core, uint8_t x)
+{
+    contra_rom_mini_ufo_tick_sprite(core, x);
+    contra_rom_update_enemy_pos(core, x);
+}
+
+/* boss_ufo_bomb_routine_00 (bank0:7128): fall under gravity, blow at y 0xB0. */
+static void contra_rom_boss_ufo_bomb_routine_00(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_add_a_to_enemy_y_fract_vel(core, x, 0x28u);
+    if (ram[CONTRA_RAM_ENEMY_Y_POS + x] < 0xB0u)
+    {
+        contra_rom_update_enemy_pos(core, x);
+        return;
+    }
+    contra_rom_advance_enemy_routine(core, x); /* -> init_explosion */
 }
 
 static const uint8_t contra_fire_beam_anim_delay_tbl[4] = {0x00u, 0x20u, 0x40u, 0x60u};
@@ -17013,8 +17473,22 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
             }
             else if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u)
             {
-                /* TODO: port level-5 boss UFO (bank0:6647). Do not route it through
-                   level-3 mouth or level-2 wall core behavior. */
+                switch (routine) /* level-5 boss UFO (Guldaf), bank0:6653 */
+                {
+                    case 0x01u: contra_rom_boss_ufo_routine_00(core, x); break;
+                    case 0x02u: contra_rom_boss_ufo_routine_01(core, x); break;
+                    case 0x03u: contra_rom_boss_ufo_routine_02(core, x); break;
+                    case 0x04u: contra_rom_boss_ufo_routine_03(core, x); break;
+                    case 0x05u: contra_rom_boss_ufo_routine_04(core, x); break;
+                    case 0x06u: contra_rom_boss_ufo_routine_05(core, x); break;
+                    case 0x07u: contra_rom_boss_ufo_routine_06(core, x); break;
+                    case 0x08u: contra_rom_boss_ufo_routine_07(core, x); break;
+                    case 0x09u: contra_rom_boss_ufo_routine_08(core, x); break;
+                    case 0x0Au: contra_rom_boss_ufo_routine_09(core, x); break;
+                    case 0x0Bu: contra_rom_boss_ufo_routine_0a(core, x); break;
+                    case 0x0Cu: contra_rom_boss_ufo_routine_0b(core, x); break;
+                    default: break;
+                }
             }
             else if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x02u)
             {
@@ -17079,6 +17553,21 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                     default: break;
                 }
             }
+            else if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u)
+            {
+                switch (routine) /* level-5 flying saucer (mini UFO), bank0:7045 */
+                {
+                    case 0x01u: contra_rom_mini_ufo_routine_00(core, x); break;
+                    case 0x02u: contra_rom_mini_ufo_routine_01(core, x); break;
+                    case 0x03u: contra_rom_mini_ufo_routine_02(core, x); break;
+                    case 0x04u: contra_rom_mini_ufo_routine_03(core, x); break;
+                    /* table tail: init_explosion, explosion, remove_enemy */
+                    case 0x05u: contra_rom_enemy_routine_init_explosion_inplace(core, x); break;
+                    case 0x06u: contra_rom_enemy_routine_explosion_inplace(core, x); break;
+                    case 0x07u: contra_rom_enemy_routine_remove_inplace(core, x); break;
+                    default: break;
+                }
+            }
             else if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x02u)
             {
                 switch (routine) /* level-3 dragon arm orb */
@@ -17138,6 +17627,18 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                     case 0x05u: contra_rom_enemy_routine_explosion_step(core, x); break;
                     case 0x06u: contra_rom_level7_boss_door_routine_05(core, x); break;
                     case 0x07u: contra_rom_level7_boss_door_routine_06(core, x); break;
+                    default: break;
+                }
+            }
+            else if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u)
+            {
+                switch (routine) /* level-5 boss UFO drop bomb, bank0:7132 */
+                {
+                    case 0x01u: contra_rom_boss_ufo_bomb_routine_00(core, x); break;
+                    /* table tail: init_explosion, explosion, remove_enemy */
+                    case 0x02u: contra_rom_enemy_routine_init_explosion_inplace(core, x); break;
+                    case 0x03u: contra_rom_enemy_routine_explosion_inplace(core, x); break;
+                    case 0x04u: contra_rom_enemy_routine_remove_inplace(core, x); break;
                     default: break;
                 }
             }
@@ -17734,7 +18235,22 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
                 contra_rom_set_enemy_routine_to_a(core, slot, 0x06u);
                 return;
             }
-            if ((dead_type == 0x13u) || (dead_type == 0x14u) || (dead_type == 0x08u))
+            if ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u) && (dead_type == 0x14u))
+            {
+                dest_routine = 0x0Au; /* L5 boss UFO: nibble $a5 high (bank7:8129)
+                                         -> boss_ufo_routine_09 (destroyed) */
+            }
+            else if ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u) && (dead_type == 0x15u))
+            {
+                dest_routine = 0x05u; /* L5 flying saucer: nibble $a5 low -> its
+                                         table's appended init_explosion */
+            }
+            else if ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u) && (dead_type == 0x16u))
+            {
+                dest_routine = 0x02u; /* L5 drop bomb: nibble $20 high -> its
+                                         table's appended init_explosion */
+            }
+            else if ((dead_type == 0x13u) || (dead_type == 0x14u) || (dead_type == 0x08u))
             {
                 dest_routine = 0x05u;
             }
