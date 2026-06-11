@@ -1,12 +1,32 @@
 # Native Port Coverage
 
-Last updated: 2026-04-16
+Last updated: 2026-06-11 (after the all-stages-green milestone)
 
 This file tracks native-port coverage by ROM bank and subsystem.
 
-## Visualization (line-weighted)
+## Headline
 
-For a per-bank bar chart, weighted by assembly line count, run:
+**Every game system has a running, faithful implementation**: all 8 levels'
+enemies and bosses, all level flows (intro cards, gameplay, boss defeats,
+end-of-level walks), the full game-end sequence (screen melt, helicopter
+island escape, credits crawl, second-loop handoff), scoring, and the demo.
+The one deliberately unported subsystem is the **bank 1 APU sound engine**
+(the port records sound codes; it does not synthesize audio).
+
+Verification status:
+
+- **Stages 1-4 (levels 1-4, 39,970 frames)**: continuously verified by the
+  play-parity pipeline (`tools/frontier.sh`) — zero structural divergence
+  against the Mesen ground-truth recording.
+- **Levels 5-8 and the ending**: ported statically from the assembly (build +
+  unit smoke tests + the regression staying green). **No recording covers them
+  yet** — recording stages 5-8 with the v5 pipeline is the next verification
+  step. Treat their behavior as ported-but-unverified.
+- The v4 reference trace has no `score` field, so score correctness in stages
+  1-4 is not continuously checked (it was spot-verified once via the score
+  side-channel traces). The v5 schema makes score structural.
+
+## Visualization (line-weighted)
 
 ```
 python3 tools/port_coverage.py             # per-bank line-weighted % bar chart
@@ -14,214 +34,159 @@ python3 tools/port_coverage.py --uncited 7 # bank-7 routines not yet cited as po
 ```
 
 It sums the ASM line ranges that `core.c` cites (convention
-`bank<N>:<from>-<to>`, e.g. `bank7:7315-7352`) and divides by each bank's total
-lines. This is an **objective, reproducible lower bound on faithful porting** —
-a faithful port that doesn't cite its range isn't credited, so the number reads
-low today (the older engine code predates the convention and still needs its
-ranges backfilled). Cite the ASM range whenever you faithfully port a routine.
+`bank<N>:<from>-<to>`; bare `bank<N>:<line>` citations auto-expand to the
+enclosing routine) and divides by each bank's total lines. The header of
+`core.c` carries the consolidated ledger, including the 2026-06-11 backfill.
+Cite the ASM range whenever you faithfully port a routine.
 
-Important limits:
+Current numbers (2026-06-11):
 
-- The bar chart counts faithfully-cited lines only; it under-reports until
-  ranges are backfilled.
-- **`Translated` below means "a native runtime path exists" — NOT "faithfully
-  ported."** Some `Translated` subsystems (notably the level-1 enemy AI) are
-  invented native heuristics, not translations of the original routines. The
-  faithful real-RAM enemy effort is what `tools/port_coverage.py` measures.
-- Status is based on the current native runtime path in `port/contra_core/src/core.c`.
-- "ROM-backed" means the native port is consuming original bank data directly, but the original bank logic is not necessarily translated 1:1.
+```
+bank0  91.7%  ( 9639/10511)  enemy routines
+bank1  43.6%  ( 3138/ 7196)  sprite data + decode (the sound engine is the 0%)
+bank2  98.4%  ( 3026/ 3074)  level/spawn data, player sprites, soldier gen
+bank3  96.9%  ( 1541/ 1590)  supertile data, end-of-level routines
+bank4  95.2%  (  767/  806)  graphic data, game-end/credits
+bank5  89.0%  (  235/  264)  graphic data, demo input
+bank6  98.3%  ( 1886/ 1919)  text data, player weapons/bullets
+bank7  76.1%  ( 8222/10800)  engine core, collision, dispatch
+TOTAL  78.7%  (28454/36160 assembly lines)
+```
 
-## Status Legend
+The total excluding the out-of-scope bank 1 sound engine (lines 1-4058) is
+**~85%**; the remainder is NMI/PPU plumbing modeled by the native renderer at
+a different layer, plus the deferred items below.
 
-- `Translated`: native C logic exists and is on the active runtime path.
-- `ROM-backed`: original ROM data is being read and used directly.
-- `Stubbed`: the hook exists, but behavior is placeholder or no-op.
-- `Missing`: not translated yet, or only covered by a narrow one-off path.
+## Status legend
 
-## Bank 0
+- `Ported`: faithful native C translation on the active runtime path.
+- `ROM-backed`: the port reads the original data bytes from the ROM image at
+  runtime (the correct way to "port" data).
+- `Modeled`: the game-visible effect is reproduced through a native mechanism
+  (e.g. the renderer) rather than a 1:1 translation of the PPU plumbing.
+- `Not ported`: listed under Known gaps.
 
-Primary responsibility in the original game: enemy routines.
+## Bank 0 — enemy routines (91.7%)
 
-Current coverage:
+`Ported`: every enemy and boss for all 8 levels, including this milestone's
+L5 tank, L5 boss UFO set (carrier/saucers/bombs), L8 alien guardian, and all
+shared helpers (explosion trios, husk-keeping removes, the destroyed-routine
+nibble routing, supertile stamping on the graphics budget).
 
-- `Translated`: native level 1 enemy update loop.
-- `Translated`: native level 1 enemy projectile update loop.
-- `Translated`: native level 1 player-vs-enemy collision checks.
-- `Translated`: level 1 enemy spawning from screen data once the screen records have been loaded.
-- `Translated`: level 1 generated soldier spawning.
-- `Translated`: bridge segment state and collision-gap handling for level 1.
+Known gaps (the missing 8%):
 
-Currently covered enemy types in the native level 1 path:
+- `Not ported`: soldier water-landing splash (`soldier_routine_09/0a`,
+  bank0:1615-1640) — a soldier corpse falling into water freezes instead of
+  splashing/removing. Never exercised by the reference recording.
+- `Not ported`: fire-beam nametable draw (`draw_fire_beam_if_anim_elapsed` /
+  `draw_fire_beam_tiles`, bank0:7389-7447) — the L6 beam state machine,
+  timing, and collision are ported, but the beam graphic isn't drawn.
+- Approximation: `wall_core_routine_03` fires horizontally at the nearest
+  player instead of the ROM's diagonal aim solve (bank0:3265 area). Unverified
+  by the recording (the core died before firing).
+- `Not ported`: the L4 boss-screen red soldier's weapon drop on death (it
+  dies via the generic explosion).
+- Small uncited leaf helpers.
 
-- `0x00`: weapon item drop / pickup actor
-- `0x02`: stationary gun emplacement emerge/active cycle
-- `0x03`: flying capsule
-- `0x04`: turret aiming/firing
-- `0x05`: running soldier
-- `0x06`: fixed soldier variants
-- `0x07`: pop-up turret / rocky background variant
-- `0x10`: heavy target / large stationary target
-- `0x12`: bridge segments
+## Bank 1 — audio engine + sprite data (43.6%)
 
-Major gaps:
+- `ROM-backed`: all sprite definitions and pointer tables (read at $B030/$B12E+).
+- `Ported`: the multi-tile sprite decode (`load_sprite_to_cpu_mem`) and HUD
+  sprites, as the native OAM builder.
+- `Not ported` (**by design**): the APU sound engine (lines 1-4058).
+  `contra_play_sound` records sound codes; there is no audio synthesis. This
+  is the entire remaining 56% of the bank.
 
-- `Missing`: enemy routines for levels 2 through 8.
-- `Missing`: most boss logic outside the current level 1 path.
-- `Missing`: shared enemy behaviors that still live in original bank 0 or bank 7 for later levels.
+## Bank 2 — level data, player sprites, soldier generation (98.4%)
 
-## Bank 1
+- `ROM-backed`: all levels' super-tile screen data, level headers, enemy
+  screen data, alt-graphics refs, demo tables.
+- `Ported`: player sprite/state code (pause, death, water entry/swim/exit,
+  indoor walks, boss-screen aiming), enemy screen-data loaders for all levels,
+  and the full soldier-generation system (timer carry chains, find-pos ring
+  semantics — both verified frame-exact).
 
-Primary responsibility in the original game: audio engine and sprite data.
+## Bank 3 — supertile data + end-of-level (96.9%)
 
-Current coverage:
+- `ROM-backed`: every level's super-tile, nametable-update, palette, and
+  tile-animation data (consumed by the renderer and the overlay caches).
+- `Ported`: the end-level sequence and all eight per-level end-of-level
+  routines (L1 tunnel jump, indoor elevators, L3 gate, L5/6/7 walk-right with
+  background-priority triggers, L8 timer).
 
-- `ROM-backed`: sprite pointer tables are read directly from the ROM.
-- `ROM-backed`: sprite definitions are read directly from the ROM.
-- `Translated`: native sprite decode and framebuffer rendering path consumes the ROM sprite data.
+## Bank 4 — graphic data + game end (95.2%)
 
-Major gaps:
+- `ROM-backed`: graphic data blobs; ending credits text (read live by the
+  credits crawl).
+- `Ported`: the full game-end flow — screen melt, island scene, helicopter
+  escape, destroyed-island redraw, credits crawl, the 2nd-loop handoff.
 
-- `Stubbed`: sound command playback (`contra_play_sound`).
-- `Stubbed`: APU initialization (`contra_init_apu_channels`).
-- `Missing`: actual audio engine translation.
-- `Missing`: timing-faithful sound playback and mixing.
+## Bank 5 — graphic data + demo input (89.0%)
 
-## Bank 2
+- `ROM-backed`: graphic data, demo input tables.
+- `Ported`: demo input playback (attract mode is frame-exact vs the ROM).
 
-Primary responsibility in the original game: level screen data, player sprite logic, level headers, enemy screen data, soldier generation.
+## Bank 6 — text + player weapons/bullets (98.3%)
 
-Current coverage:
+- `ROM-backed`: short text tables, transition/intro palettes, graphic data
+  (the text writer reads bank 6 bytes at runtime).
+- `Ported`: the entire player weapon and bullet system (fire gates, per-weapon
+  spawn/velocity/update, F swirl, S spread, L laser) — continuously verified
+  through the `pbul` digest field across all four recorded stages.
 
-- `ROM-backed`: level screen supertile pointer tables.
-- `ROM-backed`: per-screen RLE supertile data.
-- `ROM-backed`: level headers.
-- `ROM-backed`: level 1 enemy screen data.
-- `ROM-backed`: alternate graphics references.
-- `ROM-backed`: demo input tables and demo input pointer table.
-- `Translated`: player aim, jump, ledge-fall, landing, and basic movement state.
-- `Translated`: player water entry, in-water, and walk-out sprite/state path.
-- `Translated`: player bullet spawn/update/render support used by the native gameplay path.
-- `Translated`: level 1 screen-enemy loading.
-- `Translated`: level 1 soldier generation flow.
-- `Translated`: alternate graphics loading hook used by the native port.
-- `Translated`: attract-mode demo playback shell that consumes the ROM-backed demo tables.
+Known gap:
 
-Major gaps:
+- Laser pass-through: the port consumes the L bullet on its first hit; the
+  ROM's laser continues through enemies. (The gap is in the bank 7 collision
+  consumption, but it is the laser's behavior.)
 
-- `Missing`: full water/swim parity for all edge cases and later-level interactions.
-- `Missing`: complete indoor player sprite/state coverage.
-- `Missing`: native consumption of non-level-1 enemy screen data.
-- `Missing`: exact parity for outdoor vertical scrolling cases that rely on bank 2 data plus bank 7 scroll/collision logic.
+## Bank 7 — engine core (76.1%)
 
-## Bank 3
+- `Ported`: game/level routine state machines (00-0A + game_routine_06),
+  controller reading (including the DPCM latch glitch), scoring, timers,
+  collision (outdoor horizontal + the vertical BG_COLLISION_DATA ring
+  semantics + the world-anchored override list for runtime clears), enemy
+  dispatch and all shared enemy helpers, aim/rotation helpers and bullet
+  velocity solves, palette pipeline, graphics decompressor, text writer.
+- `Modeled`: the PPU write plumbing (supertile stamp pipeline, attribute
+  writers, column streaming) — the native renderer reproduces the visible
+  output from the same data; PPU addr math mirrors `set_ppu_addresses_in_mem`.
 
-Primary responsibility in the original game: supertile pattern data, supertile palette data, end-of-level routines.
+Known gaps (the missing 24%):
 
-Current coverage:
+- `Not ported`: NMI/IRQ entry and sound dispatch plumbing (232-441).
+- `Not ported`: the NMI graphics-buffer group-format drain
+  (`write_cpu_graphics_buffer_to_ppu`, 2666-2785) — gameplay nametable writes
+  are modeled natively instead.
+- `Modeled differently`: the BG_COLLISION_DATA ring **writer**
+  (`set_supertile_bg_collisions`, 8218-8317) — runtime collision rewrites go
+  through the override list.
+- `Not ported`: landing on rideable enemies (`check_players_collision` tail).
+- Unused/dead ROM labels and small uncited helpers.
 
-- `ROM-backed`: supertile pattern data.
-- `ROM-backed`: supertile palette data.
-- `Translated`: native background renderer consumes the bank 3 supertile and palette data.
-- `Translated`: palette load/cycle support used in the active level path.
-- `Translated`: part of the scroll update path for the currently supported gameplay loop.
-- `Translated`: Level 1 post-boss end-of-level walk / jump tunnel exit sequence.
+## Known gaps, consolidated (the honest backlog)
 
-Major gaps:
+1. Bank 1 sound engine (out of scope by design).
+2. Laser pass-through.
+3. Landing on rideable enemies.
+4. Soldier water-landing splash routines.
+5. L6 fire-beam nametable draw (visual only).
+6. Red soldier weapon drop on death.
+7. Wall core diagonal aim (horizontal approximation, unverified).
+8. A few kill tails still route to the 0xFE explosion actor where the ROM
+   runs in-place routines (jumping-soldier default and similar).
+9. RNG is an approximation by design (the busy-loop iteration count is not
+   reproducible without cycle accuracy); the replay pipeline injects the
+   recorded RNG, so parity testing is unaffected.
+10. Three renderer findings from the frame-diff sweep (frame 3000 corner +
+    weapon-box supertile, frame 6500 phantom pill-box overlay) — see the
+    memory/pipeline notes; game state is identical, pixels differ.
 
-- `Missing`: non-Level-1 end-of-level routine translation.
-- `Missing`: exact vertical outdoor nametable update parity.
-- `Missing`: broader bank 3 logic outside the currently exercised background and palette path.
+## Tracking plan
 
-## Bank 4
-
-Primary responsibility in the original game: compressed graphics data, ending scene, ending credits logic.
-
-Current coverage:
-
-- `ROM-backed`: graphics data consumed by native graphics-loading code.
-
-Major gaps:
-
-- `Missing`: ending scene logic.
-- `Missing`: ending credits logic.
-- `Missing`: bank 4 non-graphics runtime code.
-
-## Bank 5
-
-Primary responsibility in the original game: compressed graphics data and demo input data.
-
-Current coverage:
-
-- `ROM-backed`: graphics data consumed by native graphics-loading code.
-- `ROM-backed`: demo input data consumed by attract-mode playback.
-- `Translated`: attract-mode sequencing shell in the native core.
-
-Major gaps:
-
-- `Missing`: any bank-5-specific runtime logic not already reduced to data consumption.
-
-## Bank 6
-
-Primary responsibility in the original game: short text, weapon logic, bullet logic, additional graphics data.
-
-Current coverage:
-
-- `ROM-backed`: short text tables used by the UI/text writer.
-- `ROM-backed`: graphics data consumed by native graphics-loading code.
-- `Translated`: native text/palette writes for title, stage name, menu text, and player/lives UI.
-- `Translated`: player firing gate checks.
-- `Translated`: player bullet spawn, movement, and draw path.
-- `Translated`: weapon pickup state updates and repeat-fire timing.
-
-Major gaps:
-
-- `Missing`: full confidence on parity for every weapon-specific behavior.
-- `Missing`: bank 6 behavior that depends on not-yet-ported audio or later-level interactions.
-
-## Bank 7
-
-Primary responsibility in the original game: core engine, dispatch, controller, scrolling, collision, shared enemy logic, rendering support, game flow.
-
-Current coverage:
-
-- `Translated`: native RAM model mirrors the original CPU RAM layout.
-- `Translated`: controller state and edge-diff handling.
-- `Translated`: high-level game routine dispatch.
-- `Translated`: game routines `00` through `05` on the current native path.
-- `Translated`: game-over/continue flow for the current native path.
-- `Translated`: level routines `00` through `0A` on the current Level 1 native path, including post-boss handoff.
-- `Translated`: intro/title/player-select/game-start flow currently used by the port.
-- `Translated`: level header loading, graphics setup, palette loading, and early level bring-up.
-- `Translated`: outdoor horizontal collision lookup path.
-- `Translated`: data-backed outdoor vertical collision lookup for the active native path.
-- `Translated`: player core state loop for the currently supported gameplay path.
-- `Translated`: frame scroll integration for the currently supported horizontal outdoor gameplay path.
-- `Translated`: native sprite buffer render path and framebuffer composition.
-- `Translated`: demo level stepping and demo input playback support.
-
-Major gaps:
-
-- `Missing`: exact outdoor vertical collision parity with the original BG collision memory semantics.
-- `Missing`: exact outdoor vertical scroll/render parity.
-- `Missing`: remaining game and level routines that are not yet on the broader native runtime path, especially post-Level-1 content.
-- `Missing`: large parts of shared enemy logic for later levels.
-- `Missing`: exact NMI/IRQ/APU behavior.
-- `Missing`: full semantics coverage outside the currently supported level 1 focused gameplay loop.
-
-## Highest-Risk Gaps Right Now
-
-These are the gaps most likely to produce visible gameplay mismatches:
-
-- Water/swim logic.
-- Outdoor vertical collision and scrolling parity, especially level 3.
-- Audio, because bank 1 sound hooks are still stubbed.
-- Non-level-1 enemy and boss coverage.
-
-## Tracking Plan
-
-For now, updates to this file should do two things:
-
-- move items between `Missing`, `Stubbed`, `ROM-backed`, and `Translated`
-- name the exact subsystem or enemy types that changed
-
-The next improvement to this tracker should be a per-bank label/routine ledger with original symbol names and a native status for each one.
+- When you faithfully port a routine, cite `bank<N>:<from>-<to>` in a comment
+  (the core.c header ledger or at the function).
+- When a recording of stages 5-8 exists, move L5-L8 systems from
+  "ported-but-unverified" to "verified" here.
+- Keep the Known-gaps list in sync with the `DEFERRED`/`not ported` comments
+  in core.c — they are cross-referenced.

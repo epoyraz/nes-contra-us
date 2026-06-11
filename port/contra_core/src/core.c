@@ -91,6 +91,163 @@
  *   bank7:5452-5461  init_ppu_write_screen_supertiles
  *   bank7:6570-6577  load_next_supertiles_screen_indexes
  *   bank7:6586-6603  load_supertiles_screen_indexes */
+
+/* Faithful-port ledger, backfill (2026-06-11, after the all-stages-green
+ * milestone): ranges verified ported (in-body citations elsewhere name the
+ * routine but not always the line range) or ROM-backed (the port reads the
+ * original data bytes from the ROM image at runtime). Known NOT ported and
+ * deliberately absent from this ledger: the bank1 APU sound engine (1-4058);
+ * bank0 soldier_routine_09/0a (water-landing splash, 1615-1640) and the fire
+ * beam nametable draw (draw_fire_beam_if_anim_elapsed/draw_fire_beam_tiles,
+ * 7389-7447); bank7 NMI/sound plumbing (232-441), the NMI graphics-buffer
+ * drain (write_cpu_graphics_buffer_to_ppu, 2666-2785), and the
+ * BG_COLLISION_DATA ring writer (set_supertile_bg_collisions, 8218-8317 --
+ * modeled by the world-anchored collision-override list instead).
+ *
+ *   bank0:391-453    enemy_bullet_routine_01 + indoor_bullet_offscreen_check
+ *   bank0:499-517    cannonball_explosion_sprite_tbl + weapon_box_routine_ptr_tbl
+ *   bank0:715-719    flying_capsule_vel_tbl
+ *   bank0:1063-1067  red_turret_supertile_1_tbl
+ *   bank0:1202-1216  soldier_routine_ptr_tbl
+ *   bank0:1232-1236  soldier_initial_anim_delay_tbl
+ *   bank0:1267-1274  soldier_x_vel_tbl
+ *   bank0:1443-1472  soldier_apply_vel_check_solid_collision
+ *   bank0:1488-1506  get_soldier_num_bullets + soldier_num_bullets_tbl
+ *   bank0:1580-1614  soldier_fired_all_bullets + bullet offset/type tbls
+ *   bank0:1658-1688  init_soldier_hit_vel
+ *   bank0:2034-2065  sniper_set_sprite
+ *   bank0:2082-2129  bomb_turret_routine_ptr_tbl + routines 00-01
+ *   bank0:2527-2545  indoor_enemy_gen_tbl + lvl_2_enemy_gen_tbl
+ *   bank0:2572-2615  lvl_2/lvl_4 enemy gen screen tables
+ *   bank0:2796-2801  boss_eye_routine_06
+ *   bank0:2918-2925  grenade_routine_00
+ *   bank0:3047-3052  wall_turret_routine_00
+ *   bank0:3184-3193  wall_core_hp_tbl
+ *   bank0:3385-3397  wall_core_wait_play_sound
+ *   bank0:3419-3429  indoor_soldier_routine_ptr_tbl
+ *   bank0:3535-3545  jumping_soldier_routine_ptr_tbl
+ *   bank0:3650-3677  jumping_soldier_routine_04 + grenade_launcher_routine_ptr_tbl
+ *   bank0:3799-3817  grenade_launcher_routine_06 + four_soldiers_routine_ptr_tbl
+ *   bank0:3825-3847  four_soldiers_routine_01
+ *   bank0:3908-3911  indoor_roller_gen_routine_00
+ *   bank0:3976-4040  roller_gen_init_tbl + roller_gen_init_01
+ *   bank0:4061-4103  indoor_close_segment_tbl + init_indoor_enemy_pos_and_vel
+ *   bank0:4222-4225  grenade_vel_code_tbl
+ *   bank0:4260-4279  indoor_bullet_velocity_tbl + init_enemy_set_type_and_pos
+ *   bank0:4445-4448  falling_rock_set_sprite
+ *   bank0:4500-4511  boss_mouth_routine_ptr_tbl
+ *   bank0:4647-4649  mouth_projectile_type_angle
+ *   bank0:4678-4681  boss_mouth_anim_delay_tbl
+ *   bank0:4978-5022  dragon_arm_orb_attack_pat
+ *   bank0:5096-5106  dragon_arm_orb_pat_3_or_4
+ *   bank0:5423-5451  dragon_arm_orb_routine_04 + boss_gemini_routine_ptr_tbl
+ *   bank0:5678-5689  boss_gemini_routine_06
+ *   bank0:5788-5820  spinning_bullet_vel_tbl
+ *   bank0:5825-6173  L4 boss blue/red soldiers + red_blue_soldier_gen (full block)
+ *   bank0:7183-7236  fire_beam_add_pos_set_delay + begin_fire_beam_attack
+ *   bank0:7246-7388  fire beam down/left/right routines 01-03
+ *   bank0:7463-7479  animate_small_flame
+ *   bank0:10412-10466 boss_heart_routine_06 + alien_guardian_routine_0b
+ *   bank0:10490-10510 set_nametable_x_pos/pos_for_alien_guardian
+ *   bank1:4059-4217  load_sprite_to_cpu_mem (multi-tile sprite decode -> OAM builder)
+ *   bank1:4218-4301  draw_hud_sprites + hud_sprites + OAMDMA addr helpers
+ *   bank1:4302-7196  sprite_ptr_tbl_0/1 + all sprite definitions (ROM-backed)
+ *   bank2:48-758     level super-tile screen data + graphic/alt-graphic refs (ROM-backed)
+ *   bank2:759-1388   player sprite/state code (pause, death, water, indoor, boss)
+ *   bank2:1389-1516  level headers (ROM-backed)
+ *   bank2:1517-1696  enemy screen-data loaders (outdoor + indoor)
+ *   bank2:1697-2245  soldier generation system + attribute tables
+ *   bank2:2246-3073  enemy screen data, all levels (ROM-backed)
+ *   bank3:50-1227    super-tile / nametable-update / palette / tile-animation data (ROM-backed)
+ *   bank3:1228-1590  end-level sequence + per-level end-of-level routines (all 8 levels)
+ *   bank4:40-117     graphic data refs (ROM-backed; intro + ending pattern data)
+ *   bank4:617-806    ending credits text data (ROM-backed, read by the credits crawl)
+ *   bank5:29-263     graphic data refs + demo input system + demo input tables
+ *   bank6:33-289     graphic data refs + short text tables + intro/transition palettes (ROM-backed)
+ *   bank6:290-1918   player weapon + bullet system (continuously verified via the pbul digest)
+ *   bank7:442-461    clear_memory
+ *   bank7:548-566    load_bank_3_update_nametable_supertile
+ *   bank7:640-642    load_A_offset_graphic_data
+ *   bank7:671-676    game_routine_06
+ *   bank7:899-920    decrement_delay_timer
+ *   bank7:970-1049   ensure_input_valid + set_player_input + read_controller_button
+ *   bank7:1204-1229  clear_memory_starting_at_x
+ *   bank7:1240-1252  add_player_low_score
+ *   bank7:1389-1602  write_update_supertile_to_cpu + update_supertile_palette
+ *   bank7:1614-1633  nametable_update_data_ptr_tbl
+ *   bank7:1789-1897  palette_mask_tbl + set_ppu_addresses_in_mem
+ *   bank7:1898-1935  set_graphics_buffer_header + run_routine_from_tbl_below
+ *   bank7:1968-1986  shift_and_check_digit_carry
+ *   bank7:2000-2022  advance_graphic_read_addr
+ *   bank7:2048-2087  load_level_graphic_data + level_graphic_data_tbl
+ *   bank7:2114-2140  level_2_boss_graphic_data + ending_graphic_data
+ *   bank7:2141-2252  graphic_data_ptr_tbl
+ *   bank7:2253-2343  zero_out_nametables + write_graphic_data_to_ppu + sequence writer
+ *   bank7:2580-2642  write_text_palette_to_mem
+ *   bank7:2786-2817  write_palette_colors_to_ppu
+ *   bank7:2822-2881  alternate_tile_loading + set_alt_graphics_cpu_buffer
+ *   bank7:2928-3000  animate_indoor_fence
+ *   bank7:3030-3039  game_routine_05 + run_level_routine
+ *   bank7:3539-3594  write_palette_color_a_to_cpu_mem + shift_bg_palette_color
+ *   bank7:3703-3720  lvl_alt_collision_and_palette_tbl
+ *   bank7:3726-3869  game_palettes
+ *   bank7:3920-4050  frame scroll/weapon strength + player_state_routine_03 + scroll_player
+ *   bank7:4066-4073  handle_invincibility_and_weapon_strength
+ *   bank7:4147-4151  level_spawn_position_index
+ *   bank7:4231-4245  player_state_routine_01
+ *   bank7:4278-4348  auto_scroll_player + player_state_routine_02
+ *   bank7:4651-4668  set_player_x_vel_to_a
+ *   bank7:4681-4707  set_x_velocity_for_edge_fall_code
+ *   bank7:4785-4799  get_x_velocity_d_pad_code
+ *   bank7:4818-4835  indoor_transition_set_pos
+ *   bank7:4869-4881  init_player_data
+ *   bank7:5114-5149  player_jumping_set_y_pos + apply_gravity
+ *   bank7:5276-5295  can_player_drop_down
+ *   bank7:5390-5475  check_player_solid_bg_collision
+ *   bank7:5476-5501  init_ppu_write_screen_supertiles + config_horizontal_scrolling
+ *   bank7:5525-5587  init_lvl_nametable_animation
+ *   bank7:5894-5901  level_2_4_boss_graphics_data
+ *   bank7:5902-6012  load_column_of_tiles_to_cpu_buffer + load_level_supertile_data
+ *   bank7:6013-6221  set_vert_lvl_super_tiles + col/row attribute writers
+ *   bank7:6316-6399  vertical-level collision + floor finders
+ *   bank7:6501-6540  read_bg_collision_byte
+ *   bank7:6583-6586  auto_scroll_timer_tbl
+ *   bank7:6610-6657  load_supertiles_screen_indexes (+ starting_at_y)
+ *   bank7:6947-6953  remove_current_enemy
+ *   bank7:7042-7052  set_bullet_routine_to_2
+ *   bank7:7241-7250  collision_box_codes_tbl
+ *   bank7:7442-7530  enemy_routine per-level dispatch tables
+ *   bank7:7574-7581  enemy_routine_init_explosion
+ *   bank7:7621-7662  advance_enemy_routine + shared explosion routines
+ *   bank7:7712-7779  remove_enemy + set_sprite_0 + explosion type tables
+ *   bank7:7796-7800  set_enemy_y_vel_rem_off_screen
+ *   bank7:7826-7836  remove_enemy_far
+ *   bank7:7893-7907  set_enemy_(y_)velocity_to_0
+ *   bank7:7931-7970  update_enemy_y/x_pos (+scroll)
+ *   bank7:8065-8095  score_codes_tbl + enemy_destroyed_routine_ptr_tbl
+ *   bank7:8182-8217  remove_all_enemies + clear/set_supertile_bg_collision
+ *   bank7:8322-8346  create_explosion_89 + create_enemy_for_explosion
+ *   bank7:8393-8413  set_delay_remove_enemy + disable_enemy_collision
+ *   bank7:8430-8432  enable_enemy_collision
+ *   bank7:8454-8492  add_a_to_enemy_x_pos + add_with_enemy_pos
+ *   bank7:8560-8598  enemy Y adders + update_nametable_tiles_set_delay
+ *   bank7:8615-8623  draw_enemy_supertile_a
+ *   bank7:8755-8784  bg-collision probe adders
+ *   bank7:8816-8832  set_flying_capsule_x_vel
+ *   bank7:8880-8945  red_turret_find_target_player + player_enemy_x_dist
+ *   bank7:9027-9033  far_segment_code_tbl
+ *   bank7:9081-9104  weapon_item_indoor_vel_tbl + find_next_enemy_slot
+ *   bank7:9114-9173  find_bullet_slot + clear_sprite/enemy helpers
+ *   bank7:9400-9477  animate_wall_cannon + wall_cannon_routine_02/03/04
+ *   bank7:9488-9522  wall_plating_routine_00/01/03
+ *   bank7:9615-9623  scuba_soldier_routine_00
+ *   bank7:9831-9858  aim_and_create_enemy_bullet
+ *   bank7:9913-9975  create_enemy_bullet_if_attack_enabled
+ *   bank7:9992-10057 bullet_gen_exit + calc_bullet_velocities
+ *   bank7:10067-10085 bullet_fract_vel_tbl
+ *   bank7:10205-10230 aim_var_1 quadrant helpers
+ *   bank7:10275-10330 get_rotate_00/01 + get_rotate_dir_for_index
+ *   bank7:10640-10685 quadrant_aim_dir_00/01/02 */
 #include "contra/core.h"
 
 #include <stdbool.h>
@@ -8131,10 +8288,9 @@ static void contra_rom_soldier_start_jump(ContraCore *core, uint8_t x)
 }
 
 /* soldier_routine_02 (bank0.asm:1323): walk. Animate the run cycle, step in the
-   facing direction (velocity + scroll), and turn around at an edge.
-   DEFERRED (clearly not yet faithful): the RNG-driven jump-off-ledge (uses the
-   busy-loop RANDOM_NUM, unreproducible) and firing (routine_03); at an edge the
-   soldier simply turns instead of jumping for now. */
+   facing direction (velocity + scroll), turn or jump at an edge (the jump pick
+   draws on the injected RANDOM_NUM), and start an attack round (routine_03)
+   when the fire pick lands. */
 static void contra_rom_soldier_routine_02(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -9487,8 +9643,8 @@ static void contra_rom_roller_routine_explosion(ContraCore *core, uint8_t x)
 /* roller_routine_00/01 (bank0:2860): start at Y=0x72, then roll down the
    corridor -- the sprite grows (0x99..0x9c) with depth, collision turns on once
    it's close (Y in [0xAC,0xBC)), and it's removed once it rolls past (Y>=0xBC).
-   (Level-2 0x11 is the roller; level-1 0x11 is the boss door -- not yet ported,
-   so this dispatch case is roller-only for now.) */
+   (Level-2 0x11 is the roller; level-1 0x11 is the fortress boss door, which
+   has its own dispatch branch.) */
 static void contra_rom_roller_routine_00(ContraCore *core, uint8_t x)
 {
     core->ram[CONTRA_RAM_ENEMY_Y_POS + x] = 0x72u;
@@ -11486,8 +11642,8 @@ static bool contra_rom_red_turret_load_supertile(ContraCore *core, uint8_t x)
 
 /* red_turret_routine_00..02 (bank0): aim left, wait for the player to approach,
    then emerge (super-tile animation) and become collidable. The active rotating
-   aim + firing + retract (routine_03..05) are DEFERRED: the turret emerges,
-   renders, and can be shot/destroyed (via the kill path -> explosion). */
+   aim + firing + retract (routine_03..05) follow further down, after the shared
+   rotating-aim helpers they reuse. */
 /* red_turret_routine_00 (bank0:987-991): set aim direction left, advance routine. */
 static void contra_rom_red_turret_routine_00(ContraCore *core, uint8_t x)
 {
@@ -12616,14 +12772,15 @@ static const uint8_t contra_weapon_box_destroyed_supertile[16] = {
     0x16u, 0x16u, 0x16u, 0x16u, 0x16u, 0x16u, 0x16u, 0x16u,
     0x19u, 0x1Au, 0x03u, 0x04u, 0x09u, 0x09u, 0x16u, 0x16u};
 
-/* play_explosion_sound (bank0:642): pop an explosion and repurpose this slot into
-   a weapon item carrying the source's weapon type (ATTRIBUTES & 0x07). Shared by
-   the pill box (weapon_box_routine_04) and the flying capsule
-   (flying_capsule_routine_02). Score/sound award is deferred. */
+/* play_explosion_sound (bank0:642-658): sound $19, pop an explosion, and
+   repurpose this slot into a weapon item carrying the source's weapon type
+   (ATTRIBUTES & 0x07). Shared by the pill box (weapon_box_routine_04) and the
+   flying capsule (flying_capsule_routine_02). */
 static void contra_rom_play_explosion_sound(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
 
+    contra_play_sound(core, 0x19u); /* enemy destroyed */
     contra_rom_create_explosion_at(core, ram[CONTRA_RAM_ENEMY_X_POS + x], ram[CONTRA_RAM_ENEMY_Y_POS + x]);
     ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x07u);
     contra_rom_clear_sprite_clear_enemy_pt_3(core, x);
@@ -18383,7 +18540,8 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x07u: contra_rom_enemy_routine_init_explosion_inplace(core, x); break;
                 case 0x08u: contra_rom_enemy_routine_explosion_inplace(core, x); break;
                 case 0x09u: contra_rom_enemy_routine_remove_inplace(core, x); break;
-                default: break; /* 0x04 fire not yet ported; 0x0A/0x0B water splash */
+                default: break; /* 0x0A/0x0B (soldier_routine_09/0a, the
+                                   water-landing splash) are not ported */
             }
             break;
         case 0x02u: /* pill box / weapon box */
