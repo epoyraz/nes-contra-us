@@ -97,9 +97,7 @@
  * routine but not always the line range) or ROM-backed (the port reads the
  * original data bytes from the ROM image at runtime). Known NOT ported and
  * deliberately absent from this ledger: the bank1 APU sound engine (1-4058);
- * the bank0 fire beam nametable draw
- * (draw_fire_beam_if_anim_elapsed/draw_fire_beam_tiles,
- * 7389-7447); bank7 NMI/sound plumbing (232-441), the NMI graphics-buffer
+ * bank7 NMI/sound plumbing (232-441), the NMI graphics-buffer
  * drain (write_cpu_graphics_buffer_to_ppu, 2666-2785), and the
  * BG_COLLISION_DATA ring writer (set_supertile_bg_collisions, 8218-8317 --
  * modeled by the world-anchored collision-override list instead).
@@ -612,6 +610,7 @@ static const uint16_t contra_level_2_4_boss_nametable_update_palette_data_addr =
 static const uint16_t contra_level_3_nametable_update_supertile_data_addr = 0x9368u;
 static const uint16_t contra_level_3_nametable_update_palette_data_addr = 0x965Fu;
 static const uint16_t contra_level_7_tile_animation_addr = 0xA56Eu;
+static const uint16_t contra_level_6_tile_animation_addr = 0x9DD8u;
 static const uint16_t contra_level_5_nametable_update_supertile_data_addr = 0x9BA8u;
 static const uint16_t contra_level_5_nametable_update_palette_data_addr = 0x9DB9u;
 static const uint16_t contra_level_7_nametable_update_supertile_data_addr = 0xABEAu;
@@ -5449,9 +5448,9 @@ static bool contra_is_native_level_7_active(const ContraCore *core)
         (core->ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] == 0u);
 }
 
-/* Levels 5 and 8: outdoor horizontal levels whose bosses stamp background
-   super-tile overlays (tank/boss UFO, alien guardian/spawns/heart) through the
-   position-keyed cache. */
+/* Levels 5, 6, and 8: outdoor horizontal levels whose enemies stamp
+   background overlays (tank/boss UFO, fire beams, alien guardian/spawns/
+   heart) through the position-keyed caches. */
 static bool contra_is_native_overlay_level_active(const ContraCore *core)
 {
     const uint8_t game_routine = core->ram[CONTRA_RAM_GAME_ROUTINE_INDEX];
@@ -5460,7 +5459,7 @@ static bool contra_is_native_overlay_level_active(const ContraCore *core)
     return ((game_routine == 0x05u) ||
             ((game_routine == 0x02u) && (core->ram[CONTRA_RAM_DEMO_MODE] != 0u))) &&
         (core->ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] >= 0x04u) &&
-        ((level == 0x04u) || (level == 0x07u)) &&
+        ((level == 0x04u) || (level == 0x05u) || (level == 0x07u)) &&
         (core->ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0u) &&
         (core->ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] == 0u);
 }
@@ -15731,9 +15730,26 @@ static void contra_rom_begin_fire_beam_attack(ContraCore *core, uint8_t x)
     contra_rom_set_enemy_delay_adv_routine(core, x, 0x00u);
 }
 
-static bool contra_rom_fire_beam_step_anim(ContraCore *core, uint8_t x)
+static void contra_level7_record_tile_update(ContraCore *core, int x, int y, uint8_t tile_index);
+
+/* draw_fire_beam_if_anim_elapsed + draw_fire_beam_tiles (bank0:7389-7447):
+   stamp one beam section (a level_6_tile_animation code from
+   fire_beam_tile_tbl) at the beam tip on the 0x50 tile budget. Returns the
+   ROM's inverted carry: true = the caller steps the beam (drawn, or the tip
+   is off-screen), false = hold (delay ticking, or the stamp missed the
+   budget). */
+static bool contra_rom_draw_fire_beam_if_anim_elapsed(
+    ContraCore *core, uint8_t x, uint8_t tbl_base)
 {
+    static const uint8_t fire_beam_tile_tbl[12] = {
+        0x87u, 0x88u, 0x80u, 0x89u,  /* down: grow start/mid, retract blank/end */
+        0x84u, 0x85u, 0x80u, 0x86u,  /* left */
+        0x81u, 0x82u, 0x80u, 0x83u}; /* right */
     uint8_t *const ram = core->ram;
+    const uint8_t var3 = ram[CONTRA_RAM_ENEMY_VAR_3 + x];
+    uint8_t tile;
+    uint8_t py;
+    unsigned sum;
 
     if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
     {
@@ -15741,10 +15757,31 @@ static bool contra_rom_fire_beam_step_anim(ContraCore *core, uint8_t x)
             (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
         return false;
     }
+    tile = fire_beam_tile_tbl[tbl_base +
+        ((((uint8_t)(var3 | ram[CONTRA_RAM_ENEMY_VAR_4 + x])) != 0u) ? 1u : 0u)];
+    py = (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] +
+                   ram[CONTRA_RAM_ENEMY_VAR_4 + x] - 1u);
+    sum = (unsigned)(uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] - 0x07u) + var3;
+    if ((var3 & 0x80u) != 0u)
+    {
+        if (sum <= 0xFFu)
+        {
+            return true; /* leftward tip off-screen left: skip the stamp, step */
+        }
+    }
+    else if (sum > 0xFFu)
+    {
+        return true; /* rightward tip off-screen right: skip the stamp, step */
+    }
+    if (!contra_rom_tile_animation_draw_budget(core))
+    {
+        return false; /* graphics budget full -- retry next frame */
+    }
+    contra_level7_record_tile_update(core, (int)(uint8_t)sum, (int)py, tile);
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
         (ram[CONTRA_RAM_ENEMY_X_POS + x] < 0x30u) ? 0x00u : 0x01u;
     ram[CONTRA_RAM_ENEMY_VAR_1 + x] =
-        (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_3 + x] | ram[CONTRA_RAM_ENEMY_VAR_4 + x]);
+        (uint8_t)(var3 | ram[CONTRA_RAM_ENEMY_VAR_4 + x]);
     return true;
 }
 
@@ -15796,7 +15833,7 @@ static void contra_rom_fire_beam_down_routine_02(ContraCore *core, uint8_t x)
 
     contra_rom_add_scroll_to_enemy_pos(core, x);
     if ((ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u) ||
-        !contra_rom_fire_beam_step_anim(core, x))
+        !contra_rom_draw_fire_beam_if_anim_elapsed(core, x, 0u))
     {
         return;
     }
@@ -15815,7 +15852,7 @@ static void contra_rom_fire_beam_down_routine_03(ContraCore *core, uint8_t x)
 
     contra_rom_add_scroll_to_enemy_pos(core, x);
     if ((ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u) ||
-        !contra_rom_fire_beam_step_anim(core, x))
+        !contra_rom_draw_fire_beam_if_anim_elapsed(core, x, 2u))
     {
         return;
     }
@@ -15851,7 +15888,7 @@ static void contra_rom_fire_beam_left_routine_02(ContraCore *core, uint8_t x)
 
     contra_rom_add_scroll_to_enemy_pos(core, x);
     if ((ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u) ||
-        !contra_rom_fire_beam_step_anim(core, x))
+        !contra_rom_draw_fire_beam_if_anim_elapsed(core, x, 4u))
     {
         return;
     }
@@ -15870,7 +15907,7 @@ static void contra_rom_fire_beam_left_routine_03(ContraCore *core, uint8_t x)
 
     contra_rom_add_scroll_to_enemy_pos(core, x);
     if ((ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u) ||
-        !contra_rom_fire_beam_step_anim(core, x))
+        !contra_rom_draw_fire_beam_if_anim_elapsed(core, x, 6u))
     {
         return;
     }
@@ -15915,7 +15952,7 @@ static void contra_rom_fire_beam_right_routine_02(ContraCore *core, uint8_t x)
 
     contra_rom_add_scroll_to_enemy_pos(core, x);
     if ((ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u) ||
-        !contra_rom_fire_beam_step_anim(core, x))
+        !contra_rom_draw_fire_beam_if_anim_elapsed(core, x, 8u))
     {
         return;
     }
@@ -15934,7 +15971,7 @@ static void contra_rom_fire_beam_right_routine_03(ContraCore *core, uint8_t x)
 
     contra_rom_add_scroll_to_enemy_pos(core, x);
     if ((ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u) ||
-        !contra_rom_fire_beam_step_anim(core, x))
+        !contra_rom_draw_fire_beam_if_anim_elapsed(core, x, 10u))
     {
         return;
     }
@@ -19136,7 +19173,8 @@ static const uint8_t contra_collision_box_codes_03[15][4] = {
    destroys the enemy instead; new-life invincibility passes through). The
    collision box is selected by the player's state -- water/jumping/crouching/
    standing -- and on indoor levels a crouching player is immune to bullets
-   (ducks under them). DEFERRED: landing on rideable enemies. */
+   (ducks under them). Rideable enemies (floating rocks, mining carts) are
+   landed on and ridden instead of colliding. */
 static void contra_rom_check_players_collision(ContraCore *core, uint8_t slot)
 {
     uint8_t *const ram = core->ram;
@@ -19163,12 +19201,31 @@ static void contra_rom_check_players_collision(ContraCore *core, uint8_t slot)
            landable enemy (STATE_WIDTH bit 6 set) with bit 5 clear -- the floating
            rock platform -- a player who is jumping UP (Y fast velocity negative) or
            at the apex (velocity 0) passes straight through. This is exactly what
-           lets the player jump OFF the platform instead of being re-pinned to it. */
+           lets the player jump OFF the platform instead of being re-pinned to it.
+           With bit 5 SET (the mining carts) the ROM instead re-aims the
+           land/collide gate (STATE_WIDTH bit 4) each frame: set (a side hit
+           kills) when the player is below or within 8px of the top, cleared
+           (landable) when the player is 8+ px above. */
         {
             const uint8_t sw = ram[CONTRA_RAM_ENEMY_STATE_WIDTH + slot];
 
-            if (((sw & 0x40u) != 0u) && ((sw & 0x20u) == 0u) &&
-                (ram[CONTRA_RAM_PLAYER_JUMP_STATUS + p] != 0u))
+            if (((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] & 0x01u) == 0u) &&
+                ((sw & 0x40u) != 0u) && ((sw & 0x20u) != 0u))
+            {
+                const uint8_t ey = ram[CONTRA_RAM_ENEMY_Y_POS + slot];
+                const uint8_t py = ram[CONTRA_RAM_SPRITE_Y_POS + p];
+
+                if ((ey >= py) && ((uint8_t)(ey - py) >= 0x08u))
+                {
+                    ram[CONTRA_RAM_ENEMY_STATE_WIDTH + slot] = (uint8_t)(sw & 0xEFu);
+                }
+                else
+                {
+                    ram[CONTRA_RAM_ENEMY_STATE_WIDTH + slot] = (uint8_t)(sw | 0x10u);
+                }
+            }
+            else if (((sw & 0x40u) != 0u) && ((sw & 0x20u) == 0u) &&
+                     (ram[CONTRA_RAM_PLAYER_JUMP_STATUS + p] != 0u))
             {
                 const uint8_t yv = ram[CONTRA_RAM_PLAYER_Y_FAST_VELOCITY + p];
 
@@ -21609,7 +21666,13 @@ static uint8_t contra_read_screen_palette_slot_at(const ContraCore *core, int px
 static void contra_render_level_7_tile_animation(ContraCore *core, int x, int y, uint8_t tile_index)
 {
     const uint8_t index = (uint8_t)(tile_index & 0x7Fu);
-    const uint16_t entry = (uint16_t)(contra_level_7_tile_animation_addr + ((uint16_t)index * 5u));
+    /* level 6 (the fire beams) records into the same tile cache; only the
+       source data table differs */
+    const uint16_t tile_animation_addr =
+        (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x05u)
+            ? contra_level_6_tile_animation_addr
+            : contra_level_7_tile_animation_addr;
+    const uint16_t entry = (uint16_t)(tile_animation_addr + ((uint16_t)index * 5u));
     uint8_t row_count;
     uint16_t read_addr;
     uint8_t row;
@@ -21713,10 +21776,11 @@ static void contra_render_native_enemies(ContraCore *core)
         return;
     }
     if ((core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u) ||
+        (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x05u) ||
         (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x07u))
     {
-        /* level-5 tank/boss UFO and level-8 guardian/spawn/heart background
-           super-tile overlays; their sprite enemies render via the normal path */
+        /* level-5 tank/boss UFO, level-6 fire beams, and level-8 guardian/
+           spawn/heart background overlays; sprite enemies render normally */
         contra_render_level_7_nametable_writes(core);
     }
     if (contra_is_native_level_2_active(core))
