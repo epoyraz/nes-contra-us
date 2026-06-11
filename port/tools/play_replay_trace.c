@@ -309,6 +309,11 @@ int main(int argc, char **argv)
     const char *const resume_path = getenv("CONTRA_NATIVE_PLAY_RESUME");
     const unsigned snapshot_every =
         (snapshot_every_text != NULL) ? (unsigned)strtoul(snapshot_every_text, NULL, 10) : 0u;
+    /* CONTRA_NATIVE_PLAY_DUMP_FRAMES: comma-separated list; each dump file
+       gets a ".<frame>" suffix (mirrors the recorder's DUMP_FRAMES) */
+    const char *const dump_frames_text = getenv("CONTRA_NATIVE_PLAY_DUMP_FRAMES");
+    unsigned dump_frames[64];
+    unsigned dump_frames_count = 0u;
     unsigned resume_frame = 0u;
     uint8_t prev_fc = 0u;
     bool prev_fc_valid = false;
@@ -344,6 +349,24 @@ int main(int argc, char **argv)
         if ((limit != 0u) && (limit < max_frame))
         {
             max_frame = limit;
+        }
+    }
+
+    if (dump_frames_text != NULL)
+    {
+        const char *p = dump_frames_text;
+
+        while ((*p != '\0') && (dump_frames_count < 64u))
+        {
+            char *end;
+            const unsigned long v = strtoul(p, &end, 10);
+
+            if (end == p)
+            {
+                break;
+            }
+            dump_frames[dump_frames_count++] = (unsigned)v;
+            p = (*end == ',') ? (end + 1) : end;
         }
     }
 
@@ -496,34 +519,59 @@ int main(int argc, char **argv)
             }
         }
 
-        if ((dump_frame != 0u) && (frame == dump_frame))
         {
-            const struct
-            {
-                const char *path;
-                const void *data;
-                size_t size;
-            } dumps[] = {
-                {ram_dump_path, core.ram, sizeof(core.ram)},
-                {oam_dump_path, core.latched_oam, sizeof(core.latched_oam)},
-                {nametable_dump_path, core.ppu_nametable, sizeof(core.ppu_nametable)},
-                {palette_dump_path, core.ppu_palette, sizeof(core.ppu_palette)},
-                {framebuffer_dump_path, core.framebuffer, sizeof(core.framebuffer)},
-                {chr_dump_path, core.ppu_pattern, sizeof(core.ppu_pattern)},
-                {supertile_dump_path, core.level_screen_supertiles, sizeof(core.level_screen_supertiles)},
-            };
-            size_t dump_index;
+            const bool want_plain = (dump_frame != 0u) && (frame == dump_frame);
+            bool want_suffixed = false;
+            unsigned di;
 
-            for (dump_index = 0u; dump_index < (sizeof(dumps) / sizeof(dumps[0])); ++dump_index)
+            for (di = 0u; di < dump_frames_count; ++di)
             {
-                if (dumps[dump_index].path != NULL)
+                if (dump_frames[di] == frame)
                 {
-                    FILE *const dump = fopen(dumps[dump_index].path, "wb");
+                    want_suffixed = true;
+                    break;
+                }
+            }
+            if (want_plain || want_suffixed)
+            {
+                const struct
+                {
+                    const char *path;
+                    const void *data;
+                    size_t size;
+                } dumps[] = {
+                    {ram_dump_path, core.ram, sizeof(core.ram)},
+                    {oam_dump_path, core.latched_oam, sizeof(core.latched_oam)},
+                    {nametable_dump_path, core.ppu_nametable, sizeof(core.ppu_nametable)},
+                    {palette_dump_path, core.ppu_palette, sizeof(core.ppu_palette)},
+                    {framebuffer_dump_path, core.framebuffer, sizeof(core.framebuffer)},
+                    {chr_dump_path, core.ppu_pattern, sizeof(core.ppu_pattern)},
+                    {supertile_dump_path, core.level_screen_supertiles, sizeof(core.level_screen_supertiles)},
+                };
+                size_t dump_index;
 
-                    if (dump != NULL)
+                for (dump_index = 0u; dump_index < (sizeof(dumps) / sizeof(dumps[0])); ++dump_index)
+                {
+                    if (dumps[dump_index].path != NULL)
                     {
-                        fwrite(dumps[dump_index].data, 1u, dumps[dump_index].size, dump);
-                        fclose(dump);
+                        char path_buf[1024];
+                        FILE *dump;
+
+                        if (want_suffixed)
+                        {
+                            snprintf(path_buf, sizeof(path_buf), "%s.%u",
+                                     dumps[dump_index].path, frame);
+                        }
+                        else
+                        {
+                            snprintf(path_buf, sizeof(path_buf), "%s", dumps[dump_index].path);
+                        }
+                        dump = fopen(path_buf, "wb");
+                        if (dump != NULL)
+                        {
+                            fwrite(dumps[dump_index].data, 1u, dumps[dump_index].size, dump);
+                            fclose(dump);
+                        }
                     }
                 }
             }
