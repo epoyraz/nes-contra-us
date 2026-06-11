@@ -457,6 +457,8 @@ static const uint16_t contra_level_5_nametable_update_supertile_data_addr = 0x9B
 static const uint16_t contra_level_5_nametable_update_palette_data_addr = 0x9DB9u;
 static const uint16_t contra_level_7_nametable_update_supertile_data_addr = 0xABEAu;
 static const uint16_t contra_level_7_nametable_update_palette_data_addr = 0xAD4Au;
+static const uint16_t contra_level_8_nametable_update_supertile_data_addr = 0xB25Au;
+static const uint16_t contra_level_8_nametable_update_palette_data_addr = 0xB543u;
 static const uint16_t contra_demo_input_pointer_table_addr = 0xB3D2u;
 static const uint8_t contra_level_2_wall_core_update_supertile_tbl[4] = {0x02u, 0x03u, 0x01u, 0x00u};
 static const uint8_t contra_level_2_wall_core_update_x_tbl[4] = {0x70u, 0x90u, 0x90u, 0x70u};
@@ -5280,11 +5282,28 @@ static bool contra_is_native_level_7_active(const ContraCore *core)
         (core->ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] == 0u);
 }
 
+/* Levels 5 and 8: outdoor horizontal levels whose bosses stamp background
+   super-tile overlays (tank/boss UFO, alien guardian/spawns/heart) through the
+   position-keyed cache. */
+static bool contra_is_native_overlay_level_active(const ContraCore *core)
+{
+    const uint8_t game_routine = core->ram[CONTRA_RAM_GAME_ROUTINE_INDEX];
+    const uint8_t level = core->ram[CONTRA_RAM_CURRENT_LEVEL];
+
+    return ((game_routine == 0x05u) ||
+            ((game_routine == 0x02u) && (core->ram[CONTRA_RAM_DEMO_MODE] != 0u))) &&
+        (core->ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] >= 0x04u) &&
+        ((level == 0x04u) || (level == 0x07u)) &&
+        (core->ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0u) &&
+        (core->ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] == 0u);
+}
+
 static bool contra_is_native_combat_active(const ContraCore *core)
 {
     return contra_is_native_level_1_active(core) ||
         contra_is_native_level_2_active(core) ||
-        contra_is_native_level_7_active(core);
+        contra_is_native_level_7_active(core) ||
+        contra_is_native_overlay_level_active(core);
 }
 
 /* Find the screen Y of the top of the first solid floor tile at or below
@@ -17092,6 +17111,429 @@ static void contra_rom_boss_heart_routine_06(ContraCore *core, uint8_t x)
     contra_rom_advance_enemy_routine(core, x);
 }
 
+/* ===== level-8 alien guardian (type 0x10, bank0:8969-9520) ===== */
+
+/* set_guardian_and_heart_enemy_hp (bank0:9016): (weapon strength * 0x10) +
+   0x37 + (completion count * 0x10); any 8-bit overflow or sum >= 0xA0 caps
+   the HP at 0xA0. */
+static void contra_rom_set_guardian_and_heart_enemy_hp(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t ws = (uint8_t)(ram[CONTRA_RAM_PLAYER_WEAPON_STRENGTH] << 4u);
+    const uint8_t cc = (uint8_t)(ram[CONTRA_RAM_GAME_COMPLETION_COUNT] << 4u);
+    unsigned sum = (unsigned)ws + 0x37u;
+
+    if (sum <= 0xFFu)
+    {
+        sum += cc;
+    }
+    ram[CONTRA_RAM_ENEMY_HP + x] = (uint8_t)((sum >= 0xA0u) ? 0xA0u : sum);
+}
+
+/* draw_alien_guardian_supertile (bank0:9095): stamp super-tile `code` at
+   (px - 0x0e, py - 0x10) on the 0x40 graphics budget. Returns true when drawn
+   (the ROM's $0b success flag inverted). */
+static bool contra_rom_alien_guardian_draw_supertile(
+    ContraCore *core, uint8_t px, uint8_t py, uint8_t code)
+{
+    return contra_rom_level5_draw_nametable_supertile(
+        core, (uint8_t)(px - 0x0Eu), (uint8_t)(py - 0x10u), code);
+}
+
+/* draw_alien_boss_supertiles (bank0:9162): the right tile at (px, py), the
+   left tile 0x20 to its left. The ROM's $0b reflects only the LAST (left)
+   stamp; a half-drawn pair retries whole next frame. */
+static bool contra_rom_alien_guardian_draw_pair(
+    ContraCore *core, uint8_t px, uint8_t py, uint8_t right_code, uint8_t left_code)
+{
+    (void)contra_rom_alien_guardian_draw_supertile(core, px, py, right_code);
+    return contra_rom_alien_guardian_draw_supertile(
+        core, (uint8_t)(px - 0x20u), py, left_code);
+}
+
+/* draw_alien_guardian_top_jaw (bank0:9120): VAR_1 (right) and VAR_1+1 (left)
+   at (X + 0x10, Y). VAR_2 holds the retry flag (0 = drawn, 1 = retry). */
+static void contra_rom_draw_alien_guardian_top_jaw(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t code = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
+    const bool ok = contra_rom_alien_guardian_draw_pair(
+        core,
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] + 0x10u),
+        ram[CONTRA_RAM_ENEMY_Y_POS + x],
+        code, (uint8_t)(code + 1u));
+
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = ok ? 0x00u : 0x01u;
+}
+
+/* draw_alien_guardian_lower_jaw (bank0:9136): super-tile 0x94 (lower jaw,
+   mouth open) or 0x83 (blank) at (X + 0x11, Y + 0x20). VAR_3 = retry flag. */
+static void contra_rom_draw_alien_guardian_lower_jaw(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t code =
+        (ram[CONTRA_RAM_ENEMY_VAR_1 + x] == 0x92u) ? 0x94u : 0x83u;
+    const bool ok = contra_rom_alien_guardian_draw_supertile(
+        core,
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] + 0x11u),
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + 0x20u),
+        code);
+
+    ram[CONTRA_RAM_ENEMY_VAR_3 + x] = ok ? 0x00u : 0x01u;
+}
+
+/* alien_boss_supertile_tbl (bank0:9251): {right code, left code, rel y, rel x}
+   pairs shared by the guardian and the heart. */
+static const uint8_t contra_alien_boss_supertile_tbl[12][4] = {
+    {0x83u, 0x83u, 0x00u, 0x10u}, /* 0: two blanks */
+    {0x95u, 0x96u, 0xC0u, 0x30u}, /* 1: body destroyed (top) */
+    {0x97u, 0x83u, 0xE0u, 0x50u}, /* 2: body destroyed + blank */
+    {0x84u, 0x85u, 0xF0u, 0x10u}, /* 3: heart frame 0 top */
+    {0x86u, 0x87u, 0x10u, 0x10u}, /* 4: heart frame 0 bottom */
+    {0x88u, 0x89u, 0xF0u, 0x10u}, /* 5: heart frame 1 top */
+    {0x8Au, 0x8Bu, 0x10u, 0x10u}, /* 6: heart frame 1 bottom */
+    {0x8Cu, 0x8Du, 0xF0u, 0x10u}, /* 7: heart destroyed top */
+    {0x8Eu, 0x8Fu, 0x10u, 0x10u}, /* 8: heart destroyed bottom */
+    {0x83u, 0x83u, 0x20u, 0xF0u}, /* 9: blanks (wall top) */
+    {0x83u, 0x83u, 0x40u, 0xF0u}, /* 10: blanks (wall bottom) */
+    {0x29u, 0x29u, 0x60u, 0xF0u}, /* 11: empty ground */
+};
+
+/* update_alien_boss_supertiles (bank0:9234): stamp a table entry's pair at the
+   enemy-relative position. out_px/out_py return the right tile's position (the
+   ROM leaves the left stamp's PPU address in $12 for the collision clears). */
+static bool contra_rom_update_alien_boss_supertiles(
+    ContraCore *core, uint8_t x, uint8_t entry, uint8_t *out_px, uint8_t *out_py)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t *const e = contra_alien_boss_supertile_tbl[entry];
+    const uint8_t px = (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] + e[3]);
+    const uint8_t py = (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + e[2]);
+
+    if (out_px != NULL)
+    {
+        *out_px = px;
+    }
+    if (out_py != NULL)
+    {
+        *out_py = py;
+    }
+    return contra_rom_alien_guardian_draw_pair(core, px, py, e[0], e[1]);
+}
+
+/* alien_guardian_clear_wall_bg_collision (bank0:9381) on the native model:
+   record world-anchored collision overrides (code 0 = empty) for both stamped
+   super-tile cells -- the ROM keys off the left stamp's PPU address and its
+   +4-column neighbor. (px, py) is the pair's right-tile position as passed to
+   update_alien_boss_supertiles; -0x0e/-0x10 yields the draw anchor. */
+static void contra_rom_alien_guardian_clear_wall_cells(
+    ContraCore *core, uint8_t px, uint8_t py)
+{
+    const uint8_t cy = (uint8_t)(py - 0x10u);
+
+    contra_rom_record_supertile_collision_override(
+        core, (uint8_t)(px - 0x20u - 0x0Eu), cy, 0x83u, 0x00u);
+    contra_rom_record_supertile_collision_override(
+        core, (uint8_t)(px - 0x0Eu), cy, 0x83u, 0x00u);
+}
+
+/* alien_guardian_routine_00 (bank0:9002): HP, mouth-cycle delay, closed-mouth
+   super-tile code, and the 0x40-frame reveal auto-scroll. */
+static void contra_rom_alien_guardian_routine_00(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_set_guardian_and_heart_enemy_hp(core, x);
+    ram[CONTRA_RAM_ENEMY_VAR_4 + x] = 0x20u; /* delay between mouth movements */
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0x90u; /* super-tile code: mouth closed */
+    ram[CONTRA_RAM_AUTO_SCROLL_TIMER_01] = 0x40u;
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x03u);
+}
+
+/* alien_guardian_routine_01 (bank0:9037): toggle the mouth every 0x20 frames,
+   retrying failed jaw stamps; each open decrements ANIMATION_DELAY (3 from
+   routine_00) and the final open advances to the fetus spawner. */
+static void contra_rom_alien_guardian_routine_01(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    if (ram[CONTRA_RAM_ENEMY_X_POS + x] < 0x50u)
+    {
+        contra_rom_add_scroll_to_enemy_pos(core, x);
+        return;
+    }
+    if (ram[CONTRA_RAM_ENEMY_VAR_2 + x] != 0u)
+    {
+        contra_rom_draw_alien_guardian_top_jaw(core, x);
+    }
+    if (ram[CONTRA_RAM_ENEMY_VAR_3 + x] != 0u)
+    {
+        contra_rom_draw_alien_guardian_lower_jaw(core, x);
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_4 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_4 + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_VAR_4 + x] == 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_VAR_4 + x] = 0x20u;
+        if (ram[CONTRA_RAM_ENEMY_VAR_1 + x] == 0x90u)
+        {
+            ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0x92u; /* open the mouth */
+            ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+                (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+        }
+        else
+        {
+            ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0x90u; /* close the mouth */
+        }
+        contra_rom_draw_alien_guardian_top_jaw(core, x);
+        contra_rom_draw_alien_guardian_lower_jaw(core, x);
+    }
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    /* draw_lower_jaw_open_adv_routine (bank0:9193) */
+    contra_rom_draw_alien_guardian_lower_jaw(core, x);
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x20u);
+}
+
+/* alien_guardian_routine_02 (bank0:9198): with the attack flag on, run the
+   0x20-frame delay out and spawn alien fetuses at ticks 1 and 0 -- plus an
+   extra at tick 2 when the player's weapon strength is >= 3 -- then go back
+   to the mouth loop for 3 more cycles. */
+static void contra_rom_alien_guardian_routine_02(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t delay;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ATTACK_FLAG] == 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x03u;
+        contra_rom_set_enemy_routine_to_a(core, x, 0x02u);
+        return;
+    }
+    delay = (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = delay;
+    if (delay > 0x02u)
+    {
+        return;
+    }
+    if ((delay == 0x02u) && (ram[CONTRA_RAM_PLAYER_WEAPON_STRENGTH] < 0x03u))
+    {
+        return;
+    }
+    contra_rom_generate_enemy_at_offset(core, x, 0x11u, 0x00u, 0x00u);
+    if (delay != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x03u;
+    contra_rom_set_enemy_routine_to_a(core, x, 0x02u);
+}
+
+/* create_boss_heart_explosion (bank0:9418): zero the work vars, pop the first
+   explosion on the boss, and start the 5-frame burst cadence. */
+static void contra_rom_create_boss_heart_explosion(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_VAR_3 + x] = 0u;
+    ram[CONTRA_RAM_ENEMY_VAR_4 + x] = 0u;
+    contra_rom_create_explosion_at(
+        core, ram[CONTRA_RAM_ENEMY_X_POS + x], ram[CONTRA_RAM_ENEMY_Y_POS + x]);
+    contra_rom_set_enemy_delay_adv_routine(core, x, 0x05u);
+}
+
+/* alien_guardian_routine_03 (bank0:9414): the kill entry -- destroyed sound,
+   first explosion. */
+static void contra_rom_alien_guardian_routine_03(ContraCore *core, uint8_t x)
+{
+    contra_play_sound(core, 0x55u);
+    contra_rom_create_boss_heart_explosion(core, x);
+}
+
+/* alien_guardian_explosion_offset_tbl (bank0:10467): {vertical, horizontal}
+   offset pairs (create_explosion_at_x_y feeds byte 0 to the Y adder and byte 1
+   to the X adder; the ROM table comment has them swapped). Entry 0 is unused
+   -- routine_04 pre-increments VAR_1. */
+static const uint8_t contra_alien_guardian_explosion_offset_tbl[24] = {
+    0x10u, 0x10u, 0xF0u, 0x10u, 0xF0u, 0xF0u, 0x10u, 0xF0u,
+    0x20u, 0x20u, 0xE0u, 0x20u, 0xE0u, 0xE0u, 0x20u, 0xE0u,
+    0x40u, 0x40u, 0xC0u, 0x40u, 0xC0u, 0xC0u, 0x50u, 0x00u};
+
+/* alien_guardian_routine_04 (bank0:9425): 11 explosions, 5 frames apart, at
+   the table offsets; shared with the heart's destroyed sequence. */
+static void contra_rom_alien_guardian_routine_04(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t n;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x05u;
+    n = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] + 1u);
+    ram[CONTRA_RAM_ENEMY_VAR_1 + x] = n;
+    if (n == 0x0Cu)
+    {
+        contra_rom_advance_enemy_routine(core, x);
+        return;
+    }
+    contra_rom_create_explosion_at(
+        core,
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] +
+                  contra_alien_guardian_explosion_offset_tbl[(size_t)n * 2u + 1u]),
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] +
+                  contra_alien_guardian_explosion_offset_tbl[(size_t)n * 2u]));
+}
+
+/* alien_guardian_routine_05 (bank0:9225): blank the pair above the top jaw;
+   on success flag VAR_2 (=1, "next stamp pending") and advance. Also called
+   by routine_06's body pass with Y temporarily shifted up 0x20. */
+static void contra_rom_alien_guardian_routine_05(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (!contra_rom_update_alien_boss_supertiles(core, x, 0u, NULL, NULL))
+    {
+        return; /* graphics budget full -- retry next frame */
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = 0x01u;
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+/* alien_guardian_routine_06 (bank0:9279): blank the single top-jaw tile, then
+   on the next pass blank the body pair 0x20 above via routine_05 (which also
+   advances). The ROM applies add_scroll twice on the body pass; kept. */
+static void contra_rom_alien_guardian_routine_06(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_VAR_2 + x] != 0u)
+    {
+        const bool ok = contra_rom_alien_guardian_draw_supertile(
+            core,
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] + 0x10u),
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + 0x20u),
+            0x83u);
+
+        ram[CONTRA_RAM_ENEMY_VAR_2 + x] = ok ? 0x00u : 0x01u;
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_Y_POS + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + 0xE0u);
+    contra_rom_alien_guardian_routine_05(core, x);
+    ram[CONTRA_RAM_ENEMY_Y_POS + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + 0x20u);
+}
+
+/* alien_guardian_routine_07 (bank0:9302): destroyed-body pair (entry 1), then
+   entry 2; advance once the second pair lands. */
+static void contra_rom_alien_guardian_routine_07(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_VAR_2 + x] != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_VAR_2 + x] =
+            contra_rom_update_alien_boss_supertiles(core, x, 1u, NULL, NULL)
+                ? 0x00u : 0x01u;
+        return;
+    }
+    if (!contra_rom_update_alien_boss_supertiles(core, x, 2u, NULL, NULL))
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_2 + x] + 1u);
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+/* alien_guardian_routine_08 (bank0:9329): blank at (X+0x30, Y) and at
+   (X-0x10, Y+0xC0); only the second stamp's success gates the advance. */
+static void contra_rom_alien_guardian_routine_08(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    (void)contra_rom_alien_guardian_draw_supertile(
+        core,
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] + 0x30u),
+        ram[CONTRA_RAM_ENEMY_Y_POS + x],
+        0x83u);
+    if (!contra_rom_alien_guardian_draw_supertile(
+            core,
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] - 0x10u),
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + 0xC0u),
+            0x83u))
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_2 + x] + 1u);
+    contra_rom_advance_enemy_routine(core, x);
+}
+
+/* alien_guardian_routine_09 (bank0:9345): blank the wall pair at Y+0x20, then
+   Y+0x40, clearing both cells' bg collision each pass (the ROM clears even
+   when the stamp missed the budget; the cells are the same on retry). */
+static void contra_rom_alien_guardian_routine_09(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t px, py;
+    bool ok;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_VAR_2 + x] != 0u)
+    {
+        ok = contra_rom_update_alien_boss_supertiles(core, x, 9u, &px, &py);
+        contra_rom_alien_guardian_clear_wall_cells(core, px, py);
+        ram[CONTRA_RAM_ENEMY_VAR_2 + x] = ok ? 0x00u : 0x01u;
+        return;
+    }
+    ok = contra_rom_update_alien_boss_supertiles(core, x, 10u, &px, &py);
+    contra_rom_alien_guardian_clear_wall_cells(core, px, py);
+    if (ok)
+    {
+        ram[CONTRA_RAM_ENEMY_VAR_2 + x] = 0x01u;
+        contra_rom_advance_enemy_routine(core, x);
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_VAR_2 + x] = 0x01u; /* keep retrying the bottom pair */
+}
+
+/* alien_guardian_routine_0a (bank0:9394): stamp empty ground where the wall
+   was (entry 11) and clear the cell row above it (PPU address - 0x20 = one
+   8px row up, snapping into the already-cleared Y+0x40 cells). */
+static void contra_rom_alien_guardian_routine_0a(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t px, py;
+    bool ok;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_VAR_2 + x] == 0u)
+    {
+        contra_rom_advance_enemy_routine(core, x);
+        return;
+    }
+    ok = contra_rom_update_alien_boss_supertiles(core, x, 11u, &px, &py);
+    contra_rom_alien_guardian_clear_wall_cells(core, px, (uint8_t)(py - 0x08u));
+    if (ok)
+    {
+        contra_rom_advance_enemy_routine(core, x);
+    }
+}
+
 static void contra_rom_alien_guardian_routine_0b(ContraCore *core, uint8_t x)
 {
     contra_rom_destroy_all_enemies(core, (int)x);
@@ -17110,20 +17552,22 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
         case 0x10u:
             if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x07u)
             {
-                switch (routine) /* level-8 alien guardian */
+                switch (routine) /* level-8 alien guardian (bank0:8969) */
                 {
-                    case 0x01u: contra_rom_advance_enemy_routine(core, x); break;
-                    case 0x02u: contra_rom_add_scroll_to_enemy_pos(core, x); break;
-                    case 0x03u: contra_rom_add_scroll_to_enemy_pos(core, x); break;
-                    case 0x04u: contra_play_sound(core, 0x55u); contra_rom_begin_enemy_explosion(core, x); break;
-                    case 0x05u: contra_rom_enemy_routine_explosion_step(core, x); break;
-                    case 0x06u: contra_rom_advance_enemy_routine(core, x); break;
-                    case 0x07u: contra_rom_advance_enemy_routine(core, x); break;
-                    case 0x08u: contra_rom_advance_enemy_routine(core, x); break;
-                    case 0x09u: contra_rom_advance_enemy_routine(core, x); break;
-                    case 0x0Au: contra_rom_advance_enemy_routine(core, x); break;
-                    case 0x0Bu: contra_rom_advance_enemy_routine(core, x); break;
+                    case 0x01u: contra_rom_alien_guardian_routine_00(core, x); break;
+                    case 0x02u: contra_rom_alien_guardian_routine_01(core, x); break;
+                    case 0x03u: contra_rom_alien_guardian_routine_02(core, x); break;
+                    case 0x04u: contra_rom_alien_guardian_routine_03(core, x); break;
+                    case 0x05u: contra_rom_alien_guardian_routine_04(core, x); break;
+                    case 0x06u: contra_rom_alien_guardian_routine_05(core, x); break;
+                    case 0x07u: contra_rom_alien_guardian_routine_06(core, x); break;
+                    case 0x08u: contra_rom_alien_guardian_routine_07(core, x); break;
+                    case 0x09u: contra_rom_alien_guardian_routine_08(core, x); break;
+                    case 0x0Au: contra_rom_alien_guardian_routine_09(core, x); break;
+                    case 0x0Bu: contra_rom_alien_guardian_routine_0a(core, x); break;
                     case 0x0Cu: contra_rom_alien_guardian_routine_0b(core, x); break;
+                    /* table tail (bank0:8982): remove_enemy ($e809, no scroll) */
+                    case 0x0Du: contra_rom_remove_enemy(core, x); break;
                     default: break;
                 }
             }
@@ -18235,7 +18679,20 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
                 contra_rom_set_enemy_routine_to_a(core, slot, 0x06u);
                 return;
             }
-            if ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u) && (dead_type == 0x14u))
+            if ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x07u) && (dead_type >= 0x10u))
+            {
+                /* L8 nibbles (bank7:8143-8146): $43 guardian/fetus, $34
+                   mouth/blob, $63 spider/spawn, $40 heart -- each an entry in
+                   its own per-type routine table. */
+                static const uint8_t l8_kill_routine[7] = {
+                    0x04u, 0x03u, 0x03u, 0x04u, 0x06u, 0x03u, 0x04u};
+
+                if (dead_type <= 0x16u)
+                {
+                    dest_routine = l8_kill_routine[dead_type - 0x10u];
+                }
+            }
+            else if ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u) && (dead_type == 0x14u))
             {
                 dest_routine = 0x0Au; /* L5 boss UFO: nibble $a5 high (bank7:8129)
                                          -> boss_ufo_routine_09 (destroyed) */
@@ -20500,15 +20957,19 @@ static void contra_render_level_7_tile_animation(ContraCore *core, int x, int y,
 
 static void contra_render_level_7_nametable_writes(ContraCore *core)
 {
-    /* level 5 (the tank) records into the same position-keyed overlay cache;
+    /* levels 5 and 8 record into the same position-keyed overlay cache;
        only the source data tables differ */
-    const bool level5 = (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u);
-    const uint16_t supertile_addr = level5
+    const uint8_t level = core->ram[CONTRA_RAM_CURRENT_LEVEL];
+    const uint16_t supertile_addr = (level == 0x04u)
         ? contra_level_5_nametable_update_supertile_data_addr
-        : contra_level_7_nametable_update_supertile_data_addr;
-    const uint16_t palette_addr = level5
+        : ((level == 0x07u)
+               ? contra_level_8_nametable_update_supertile_data_addr
+               : contra_level_7_nametable_update_supertile_data_addr);
+    const uint16_t palette_addr = (level == 0x04u)
         ? contra_level_5_nametable_update_palette_data_addr
-        : contra_level_7_nametable_update_palette_data_addr;
+        : ((level == 0x07u)
+               ? contra_level_8_nametable_update_palette_data_addr
+               : contra_level_7_nametable_update_palette_data_addr);
     uint8_t i;
 
     for (i = 0u; i < core->l7_supertile_update_count; ++i)
@@ -20560,10 +21021,11 @@ static void contra_render_native_enemies(ContraCore *core)
         contra_render_level_7_nametable_writes(core);
         return;
     }
-    if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u)
+    if ((core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u) ||
+        (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x07u))
     {
-        /* level-5 tank: background super-tile overlays (tires/turret/blanks);
-           other L5 enemies are sprites and render via the normal path */
+        /* level-5 tank/boss UFO and level-8 guardian/spawn/heart background
+           super-tile overlays; their sprite enemies render via the normal path */
         contra_render_level_7_nametable_writes(core);
     }
     if (contra_is_native_level_2_active(core))

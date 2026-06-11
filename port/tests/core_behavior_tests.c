@@ -436,6 +436,31 @@ static void force_level5_gameplay(ContraCore *core)
     }
 }
 
+static void force_level8_gameplay(ContraCore *core)
+{
+    unsigned frame;
+
+    contra_core_init(core);
+    core->ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
+    core->ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x00u;
+    core->ram[CONTRA_RAM_CURRENT_LEVEL] = 0x07u;
+    core->ram[CONTRA_RAM_PLAYER_MODE_1D] = 0x01u;
+    core->ram[CONTRA_RAM_P1_GAME_OVER_STATUS] = 0x00u;
+    core->ram[CONTRA_RAM_P2_GAME_OVER_STATUS] = 0x01u;
+    core->ram[CONTRA_RAM_P1_NUM_LIVES] = 0x02u;
+    core->ram[CONTRA_RAM_P2_NUM_LIVES] = 0x00u;
+
+    for (frame = 0u; frame < 256u; ++frame)
+    {
+        step_no_input(core);
+        if ((core->ram[CONTRA_RAM_GAME_ROUTINE_INDEX] == 0x05u) &&
+            (core->ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x04u))
+        {
+            return;
+        }
+    }
+}
+
 static void force_level6_gameplay(ContraCore *core)
 {
     unsigned frame;
@@ -1841,6 +1866,44 @@ static bool test_level5_specific_types_use_level5_handlers(void)
     return true;
 }
 
+static bool test_level8_alien_guardian_runs_its_routine_set(void)
+{
+    ContraCore core;
+    const size_t slot = 0u;
+    unsigned frame;
+
+    force_level8_gameplay(&core);
+    CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x04u);
+
+    core.ram[CONTRA_RAM_ENEMY_TYPE + slot] = 0x10u;
+    core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] = 0x01u;
+    core.ram[CONTRA_RAM_ENEMY_SPRITES + slot] = 0x01u;
+    core.ram[CONTRA_RAM_ENEMY_X_POS + slot] = 0x80u;
+    core.ram[CONTRA_RAM_ENEMY_Y_POS + slot] = 0x40u;
+    step_no_input(&core);
+
+    /* alien_guardian_routine_00: HP formula, closed mouth, reveal scroll */
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x02u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_HP + slot] >= 0x37u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_VAR_1 + slot] == 0x90u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_VAR_4 + slot] == 0x20u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + slot] == 0x03u);
+    CHECK(core.ram[CONTRA_RAM_AUTO_SCROLL_TIMER_01] != 0x00u);
+
+    /* one full mouth cycle (0x20 frames) opens the mouth and stamps the
+       jaw super-tiles into the overlay cache */
+    for (frame = 0u; frame < 0x21u; ++frame)
+    {
+        step_no_input(&core);
+    }
+    CHECK(core.ram[CONTRA_RAM_ENEMY_TYPE + slot] == 0x10u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x02u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_VAR_1 + slot] == 0x92u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + slot] == 0x02u);
+    CHECK(core.l7_supertile_update_count > 0u);
+    return true;
+}
+
 static bool test_level6_fire_beam_uses_rom_props_and_init(void)
 {
     ContraCore core;
@@ -2850,6 +2913,7 @@ int main(void)
         {"level5_ice_grenade_generator_uses_rom_props", test_level5_ice_grenade_generator_uses_rom_props},
         {"level5_ice_grenade_generator_spawns_ice_grenade", test_level5_ice_grenade_generator_spawns_ice_grenade},
         {"level5_specific_types_use_level5_handlers", test_level5_specific_types_use_level5_handlers},
+        {"level8_alien_guardian_runs_its_routine_set", test_level8_alien_guardian_runs_its_routine_set},
         {"level6_fire_beam_uses_rom_props_and_init", test_level6_fire_beam_uses_rom_props_and_init},
         {"level6_left_and_right_beams_do_not_use_old_handlers", test_level6_left_and_right_beams_do_not_use_old_handlers},
         {"level6_boss_robot_not_misrouted_to_level3_or_level2", test_level6_boss_robot_not_misrouted_to_level3_or_level2},
