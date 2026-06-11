@@ -1,0 +1,27 @@
+port/contra_core/include/contra/ram.h
+  s_d6f4243e7218de::t_ec9f4a131f458e 107
+port/contra_core/src/core.c
+  s_d6f4243e7218de::t_1cc0f76a976db8 456-457
+  s_d6f4243e7218de::t_ad613bc70baeb9 17238-17247
+  s_d6f4243e7218de::t_3d2e31dd9727fa 14547-14549,14555,14567-14589,14592-14971
+  s_d6f4243e7218de::t_66770ac59e70a5 17799-17803
+  s_d6f4243e7218de::t_b65834aa0e93fb 14590-14591
+  s_d6f4243e7218de::t_755ee65188b2b0 19987-19995,20005-20006,20012-20013
+  s_d6f4243e7218de::t_d42230a85f1efa 20047-20052
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "0cac78f0665639640d213cc3804d412fb3538f50",
+  "prompts": {},
+  "sessions": {
+    "s_d6f4243e7218de": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "825b5bf6-c121-4087-8508-1505c9d1a7d5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
