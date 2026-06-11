@@ -427,7 +427,7 @@ static const uint8_t contra_level_palette_animation_count[9] = {
     0x04u, 0x04u, 0x03u, 0x04u, 0x04u, 0x04u, 0x04u, 0x04u, 0x04u
 };
 static const uint8_t contra_level_palette_2_index_tbl[4] = {0x04u, 0x5Cu, 0x04u, 0x5Du};
-static const uint8_t contra_level_alt_collision_and_palette_tbl[8][15] = {
+static const uint8_t contra_level_alt_collision_and_palette_tbl[9][15] = {
     {0x06u, 0xA8u, 0xA8u, 0x23u, 0x23u, 0x23u, 0x23u, 0x02u, 0x03u, 0x04u, 0x23u, 0x00u, 0x01u, 0x22u, 0x07u},
     {0x00u, 0xFFu, 0xFFu, 0x16u, 0x17u, 0x18u, 0x17u, 0x11u, 0x12u, 0x13u, 0x16u, 0x00u, 0x01u, 0x22u, 0x21u},
     {0x07u, 0xFFu, 0xFFu, 0x27u, 0x54u, 0x55u, 0x54u, 0x0Bu, 0x25u, 0x26u, 0x27u, 0x00u, 0x01u, 0x22u, 0x07u},
@@ -435,7 +435,9 @@ static const uint8_t contra_level_alt_collision_and_palette_tbl[8][15] = {
     {0x20u, 0xF0u, 0xF0u, 0x42u, 0x42u, 0x42u, 0x42u, 0x3Du, 0x3Eu, 0x40u, 0x42u, 0x00u, 0x01u, 0x22u, 0x06u},
     {0x0Cu, 0xDEu, 0xDEu, 0x3Au, 0x3Bu, 0x3Au, 0x3Cu, 0x39u, 0x39u, 0x04u, 0x3Au, 0x00u, 0x01u, 0x22u, 0x56u},
     {0x0Eu, 0xF1u, 0xF1u, 0x5Au, 0x5Fu, 0x5Au, 0x5Bu, 0x45u, 0x46u, 0x59u, 0x5Fu, 0x00u, 0x01u, 0x22u, 0x07u},
-    {0x05u, 0xB6u, 0xB6u, 0x4Bu, 0x50u, 0x4Bu, 0x50u, 0x48u, 0x49u, 0x4Au, 0x4Bu, 0x00u, 0x01u, 0x43u, 0x44u}
+    {0x05u, 0xB6u, 0xB6u, 0x4Bu, 0x50u, 0x4Bu, 0x50u, 0x48u, 0x49u, 0x4Au, 0x4Bu, 0x00u, 0x01u, 0x43u, 0x44u},
+    /* row 8 = the ending animation (CURRENT_LEVEL 0x08 during game_routine_06) */
+    {0x00u, 0x00u, 0x00u, 0x67u, 0x68u, 0x69u, 0x68u, 0x25u, 0x65u, 0x66u, 0x67u, 0x6Du, 0x6Cu, 0x22u, 0x64u}
 };
 static const uint8_t contra_level_end_level_delay_timer_tbl[8] = {0xA0u, 0xA0u, 0xE0u, 0xA0u, 0xA0u, 0xA0u, 0xA0u, 0xA0u};
 static const uint16_t contra_level_1_nametable_update_supertile_data_addr = 0x83B1u;
@@ -1570,10 +1572,18 @@ static void contra_render_intro_background(ContraCore *core)
     const uint8_t fine_scroll_x = core->latched_horizontal_scroll;
     const uint8_t tile_scroll_x = (uint8_t)(fine_scroll_x >> 3u);
     const uint8_t pixel_scroll_x = (uint8_t)(fine_scroll_x & 0x07u);
+    /* Vertical scroll (the ending credits crawl): the nametable repeats every
+       240 lines (the $2800 writes mirror onto $2000). Zero everywhere else,
+       so the intro screens render as before. */
+    const uint8_t fine_scroll_y = core->latched_vertical_scroll;
+    const unsigned tile_scroll_y = (unsigned)(fine_scroll_y >> 3u);
+    const unsigned pixel_scroll_y = (unsigned)(fine_scroll_y & 0x07u);
+    const unsigned visible_rows = (pixel_scroll_y != 0u) ? 31u : 30u;
     unsigned tile_y;
 
-    for (tile_y = 0u; tile_y < 30u; ++tile_y)
+    for (tile_y = 0u; tile_y < visible_rows; ++tile_y)
     {
+        const unsigned src_tile_y = (tile_scroll_y + tile_y) % 30u;
         unsigned screen_tile_x;
 
         for (screen_tile_x = 0u; screen_tile_x < 33u; ++screen_tile_x)
@@ -1581,12 +1591,12 @@ static void contra_render_intro_background(ContraCore *core)
             const uint8_t world_tile_x = (uint8_t)(tile_scroll_x + (uint8_t)screen_tile_x);
             const uint8_t nametable_index = (uint8_t)(base_nametable ^ ((world_tile_x >> 5u) & 0x01u));
             const uint8_t coarse_x = (uint8_t)(world_tile_x & 0x1Fu);
-            const uint16_t tile_offset = (uint16_t)(((uint16_t)tile_y * 32u) + (uint16_t)coarse_x);
+            const uint16_t tile_offset = (uint16_t)(((uint16_t)src_tile_y * 32u) + (uint16_t)coarse_x);
             const uint8_t pattern_index = contra_read_nametable_byte(core, nametable_index, tile_offset);
-            const uint8_t palette_slot = contra_read_nametable_palette_slot(core, nametable_index, coarse_x, (uint8_t)tile_y);
+            const uint8_t palette_slot = contra_read_nametable_palette_slot(core, nametable_index, coarse_x, (uint8_t)src_tile_y);
             const int dest_x = ((int)screen_tile_x * 8) - (int)pixel_scroll_x;
 
-            contra_draw_background_tile(core, dest_x, (int)tile_y * 8, pattern_index, palette_slot);
+            contra_draw_background_tile(core, dest_x, ((int)tile_y * 8) - (int)pixel_scroll_y, pattern_index, palette_slot);
         }
     }
 }
@@ -5861,9 +5871,9 @@ static void contra_load_alternate_graphics(ContraCore *core)
     uint8_t *const ram = core->ram;
     const uint8_t level = ram[CONTRA_RAM_CURRENT_LEVEL];
 
-    if (level >= 8u)
+    if (level >= 9u)
     {
-        return;
+        return; /* row 8 is the ending-animation palette set */
     }
 
     ram[CONTRA_RAM_LEVEL_ALT_GRAPHICS_POS] = 0xFFu;
@@ -20084,9 +20094,16 @@ static void contra_level_routine_05(ContraCore *core)
     ram[CONTRA_RAM_CURRENT_LEVEL] = (uint8_t)(ram[CONTRA_RAM_CURRENT_LEVEL] + 1u);
     if (ram[CONTRA_RAM_CURRENT_LEVEL] >= 0x08u)
     {
-        contra_increment_game_routine(core);
+        /* level_routine_05 (bank7:3276): completed the last level -- start the
+           game_routine_06 ending and reset the level routine so the post-
+           credits handoff (game_end_routine_05 decrements the game routine)
+           re-enters level_routine_00 on level 1. */
+        contra_inc_routine_index_set_timer(core);
         ram[CONTRA_RAM_GAME_COMPLETION_COUNT] = (uint8_t)(ram[CONTRA_RAM_GAME_COMPLETION_COUNT] + 1u);
         ram[CONTRA_RAM_CURRENT_LEVEL] = 0x09u;
+        ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x00u;
+        ram[CONTRA_RAM_END_LEVEL_ROUTINE_INDEX] = 0x00u;
+        ram[CONTRA_RAM_SPRITE_LOAD_TYPE] = 0x00u;
         return;
     }
 
@@ -20326,6 +20343,368 @@ static void contra_dec_theme_delay_check_user_input(ContraCore *core)
     contra_set_game_routine_index(core, 0x03u);
 }
 
+/* ===== game_routine_06: the ending (bank4:118-616) -- screen melt, the
+   helicopter island escape, and the credits crawl, ending back at level 1
+   with GAME_COMPLETION_COUNT bumped. ===== */
+
+/* init_game_routine_reset_timer_low_byte (bank7:863): DELAY low = 0x80 and
+   advance GAME_END_ROUTINE_INDEX (the GAME_ROUTINE_INIT_FLAG byte). */
+static void contra_init_game_routine_reset_timer_low_byte(ContraCore *core)
+{
+    core->ram[CONTRA_RAM_DELAY_TIME_LOW_BYTE] = 0x80u;
+    core->ram[CONTRA_RAM_GAME_END_ROUTINE_INDEX] =
+        (uint8_t)(core->ram[CONTRA_RAM_GAME_END_ROUTINE_INDEX] + 1u);
+}
+
+static void contra_game_end_routine_00(ContraCore *core)
+{
+    core->ram[CONTRA_RAM_CURRENT_LEVEL] = 0x08u; /* the ending "level 9" */
+    core->ram[CONTRA_RAM_GRAPHICS_BUFFER_MODE] =
+        (uint8_t)(core->ram[CONTRA_RAM_GRAPHICS_BUFFER_MODE] - 1u);
+    contra_init_game_routine_reset_timer_low_byte(core);
+}
+
+/* game_end_routine_01 (bank4:139): the screen melt -- each frame zero one
+   0x20-byte vertical strip of the background pattern table ($1000-$1FFF);
+   8 strips x 16 byte offsets dissolve every tile on screen. When done, load
+   the ending palette row and the island scene (graphic list 0x0C). */
+static void contra_game_end_routine_01(ContraCore *core)
+{
+    /* screen_melt_ppu_add_tbl (bank4:200): {PPU low, PPU high} */
+    static const uint8_t screen_melt_ppu_add_tbl[8][2] = {
+        {0x00u, 0x10u}, {0x00u, 0x14u}, {0x00u, 0x18u}, {0x00u, 0x1Cu},
+        {0x10u, 0x10u}, {0x10u, 0x14u}, {0x10u, 0x18u}, {0x10u, 0x1Cu}};
+    uint8_t *const ram = core->ram;
+    const uint8_t strip = (uint8_t)(ram[0x40u] & 0x07u); /* zp $40 repurposed */
+    const uint8_t byte_off = ram[0x41u];
+    const uint16_t ppu_addr = (uint16_t)(
+        ((uint16_t)screen_melt_ppu_add_tbl[strip][1] << 8u) |
+        (uint8_t)(screen_melt_ppu_add_tbl[strip][0] + byte_off));
+    unsigned k;
+
+    for (k = 0u; k < 0x20u; ++k)
+    {
+        contra_write_ppu_byte(core, (uint16_t)(ppu_addr + (k * 0x20u)), 0x00u);
+    }
+
+    if ((uint8_t)(strip + 1u) != 0x08u)
+    {
+        ram[0x40u] = (uint8_t)(strip + 1u);
+        return;
+    }
+    ram[0x41u] = (uint8_t)(byte_off + 1u);
+    if (ram[0x41u] != 0x10u)
+    {
+        ram[0x40u] = 0x00u;
+        return;
+    }
+    /* @load_alt_graphics (bank4:189) */
+    ram[CONTRA_RAM_DELAY_TIME_LOW_BYTE] = 0x40u; /* dead store, ROM order */
+    contra_init_game_routine_reset_timer_low_byte(core);
+    contra_load_alternate_graphics(core);
+    contra_load_graphic_data_list(core, 12u); /* ending_graphic_data */
+}
+
+/* end_scene_sprite_anim_tbl (bank4): {delay, x, y}; entry 0 -> slot 9
+   (helicopter), entry 1 -> slot 8 (mountains), 2..9 -> slots 7..0
+   (the island explosions). */
+static const uint8_t contra_end_scene_sprite_anim_tbl[10][3] = {
+    {0x00u, 0x80u, 0x90u}, {0x00u, 0x50u, 0x86u},
+    {0xA8u, 0x60u, 0x8Cu}, {0xB4u, 0x98u, 0x8Au}, {0xB8u, 0x70u, 0x94u},
+    {0xD0u, 0x50u, 0x96u}, {0xD3u, 0xA8u, 0x98u}, {0xD6u, 0x78u, 0x94u},
+    {0xDBu, 0x68u, 0x96u}, {0xEFu, 0x88u, 0x94u}};
+
+static void contra_end_game_sequence_00(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+    int x;
+
+    ram[CONTRA_RAM_ENEMY_SPRITES + 8u] = 0xCFu; /* 3 mountain peaks */
+    ram[CONTRA_RAM_ENEMY_SPRITES + 9u] = 0xC5u; /* helicopter frame 1 */
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + 9u] = 0xFFu;
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + 9u] = 0xFFu;
+    ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + 9u] = 0x60u;
+    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + 9u] = 0x70u;
+    for (x = 9; x >= 0; --x)
+    {
+        const uint8_t *const e = contra_end_scene_sprite_anim_tbl[9 - x];
+
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = e[0];
+        ram[CONTRA_RAM_ENEMY_X_POS + x] = e[1];
+        ram[CONTRA_RAM_ENEMY_Y_POS + x] = e[2];
+    }
+    contra_play_sound(core, 0x21u); /* helicopter rotors */
+    ram[CONTRA_RAM_END_LEVEL_ROUTINE_INDEX] =
+        (uint8_t)(ram[CONTRA_RAM_END_LEVEL_ROUTINE_INDEX] + 1u);
+}
+
+/* destroyed_island_tile_tbl (bank4, CPU $ba67): a gameplay-format graphics
+   stream -- [vram inc][group size][group count] then per group
+   [PPU hi][PPU lo][bytes] -- applied directly to the PPU model. The last
+   group recolors the island's attribute run at $23da. */
+static void contra_apply_gameplay_graphics_stream(ContraCore *core, const uint8_t *s)
+{
+    const uint16_t stride = (s[0] == 0x02u) ? 0x20u : 0x01u;
+    const uint8_t size = s[1];
+    uint8_t groups = s[2];
+    const uint8_t *p = s + 3;
+
+    while (groups-- != 0u)
+    {
+        uint16_t addr = (uint16_t)(((uint16_t)p[0] << 8u) | p[1]);
+        uint8_t i;
+
+        p += 2;
+        for (i = 0u; i < size; ++i)
+        {
+            contra_write_ppu_byte(core, addr, *p++);
+            addr = (uint16_t)(addr + stride);
+        }
+    }
+}
+
+static void contra_end_game_draw_destroyed_island(ContraCore *core)
+{
+    static const uint8_t destroyed_island_tile_tbl[0x43] = {
+        0x01u, 0x0Eu, 0x04u, 0x22u, 0x29u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
+        0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x22u,
+        0x49u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
+        0x70u, 0x71u, 0x72u, 0x00u, 0x00u, 0x22u, 0x69u, 0x7Cu, 0x00u, 0x00u,
+        0x70u, 0x00u, 0x7Cu, 0x74u, 0x7Eu, 0x74u, 0x80u, 0x81u, 0x74u, 0x73u,
+        0x7Fu, 0x23u, 0xDAu, 0xAAu, 0xAAu, 0xAAu, 0xAAu, 0xAAu, 0xAAu, 0xAAu,
+        0xAAu, 0xAAu, 0xAAu, 0xAAu, 0xAAu, 0xAAu, 0xAAu};
+
+    core->ram[CONTRA_RAM_ENEMY_SPRITES + 8u] = 0x00u; /* mountains gone */
+    contra_apply_gameplay_graphics_stream(core, destroyed_island_tile_tbl);
+}
+
+/* end_game_sequence_01 (bank4:260): fly the helicopter up-left (accelerating
+   rightward until it exits off the top), and run the island explosion slots:
+   each slot pops sound $25 as its delay crosses 0x80 (slot 3 also redraws the
+   island destroyed), shows the explosion sprites through 0x7F..0x60, then
+   blanks; slot 0's delay (the longest) reaching 0 advances the scene. */
+static void contra_end_game_sequence_01(ContraCore *core)
+{
+    static const uint8_t helicopter_sprite_anim_tbl[32] = {
+        0xC5u, 0xC6u, 0xC7u, 0xC5u, 0xC6u, 0xC7u, 0xC5u, 0xC6u,
+        0xC7u, 0xC5u, 0xC8u, 0xC9u, 0xCAu, 0xCBu, 0xCCu, 0xCDu,
+        0xCEu, 0xCCu, 0xCDu, 0xCEu, 0xCCu, 0xCDu, 0xCEu, 0xCCu,
+        0xCDu, 0xCEu, 0xCCu, 0xCDu, 0xCEu, 0xCCu, 0xCDu, 0xCEu};
+    static const uint8_t ending_sequence_explosion_tbl[4] = {0x37u, 0x36u, 0x35u, 0x37u};
+    uint8_t *const ram = core->ram;
+    int x;
+
+    if (ram[CONTRA_RAM_ENEMY_SPRITES + 9u] != 0x01u)
+    {
+        unsigned sum;
+
+        sum = (unsigned)ram[CONTRA_RAM_ENEMY_X_VEL_ACCUM + 9u] +
+              ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + 9u];
+        ram[CONTRA_RAM_ENEMY_X_VEL_ACCUM + 9u] = (uint8_t)sum;
+        ram[CONTRA_RAM_ENEMY_X_POS + 9u] =
+            (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + 9u] +
+                      ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + 9u] + (sum >> 8u));
+        sum = (unsigned)ram[CONTRA_RAM_ENEMY_Y_VEL_ACCUM + 9u] +
+              ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + 9u];
+        ram[CONTRA_RAM_ENEMY_Y_VEL_ACCUM + 9u] = (uint8_t)sum;
+        sum = (unsigned)ram[CONTRA_RAM_ENEMY_Y_POS + 9u] +
+              ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + 9u] + (sum >> 8u);
+        ram[CONTRA_RAM_ENEMY_Y_POS + 9u] = (uint8_t)sum;
+        if (sum <= 0xFFu)
+        {
+            /* the Y add's missing carry: flew off the top -- hide it */
+            ram[CONTRA_RAM_ENEMY_SPRITES + 9u] = 0x01u;
+        }
+        else
+        {
+            const unsigned anim = (unsigned)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + 9u] >> 2u);
+            unsigned v;
+
+            v = (unsigned)ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + 9u] + 2u;
+            ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + 9u] = (uint8_t)v;
+            ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + 9u] =
+                (uint8_t)(ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + 9u] + (v >> 8u));
+            ram[CONTRA_RAM_ENEMY_SPRITES + 9u] =
+                helicopter_sprite_anim_tbl[(anim < 32u) ? anim : 31u];
+            if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x01u) != 0u)
+            {
+                return; /* odd frames skip the explosion slots */
+            }
+            ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + 9u] =
+                (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + 9u] + 1u);
+        }
+    }
+
+    for (x = 7; x >= 0; --x)
+    {
+        const uint8_t delay = ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x];
+
+        if (delay == 0u)
+        {
+            if (x == 0)
+            {
+                ram[CONTRA_RAM_END_LEVEL_ROUTINE_INDEX] =
+                    (uint8_t)(ram[CONTRA_RAM_END_LEVEL_ROUTINE_INDEX] + 1u);
+                return;
+            }
+            /* ROM quirk: an elapsed non-zero slot still decrements (wrapping
+               to 0xFF) and compares the slot NUMBER, landing on sprite 0 */
+            ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0xFFu;
+            ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x00u;
+            continue;
+        }
+        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = (uint8_t)(delay - 1u);
+        if (delay >= 0x80u)
+        {
+            if (delay == 0x80u)
+            {
+                contra_play_sound(core, 0x25u); /* big island explosion */
+                if (x == 3)
+                {
+                    contra_end_game_draw_destroyed_island(core);
+                    continue; /* island draw skips the sprite write */
+                }
+            }
+            ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x00u;
+        }
+        else if (delay >= 0x60u)
+        {
+            ram[CONTRA_RAM_ENEMY_SPRITES + x] =
+                ending_sequence_explosion_tbl[(delay >> 3u) & 0x03u];
+        }
+        else
+        {
+            ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x00u;
+        }
+    }
+}
+
+/* end_game_sequence_02 (bank4:420): after the scene delay, clear the screen
+   and start the credits music and crawl. */
+static void contra_end_game_sequence_02(ContraCore *core)
+{
+    if (!contra_decrement_delay_timer_elapsed(core))
+    {
+        return;
+    }
+    core->ram[CONTRA_RAM_LEVEL_SUPERTILE_DATA_PTR] = 0x20u; /* zp $44: credits
+        PPU write pointer high byte ($43 low is already 0) */
+    contra_init_apu_channels(core);
+    contra_reset_delay_timer(core);
+    contra_play_sound(core, 0x4Au); /* end credits music */
+    contra_zero_out_nametables(core);
+    contra_init_game_routine_reset_timer_low_byte(core);
+}
+
+static void contra_game_end_routine_03(ContraCore *core)
+{
+    contra_load_palette_indexes(core);
+    switch (core->ram[CONTRA_RAM_END_LEVEL_ROUTINE_INDEX])
+    {
+        case 0x00u: contra_end_game_sequence_00(core); break;
+        case 0x01u: contra_end_game_sequence_01(core); break;
+        default: contra_end_game_sequence_02(core); break;
+    }
+}
+
+/* Write one 0x20-tile credits row at the $43/$44 PPU pointer. A terminator
+   entry (high byte 0) starts the 0x0300-frame post-credits delay instead. */
+static void contra_game_end_draw_credits_line(ContraCore *core, uint8_t entry_index)
+{
+    const uint16_t ending_credits_ptr_tbl = 0xBB95u; /* bank 4 */
+    const uint16_t line_addr = contra_rom_read_u16(
+        4u, (uint16_t)(ending_credits_ptr_tbl + ((uint16_t)entry_index << 1u)));
+    uint8_t *const ram = core->ram;
+    const uint16_t ppu = (uint16_t)(((uint16_t)ram[0x44u] << 8u) | ram[0x43u]);
+    uint8_t n_chars;
+    uint8_t x_off;
+    uint8_t i;
+
+    if ((line_addr >> 8u) == 0u)
+    {
+        /* end_credits_text (bank4:531): ~12.8s then the final routine */
+        ram[CONTRA_RAM_DELAY_TIME_LOW_BYTE] = 0x00u;
+        ram[CONTRA_RAM_DELAY_TIME_HIGH_BYTE] = 0x03u;
+        contra_init_game_routine_reset_timer_low_byte(core);
+        return;
+    }
+    n_chars = contra_rom_read_u8(4u, line_addr);
+    x_off = contra_rom_read_u8(4u, (uint16_t)(line_addr + 1u));
+    for (i = 0u; i < 0x20u; ++i)
+    {
+        uint8_t tile = 0x00u;
+
+        if ((i >= x_off) && ((uint8_t)(i - x_off) < n_chars))
+        {
+            tile = contra_rom_read_u8(4u, (uint16_t)(line_addr + 2u + (uint16_t)(i - x_off)));
+        }
+        contra_write_ppu_byte(core, (uint16_t)(ppu + i), tile);
+    }
+    ram[0x43u] = (uint8_t)((ppu + 0x20u) & 0xFFu);
+    ram[0x44u] = (uint8_t)((ppu + 0x20u) >> 8u);
+}
+
+/* game_end_routine_04 (bank4:435): the credits crawl -- scroll up one line
+   every 4 frames; rows are written just below the visible window (a text line
+   when the scroll's low nibble hits 4, a blank spacer at 0xC), wrapping the
+   write pointer with the 240-line scroll reset. */
+static void contra_game_end_routine_04(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t vs;
+
+    if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x03u) != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_VERTICAL_SCROLL] = (uint8_t)(ram[CONTRA_RAM_VERTICAL_SCROLL] + 1u);
+    vs = ram[CONTRA_RAM_VERTICAL_SCROLL];
+    if (vs == 0xF0u)
+    {
+        ram[0x44u] = 0x20u;
+        ram[0x43u] = 0x00u;
+        ram[CONTRA_RAM_VERTICAL_SCROLL] = 0x00u;
+        vs = 0x00u;
+    }
+    if ((vs & 0x0Fu) == 0x04u)
+    {
+        const uint8_t entry = ram[0x42u]; /* zp $42: credits line index */
+
+        ram[0x42u] = (uint8_t)(entry + 1u);
+        contra_game_end_draw_credits_line(core, entry);
+    }
+    else if ((vs & 0x0Fu) == 0x0Cu)
+    {
+        contra_game_end_draw_credits_line(core, 0u); /* blank spacer row */
+    }
+}
+
+static void contra_game_end_routine_05(ContraCore *core)
+{
+    if (!contra_decrement_delay_timer_elapsed(core))
+    {
+        return;
+    }
+    core->ram[CONTRA_RAM_GRAPHICS_BUFFER_MODE] = 0x00u;
+    core->ram[CONTRA_RAM_CURRENT_LEVEL] = 0x00u;
+    /* back to game_routine_05: the second loop starts at level 1 */
+    core->ram[CONTRA_RAM_GAME_ROUTINE_INDEX] =
+        (uint8_t)(core->ram[CONTRA_RAM_GAME_ROUTINE_INDEX] - 1u);
+}
+
+static void contra_game_routine_06(ContraCore *core)
+{
+    switch (core->ram[CONTRA_RAM_GAME_END_ROUTINE_INDEX])
+    {
+        case 0x00u: contra_game_end_routine_00(core); break;
+        case 0x01u: contra_game_end_routine_01(core); break;
+        case 0x02u: contra_init_game_routine_reset_timer_low_byte(core); break;
+        case 0x03u: contra_game_end_routine_03(core); break;
+        case 0x04u: contra_game_end_routine_04(core); break;
+        default: contra_game_end_routine_05(core); break;
+    }
+}
+
 static void contra_exe_game_routine(ContraCore *core)
 {
     uint8_t routine;
@@ -20369,6 +20748,9 @@ static void contra_exe_game_routine(ContraCore *core)
             break;
         case 0x05u:
             contra_game_routine_05(core);
+            break;
+        case 0x06u:
+            contra_game_routine_06(core);
             break;
         default:
             break;
@@ -21259,8 +21641,12 @@ static void contra_render_frame(ContraCore *core, bool update_latches)
         core->sprite_priority[pixel_index] = 0xFFu;
     }
 
-    if ((game_routine <= 0x03u) && !demo_level_scene)
+    if (((game_routine <= 0x03u) && !demo_level_scene) || (game_routine == 0x06u))
     {
+        /* game_routine_06 (the ending) is a pure PPU-model scene: the melt
+           erases pattern tiles under the last nametable, the island scene and
+           credits write the nametable directly, and the helicopter/explosions
+           live in the enemy sprite slots. */
         contra_render_intro_background(core);
         contra_render_cpu_sprites(core);
         if (update_latches)

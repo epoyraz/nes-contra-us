@@ -1904,6 +1904,39 @@ static bool test_level8_alien_guardian_runs_its_routine_set(void)
     return true;
 }
 
+static bool test_game_end_sequence_returns_to_level_1(void)
+{
+    ContraCore core;
+    unsigned frame;
+    bool saw_credits = false;
+
+    contra_core_init(&core);
+    /* the state level_routine_05 leaves after the last level is beaten */
+    core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x06u;
+    core.ram[CONTRA_RAM_CURRENT_LEVEL] = 0x09u;
+    core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x00u;
+    core.ram[CONTRA_RAM_PLAYER_MODE_1D] = 0x01u;
+    core.ram[CONTRA_RAM_P1_NUM_LIVES] = 0x02u;
+
+    for (frame = 0u; frame < 12000u; ++frame)
+    {
+        step_no_input(&core);
+        if (core.ram[CONTRA_RAM_GAME_END_ROUTINE_INDEX] == 0x04u)
+        {
+            saw_credits = true;
+        }
+        if (core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] != 0x06u)
+        {
+            break;
+        }
+    }
+
+    CHECK(saw_credits);
+    CHECK(core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] == 0x05u);
+    CHECK(core.ram[CONTRA_RAM_CURRENT_LEVEL] == 0x00u);
+    return true;
+}
+
 static bool test_level6_fire_beam_uses_rom_props_and_init(void)
 {
     ContraCore core;
@@ -2914,6 +2947,7 @@ int main(void)
         {"level5_ice_grenade_generator_spawns_ice_grenade", test_level5_ice_grenade_generator_spawns_ice_grenade},
         {"level5_specific_types_use_level5_handlers", test_level5_specific_types_use_level5_handlers},
         {"level8_alien_guardian_runs_its_routine_set", test_level8_alien_guardian_runs_its_routine_set},
+        {"game_end_sequence_returns_to_level_1", test_game_end_sequence_returns_to_level_1},
         {"level6_fire_beam_uses_rom_props_and_init", test_level6_fire_beam_uses_rom_props_and_init},
         {"level6_left_and_right_beams_do_not_use_old_handlers", test_level6_left_and_right_beams_do_not_use_old_handlers},
         {"level6_boss_robot_not_misrouted_to_level3_or_level2", test_level6_boss_robot_not_misrouted_to_level3_or_level2},
