@@ -11238,7 +11238,7 @@ static void contra_rom_red_blue_soldier_gen_routine_01(ContraCore *core, uint8_t
 
     if (ram[CONTRA_RAM_WALL_PLATING_DESTROYED_COUNT] >= 0x03u)
     {
-        contra_rom_clear_enemy(core, x);
+        contra_rom_remove_enemy(core, x); /* jmp remove_enemy: keep the husk */
         return;
     }
     if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x01u) != 0u)
@@ -16455,7 +16455,8 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
             {
                 case 0x01u: contra_rom_red_blue_soldier_gen_routine_00(core, x); break;
                 case 0x02u: contra_rom_red_blue_soldier_gen_routine_01(core, x); break;
-                case 0x03u: contra_rom_clear_enemy(core, x); break;
+                /* table tail is remove_enemy (bank0:6085): keep the husk */
+                case 0x03u: contra_rom_remove_enemy(core, x); break;
                 default: break;
             }
             break;
