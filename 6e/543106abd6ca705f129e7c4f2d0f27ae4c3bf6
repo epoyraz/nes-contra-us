@@ -1,0 +1,41 @@
+web/deploy-pages.ps1
+  s_23b8ad7ea4bf91::t_ef24157c81e7ec 43,51,78-79
+web/index.html
+  s_cc03e2f6ae7ee6::t_996299637dda87 7
+web/styles.css
+  s_cc03e2f6ae7ee6::t_996299637dda87 150
+web/pages-workflow.yml
+  s_18830c9a377a7b::t_b51b7b262ac141 1-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "6e543106abd6ca705f129e7c4f2d0f27ae4c3bf6",
+  "prompts": {},
+  "sessions": {
+    "s_18830c9a377a7b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dc641ef0-f291-4408-a06b-5155d821dc6c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    },
+    "s_23b8ad7ea4bf91": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eb292-7a87-7142-b339-80c372501ab8",
+        "model": "gpt-5.5"
+      },
+      "human_author": null
+    },
+    "s_cc03e2f6ae7ee6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ba32fa05-517a-4931-864b-9520e3ac114a",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
