@@ -10888,8 +10888,13 @@ static void contra_rom_boss_gemini_routine_03(ContraCore *core, uint8_t x)
     contra_rom_set_enemy_routine_to_a(core, x, 0x03u);
 }
 
-/* boss_gemini_routine_04/06 (bank0:5665-5683): decrement the two-helmet count;
-   the last helmet runs the boss-defeated path, otherwise it explodes/removes. */
+static void contra_rom_boss_door_routine_02(ContraCore *core, uint8_t x);
+static void contra_rom_boss_door_routine_clear_sprite(ContraCore *core, uint8_t x);
+
+/* boss_gemini_routine_04 (bank0:5665): decrement the two-helmet count; the
+   LAST helmet jumps to boss_defeated_routine (sound 0x57, DELAY=0xFF,
+   destroy_all, then init_explosion); an earlier one runs init_explosion in
+   place. Both end up ADVANCED to the explosion routine. */
 static void contra_rom_boss_gemini_routine_04(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
@@ -10897,14 +10902,27 @@ static void contra_rom_boss_gemini_routine_04(ContraCore *core, uint8_t x)
     ram[CONTRA_RAM_WALL_CORE_REMAINING] = (uint8_t)(ram[CONTRA_RAM_WALL_CORE_REMAINING] - 1u);
     if (ram[CONTRA_RAM_WALL_CORE_REMAINING] == 0u)
     {
-        contra_init_apu_channels(core);
-        contra_play_sound(core, 0x57u);
-        ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] = 0x01u;
-        contra_rom_destroy_all_enemies(core, (int)x);
-        contra_rom_begin_enemy_explosion(core, x);
+        contra_rom_boss_door_routine_02(core, x); /* boss_defeated_routine */
         return;
     }
-    contra_rom_begin_enemy_explosion(core, x);
+    contra_rom_enemy_routine_init_explosion_inplace(core, x);
+}
+
+/* boss_gemini_routine_06 (bank0:5677): one helmet left -> plain remove (husk);
+   both destroyed -> clear sprite and set the level-end auto-move delay 0x60. */
+static void contra_rom_boss_gemini_routine_06(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+
+    if (ram[CONTRA_RAM_WALL_CORE_REMAINING] != 0u)
+    {
+        contra_rom_remove_enemy(core, x);
+        return;
+    }
+    contra_rom_boss_door_routine_clear_sprite(core, x);
+    ram[CONTRA_RAM_DELAY_TIME_LOW_BYTE] = 0x60u; /* set_delay_remove_enemy */
+    ram[CONTRA_RAM_DELAY_TIME_HIGH_BYTE] = 0x00u;
+    contra_rom_remove_enemy(core, x);
 }
 
 static const uint8_t contra_spinning_bubbles_speed_tbl[4] = {0x01u, 0x03u, 0x04u, 0x05u};
@@ -16418,8 +16436,8 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                 case 0x03u: contra_rom_boss_gemini_routine_02(core, x); break;
                 case 0x04u: contra_rom_boss_gemini_routine_03(core, x); break;
                 case 0x05u: contra_rom_boss_gemini_routine_04(core, x); break;
-                case 0x06u: contra_rom_enemy_routine_explosion_step(core, x); break;
-                case 0x07u: contra_rom_clear_enemy(core, x); break;
+                case 0x06u: contra_rom_enemy_routine_explosion_inplace(core, x); break;
+                case 0x07u: contra_rom_boss_gemini_routine_06(core, x); break;
                 default: break;
             }
             break;
