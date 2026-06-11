@@ -10786,12 +10786,14 @@ static void contra_rom_boss_gemini_routine_02(ContraCore *core, uint8_t x)
             (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] - 1u);
         if (ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] == 0u)
         {
-            uint8_t delay = contra_boss_gemini_attack_delay_tbl[
-                (uint8_t)((ram[CONTRA_RAM_RANDOM_NUM] + ram[CONTRA_RAM_FRAME_COUNTER]) & 0x03u)];
+            /* bank0:5520: RN += FC (re-randomize), then the pick is the NEW
+               value >> 1 & 3 (the lsr runs on the stored sum) */
+            const uint8_t sum =
+                (uint8_t)(ram[CONTRA_RAM_RANDOM_NUM] + ram[CONTRA_RAM_FRAME_COUNTER]);
+            uint8_t delay = contra_boss_gemini_attack_delay_tbl[(sum >> 1u) & 0x03u];
             const uint8_t strength_delta = (uint8_t)(ram[CONTRA_RAM_PLAYER_WEAPON_STRENGTH] << 3u);
 
-            ram[CONTRA_RAM_RANDOM_NUM] =
-                (uint8_t)(ram[CONTRA_RAM_RANDOM_NUM] + ram[CONTRA_RAM_FRAME_COUNTER]);
+            ram[CONTRA_RAM_RANDOM_NUM] = sum;
             delay = (uint8_t)(delay - strength_delta);
             ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = delay;
             contra_rom_generate_enemy_at_pos(core, x, 0x1Du);
