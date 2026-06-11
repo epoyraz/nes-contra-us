@@ -1,0 +1,44 @@
+tools/compare_play_trace.py
+  s_d6f4243e7218de::t_d2f1d871f75f90 42-43
+  s_d6f4243e7218de::t_eda11fcd08e64d 44-46
+tools/mesen_play_recorder.lua
+  s_d6f4243e7218de::t_78bd0b7741029a 464-465
+  s_d6f4243e7218de::t_a10c1e7ecfddca 143
+  s_d6f4243e7218de::t_94d4decb1b9daa 326-372
+  s_d6f4243e7218de::t_6024d8d82e57e6 396
+  s_d6f4243e7218de::t_c859693beadcec 219-233,235-237
+  s_d6f4243e7218de::t_d45d10c4312730 528
+  s_d6f4243e7218de::t_013a5d70b14f24 30-31,33-44,51-60
+  s_d6f4243e7218de::t_1f3f94cf825374 255-266,272-275
+port/tools/play_replay_trace.c
+  s_d6f4243e7218de::t_7e5349e54881e8 55-64
+  s_d6f4243e7218de::t_ea9d2991ffd0fa 352-380
+  s_d6f4243e7218de::t_eca1073b62e6fb 304-314
+  s_d6f4243e7218de::t_2de284bc897127 555
+  s_d6f4243e7218de::t_37201f2ff44dde 630-669,675-691
+tools/structural_check.py
+  s_d6f4243e7218de::t_59823f95a32d79 116-117
+  s_d6f4243e7218de::t_eda11fcd08e64d 31-33
+  s_d6f4243e7218de::t_875980b5e29801 94-95
+  s_d6f4243e7218de::t_fdc74069e40f1a 1-30,34-93,96-115,118-150
+tools/frontier.sh
+  s_d6f4243e7218de::t_5dde2f9db51840 1-31
+"docs/Play Recording Parity.md"
+  s_d6f4243e7218de::t_e3a3c30e5f9477 111-148,153-159
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "71c8e2dc9caab049101e786d294b86df72b7c4e3",
+  "prompts": {},
+  "sessions": {
+    "s_d6f4243e7218de": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "825b5bf6-c121-4087-8508-1505c9d1a7d5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
