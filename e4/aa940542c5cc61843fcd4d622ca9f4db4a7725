@@ -1,0 +1,27 @@
+web/styles.css
+  s_18830c9a377a7b::t_e029af3f4ad0f6 138-139
+  s_18830c9a377a7b::t_e270924546af07 561-566,568-575
+  s_18830c9a377a7b::t_a2665458837494 567
+  s_18830c9a377a7b::t_6bed1fb33db1eb 576-582
+web/deploy-pages.ps1
+  s_18830c9a377a7b::t_7bca2a2a40a9db 1-98
+web/README.md
+  s_18830c9a377a7b::t_ab6f2579b5e6a8 69,70-85
+  s_18830c9a377a7b::t_063653a819425e 65-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "e4aa940542c5cc61843fcd4d622ca9f4db4a7725",
+  "prompts": {},
+  "sessions": {
+    "s_18830c9a377a7b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dc641ef0-f291-4408-a06b-5155d821dc6c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
