@@ -17333,6 +17333,13 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
             {
                 dest_routine = 0x04u; /* boss_gemini_routine_03 */
             }
+            else if ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x03u) &&
+                     ((dead_type == 0x1Eu) || (dead_type == 0x1Fu)))
+            {
+                /* L4 boss-screen blue/red soldiers: nibble $54 (bank7:8119) --
+                   each lands on its table's appended init_explosion */
+                dest_routine = (dead_type == 0x1Eu) ? 0x05u : 0x04u;
+            }
             else if (dead_type == 0x04u)
             {
                 dest_routine = 0x07u; /* rotating gun -> routine_06 (restore rock, explode) */
