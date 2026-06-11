@@ -19824,6 +19824,38 @@ static void contra_run_indoor_end_level_player_routine(ContraCore *core, uint8_t
     }
 }
 
+/* end_of_lvl_routine_lvl_5/6/7 (bank3:1489-1524): hold right; past the
+   per-level trigger X (x_pos_bg_priority_trigger_tbl: 0xB8 / 0xD0 / 0xD0) the
+   player walks behind the background (bit 7) while bit 0 keeps the
+   edge-detect walking off the ledge. The state never advances -- the walk
+   ends when the player leaves the screen and is made invisible. */
+static void contra_run_outdoor_walk_right_end_level_player_routine(
+    ContraCore *core, uint8_t player_index, uint8_t trigger_x)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_CONTROLLER_STATE + player_index] = CONTRA_BUTTON_RIGHT;
+    ram[CONTRA_RAM_PLAYER_BG_FLAG_EDGE_DETECT + player_index] =
+        (ram[CONTRA_RAM_SPRITE_X_POS + player_index] >= trigger_x) ? 0x81u : 0x01u;
+}
+
+/* end_of_lvl_routine_lvl_8 (bank3:1526): no walk -- the player stands while
+   the boss explosions play out; state 0 just shortens the sequence-1 timer
+   to 0x40 and parks in state 1. */
+static void contra_run_level_8_end_level_player_routine(
+    ContraCore *core, uint8_t player_index, uint8_t state_index)
+{
+    uint8_t *const ram = core->ram;
+
+    if (state_index != 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_LEVEL_END_SQ_1_TIMER] = 0x40u;
+    ram[CONTRA_RAM_LEVEL_END_LVL_ROUTINE_STATE + player_index] =
+        (uint8_t)(ram[CONTRA_RAM_LEVEL_END_LVL_ROUTINE_STATE + player_index] + 1u);
+}
+
 static void contra_run_end_level_sequence(ContraCore *core)
 {
     uint8_t *const ram = core->ram;
@@ -19896,6 +19928,19 @@ static void contra_run_end_level_sequence(ContraCore *core)
                     else if (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x02u)
                     {
                         contra_run_level_3_end_level_player_routine(core, (uint8_t)player_index, (uint8_t)(routine_state - 1u));
+                    }
+                    else if (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u)
+                    {
+                        contra_run_outdoor_walk_right_end_level_player_routine(core, (uint8_t)player_index, 0xB8u);
+                    }
+                    else if ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x05u) ||
+                             (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x06u))
+                    {
+                        contra_run_outdoor_walk_right_end_level_player_routine(core, (uint8_t)player_index, 0xD0u);
+                    }
+                    else if (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x07u)
+                    {
+                        contra_run_level_8_end_level_player_routine(core, (uint8_t)player_index, (uint8_t)(routine_state - 1u));
                     }
 
                     contra_make_off_screen_player_invisible(core, (uint8_t)player_index);
