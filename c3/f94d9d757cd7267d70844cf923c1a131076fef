@@ -1,0 +1,27 @@
+port/contra_core/src/core.c
+  s_d6f4243e7218de::t_7f3b2ff2ca842a 13322-13323,13330,13336-13342
+  s_d6f4243e7218de::t_c01b3e4541c470 14981-15433
+  s_d6f4243e7218de::t_a664f606a902fb 18238-18253
+  s_d6f4243e7218de::t_6151d42e50581b 17633-17644
+  s_d6f4243e7218de::t_f10d6c47d72648 17556-17570
+  s_d6f4243e7218de::t_981d9c08f8c29f 17476-17491
+port/tests/core_behavior_tests.c
+  s_d6f4243e7218de::t_f5c88e22d6b79d 2852
+  s_d6f4243e7218de::t_4844809a7dad09 1797,1805,1816,1824-1837,1839-1840
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "c3f94d9d757cd7267d70844cf923c1a131076fef",
+  "prompts": {},
+  "sessions": {
+    "s_d6f4243e7218de": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "825b5bf6-c121-4087-8508-1505c9d1a7d5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
