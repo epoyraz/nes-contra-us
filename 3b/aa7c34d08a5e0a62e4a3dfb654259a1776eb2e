@@ -1,0 +1,29 @@
+port/contra_core/src/core.c
+  s_d6f4243e7218de::t_d3841ea0751a5b 460-461
+  s_d6f4243e7218de::t_1fc95b8ee44055 21024-21025,21027-21028
+  s_d6f4243e7218de::t_f62e2186f73ed5 17114-17536
+  s_d6f4243e7218de::t_0d5f2bb1be61dc 17555,17557-17567,17569-17570
+  s_d6f4243e7218de::t_f174e97a46ed93 18682-18695
+  s_d6f4243e7218de::t_4203990030e3eb 5285-5300,5305-5306
+  s_d6f4243e7218de::t_63963b7ebc067b 20960,20962-20963,20965-20968,20970-20972
+port/tests/core_behavior_tests.c
+  s_d6f4243e7218de::t_07c6d8d7102221 439-463
+  s_d6f4243e7218de::t_f825d8553d24ae 1869-1906
+  s_d6f4243e7218de::t_bed494bafc7caf 2916
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "3baa7c34d08a5e0a62e4a3dfb654259a1776eb2e",
+  "prompts": {},
+  "sessions": {
+    "s_d6f4243e7218de": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "825b5bf6-c121-4087-8508-1505c9d1a7d5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
