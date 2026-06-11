@@ -16425,9 +16425,10 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
             {
                 case 0x01u: contra_rom_spinning_bubbles_routine_00(core, x); break;
                 case 0x02u: contra_rom_spinning_bubbles_routine_01(core, x); break;
-                case 0x03u: contra_rom_enemy_routine_init_explosion_step(core, x); break;
-                case 0x04u: contra_rom_enemy_routine_explosion_step(core, x); break;
-                case 0x05u: contra_rom_clear_enemy(core, x); break;
+                case 0x03u: contra_rom_enemy_routine_init_explosion_inplace(core, x); break;
+                case 0x04u: contra_rom_enemy_routine_explosion_inplace(core, x); break;
+                /* enemy_routine_remove_enemy: keep the husk */
+                case 0x05u: contra_rom_enemy_routine_remove_inplace(core, x); break;
                 default: break;
             }
             break;
@@ -17350,6 +17351,11 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
                 /* L4 boss-screen blue/red soldiers: nibble $54 (bank7:8119) --
                    each lands on its table's appended init_explosion */
                 dest_routine = (dead_type == 0x1Eu) ? 0x05u : 0x04u;
+            }
+            else if ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x03u) && (dead_type == 0x1Du))
+            {
+                dest_routine = 0x03u; /* spinning bubble: nibble $43 low -> its
+                                         appended init_explosion */
             }
             else if (dead_type == 0x04u)
             {
