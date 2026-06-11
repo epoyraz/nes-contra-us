@@ -10836,8 +10836,9 @@ static void contra_rom_boss_gemini_routine_02(ContraCore *core, uint8_t x)
         {
             ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] = 0x00u;
             ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = 0x00u;
+            /* enable_bullet_enemy_collision: bit 7 only (sw 0x8F -> 0x0F) */
             ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] =
-                (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x7Eu);
+                (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x7Fu);
             ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x30u;
             contra_rom_reverse_enemy_x_direction(core, x);
         }
