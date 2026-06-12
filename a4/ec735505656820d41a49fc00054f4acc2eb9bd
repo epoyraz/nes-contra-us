@@ -1,0 +1,28 @@
+port/tests/checkpoint_trace_export_tests.c
+  s_0b512ad9ae44f6::t_840481b569974a 28-34
+port/tests/core_behavior_tests.c
+  s_0b512ad9ae44f6::t_5913d8e3437ad4 1518-1520
+port/contra_core/src/core.c
+  s_0b512ad9ae44f6::t_e700f8e3d05a1c 4094-4095,4097-4098
+  s_0b512ad9ae44f6::t_ffd7293d4645b9 3209-3210,3238-3241,3275,3277-3282
+  s_0b512ad9ae44f6::t_0f56a36a5d6179 2253-2254
+port/tests/checkpoint_trace_tests.c
+  s_0b512ad9ae44f6::t_ce1c484b89d68c 66-68,74-75,89-91
+  s_0b512ad9ae44f6::t_e6c33f46609dc5 73,83-84,88,92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "a4ec735505656820d41a49fc00054f4acc2eb9bd",
+  "prompts": {},
+  "sessions": {
+    "s_0b512ad9ae44f6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eb919-c0e7-7a23-9bd5-cc478ba45ab0",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
