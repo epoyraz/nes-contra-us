@@ -1,0 +1,44 @@
+tools/render_check.sh
+  s_0b512ad9ae44f6::t_209d88cde22f7c 6,9-10,17,26,28-32,35,42,58,69
+  s_0b512ad9ae44f6::t_1e5fbdc33d207a 19-25,27,33-34
+  s_0b512ad9ae44f6::t_881c1af43a8bc3 2-4,41,45-48,50-52,57,60-63,65,67
+  s_0b512ad9ae44f6::t_2445fbae2c297a 66
+tools/mesen_play_recorder.lua
+  s_0b512ad9ae44f6::t_e6cc22dc381a55 32-33,67-69,86-87,213-215,228-243,259-261
+port/contra_core/src/core.c
+  s_0b512ad9ae44f6::t_2513cdd4544a22 7540-7544,8968,10571
+  s_0b512ad9ae44f6::t_da20fc5a9e5ece 7898-7922,7944-7949
+  s_0b512ad9ae44f6::t_93745d86cf2305 20139,20146
+  s_0b512ad9ae44f6::t_e6b0716a5ff887 7670
+  s_0b512ad9ae44f6::t_0713095c7e4df3 6172-6176,22330-22334
+  s_0b512ad9ae44f6::t_accda1e6d7787a 6152-6153,6167-6171,6177,8061,22326-22329
+  s_0b512ad9ae44f6::t_85ad6c40d7b580 13358,13360-13362,13375-13377,13382-13385,13388
+  s_0b512ad9ae44f6::t_1e9eea0947640f 1726
+  s_0b512ad9ae44f6::t_2a99928b3a978f 11659,11666,11668-11670,11755-11769,12129-12134,12301-12307,12970-12979
+  s_0b512ad9ae44f6::t_d75e4fecee7204 3966
+  s_0b512ad9ae44f6::t_7e02074d586966 22137
+port/contra_core/include/contra/core.h
+  s_0b512ad9ae44f6::t_7e02074d586966 15-17
+  s_0b512ad9ae44f6::t_c6d5871e38c56c 133-135,137-138
+"docs/Play Recording Parity.md"
+  s_0b512ad9ae44f6::t_39ddd6d06d0d80 45,65,111-117,119-155,202-203
+  s_0b512ad9ae44f6::t_7cd752ac2cc897 118
+port/tools/play_replay_trace.c
+  s_0b512ad9ae44f6::t_877848b616947f 25,52-53,81-103,322,562,575,580-583
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "77af91ce7fed620c075009ffc471209499620fb2",
+  "prompts": {},
+  "sessions": {
+    "s_0b512ad9ae44f6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eb919-c0e7-7a23-9bd5-cc478ba45ab0",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
