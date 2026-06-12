@@ -2250,16 +2250,12 @@ static void contra_clear_player_bullet(ContraCore *core, size_t bullet_index)
     ram[CONTRA_RAM_PLAYER_BULLET_OWNER + bullet_index] = 0x00u;
     ram[CONTRA_RAM_PLAYER_BULLET_TIMER + bullet_index] = 0x00u;
     ram[CONTRA_RAM_PLAYER_BULLET_AIM_DIR + bullet_index] = 0x00u;
-    /* clear_bullet_values (bank6:1716) clears everything below EXCEPT the X/Y
-       velocity sub-pixel accumulators: those keep their phase from the previous
-       bullet that used this slot. Zeroing them (as we did) desynced a re-used
-       slot's first move -- it crossed a pixel boundary one frame early. */
+    /* clear_bullet_values (bank6:1724) preserves the X/Y positions and velocity
+       sub-pixel accumulators; re-used slots keep the previous bullet's phase. */
     ram[CONTRA_RAM_PLAYER_BULLET_X_VEL_FRACT + bullet_index] = 0x00u;
     ram[CONTRA_RAM_PLAYER_BULLET_Y_VEL_FRACT + bullet_index] = 0x00u;
     ram[CONTRA_RAM_PLAYER_BULLET_X_VEL_FAST + bullet_index] = 0x00u;
     ram[CONTRA_RAM_PLAYER_BULLET_Y_VEL_FAST + bullet_index] = 0x00u;
-    ram[CONTRA_RAM_PLAYER_BULLET_X_POS + bullet_index] = 0x00u;
-    ram[CONTRA_RAM_PLAYER_BULLET_Y_POS + bullet_index] = 0x00u;
     ram[CONTRA_RAM_PLAYER_BULLET_F_RAPID + bullet_index] = 0x00u;
     ram[CONTRA_RAM_PLAYER_BULLET_DIST + bullet_index] = 0x00u;
     ram[CONTRA_RAM_PLAYER_BULLET_FS_X + bullet_index] = 0x00u;
@@ -3210,8 +3206,8 @@ static const uint8_t contra_s_bullet_pos_mod_tbl[10][2] = {
    bullet number accumulates its own sideways offset (S_INDOOR_ADJ) from the
    pos-mod table, producing the spread fan in the corridor view. The sprite grows
    (0x1F->0x20->0x21) as the despawn TIMER counts down toward the vanishing point.
-   S_ADJ_ACCUM aliases DIST and S_INDOOR_ADJ aliases F_RAPID -- both zeroed at
-   spawn -- so the fan starts centred on FS_X (seeded from the spawn X). */
+   The ROM also writes a throwaway VEL_FS_X_ACCUM + S_ADJ_ACCUM sum into
+   X_VEL_ACCUM; later bullets reusing the slot observe that stale phase. */
 static void contra_update_s_indoor_bullet(ContraCore *core, size_t bullet_index)
 {
     uint8_t *const ram = core->ram;
@@ -3238,6 +3234,10 @@ static void contra_update_s_indoor_bullet(ContraCore *core, size_t bullet_index)
         &ram[CONTRA_RAM_PLAYER_BULLET_Y_VEL_ACCUM + bullet_index],
         ram[CONTRA_RAM_PLAYER_BULLET_Y_VEL_FAST + bullet_index],
         ram[CONTRA_RAM_PLAYER_BULLET_Y_VEL_FRACT + bullet_index]);
+
+    ram[CONTRA_RAM_PLAYER_BULLET_X_VEL_ACCUM + bullet_index] = (uint8_t)(
+        ram[CONTRA_RAM_PLAYER_BULLET_VEL_FS_X_ACCUM + bullet_index] +
+        ram[CONTRA_RAM_PLAYER_BULLET_S_ADJ_ACCUM + bullet_index]);
 
     /* X_POS = FS_X + accumulated sideways spread */
     ram[CONTRA_RAM_PLAYER_BULLET_X_POS + bullet_index] = (uint8_t)(
@@ -3272,13 +3272,14 @@ static void contra_update_spray_bullet(ContraCore *core, size_t bullet_index)
     uint8_t *const ram = core->ram;
     uint8_t sprite_code = 0x21u;
 
-    /* indoor base level: the spread uses its own pseudo-3D fan routine while it
-       is still in flight (routine < 2). Consumed bullets fall through to the
-       shared impact-ring path below. */
-    if (contra_in_indoor_base_level(ram) &&
-        (ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE + bullet_index] < 0x02u))
+    if (contra_in_indoor_base_level(ram))
     {
-        contra_update_s_indoor_bullet(core, bullet_index);
+        if (ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE + bullet_index] < 0x02u)
+        {
+            contra_update_s_indoor_bullet(core, bullet_index);
+            return;
+        }
+        contra_update_shared_player_bullet(core, bullet_index);
         return;
     }
 
@@ -4090,10 +4091,11 @@ static void contra_set_player_sprite(ContraCore *core, uint8_t player_index)
         else if (sequence == 0x05u)
         {
             core->ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + player_index] =
-                (uint8_t)(core->ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + player_index] + 1u);
-            if (core->ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + player_index] >= 0x0Bu)
+                (uint8_t)(core->ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + player_index] - 1u);
+            if ((core->ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + player_index] & 0x80u) != 0u)
             {
-                core->ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + player_index] = 0x00u;
+                contra_play_sound(core, 0x03u);
+                core->ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + player_index] = 0x0Au;
                 core->ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] =
                     (uint8_t)(core->ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] + 1u);
             }
@@ -20904,7 +20906,6 @@ static void contra_level_routine_0a(ContraCore *core)
     }
 
     contra_set_to_level_routine_05(core);
-    contra_level_routine_05(core);
 }
 
 static void contra_run_level_routine(ContraCore *core)

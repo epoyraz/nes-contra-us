@@ -1515,6 +1515,9 @@ static bool test_game_over_delay_expiry_loads_screen_without_glitch(void)
 
     step_no_input(&core);
 
+    CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x05u);
+    step_no_input(&core);
+
     CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x06u);
     CHECK(core.ram[CONTRA_RAM_NUM_CONTINUES] == 0x00u);
     CHECK(count_active_enemy_type(&core, 0x10u) == 0u);
