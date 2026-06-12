@@ -12,6 +12,9 @@ typedef struct ContraInputSnapshot
 
 enum
 {
+    /* The ROM enemy state arrays are 16 entries wide. Native-side render caches
+       can be larger when they are not indexed directly into those RAM arrays. */
+    CONTRA_ROM_ENEMY_SLOTS = 16u,
     /* Sizes the level-2 wall structure render caches (l2_structure_tile /
        l2_supertile) — one slot per enemy object slot. */
     CONTRA_NATIVE_MAX_ENEMIES = 24u,
@@ -127,8 +130,12 @@ typedef struct ContraCore
        from the level super-tile data every frame and does not persist the
        routines' one-shot nametable writes, so each active enemy's current
        super-tile is re-drawn every frame from this per-slot cache or it is
-       invisible. 0xFF = nothing drawn. */
+       invisible. 0xFF = nothing drawn. The position is world-anchored at the
+       actual nametable write point, matching the ROM write as the camera scrolls
+       even after the enemy routine is removed. */
     uint8_t l1_supertile[CONTRA_NATIVE_MAX_ENEMIES];
+    uint16_t l1_supertile_world_x[CONTRA_ROM_ENEMY_SLOTS];
+    uint8_t l1_supertile_screen_y[CONTRA_ROM_ENEMY_SLOTS];
     /* Level 7 mechanisms write directly to the nametable: mechanical claws use
        level_7_tile_animation through load_bank_3_update_nametable_tiles, while
        rising/spiked walls and the boss door/mortar use

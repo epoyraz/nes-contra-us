@@ -42,7 +42,7 @@ different probes without reproducing the bug by hand.
 | `CONTRA_MESEN_PLAY_RECORDING_JSONL` | output path (default `contra_play_recording.jsonl`, in Mesen's CWD) |
 | `CONTRA_MESEN_PLAY_MAX_FRAME` | auto-stop after N frames (default 0 = run until script unload) |
 | `CONTRA_MESEN_PLAY_NO_RESET` | `1` skips the power cycle — required when re-tracing a movie playback |
-| `CONTRA_MESEN_PLAY_DUMP_FRAME` + `CONTRA_MESEN_PLAY_{RAM,OAM,NAMETABLE,PALETTE,FRAMEBUFFER}_DUMP_PATH` | dump full state at one frame (second pass) |
+| `CONTRA_MESEN_PLAY_DUMP_FRAME` + `CONTRA_MESEN_PLAY_{RAM,OAM,NAMETABLE,PALETTE,FRAMEBUFFER,CHR,PPU,SUPERTILE}_DUMP_PATH` | dump full render/state telemetry at one frame (second pass) |
 
 ### 2. Replay — `contra_play_replay_trace`
 
@@ -62,7 +62,7 @@ alignment warning before trusting the comparison.**
 | `CONTRA_NATIVE_PLAY_INPUT` | `raw` (default) or `latched` — feed `$F1/$F2` instead; use if a Mesen DPCM controller-read glitch corrupted a raw frame |
 | `CONTRA_NATIVE_PLAY_INPUT_OFFSET` | shift the recording N frames (may be negative) |
 | `CONTRA_NATIVE_PLAY_MAX_FRAME` | stop early |
-| `CONTRA_NATIVE_PLAY_DUMP_FRAME` + `CONTRA_NATIVE_PLAY_{RAM,OAM,NAMETABLE,PALETTE,FRAMEBUFFER,CHR,SUPERTILE}_DUMP_PATH` | dump full native state at one frame |
+| `CONTRA_NATIVE_PLAY_DUMP_FRAME` + `CONTRA_NATIVE_PLAY_{RAM,OAM,NAMETABLE,PALETTE,FRAMEBUFFER,CHR,PPU,SUPERTILE}_DUMP_PATH` | dump full native render/state telemetry at one frame |
 
 ### 3. Compare — `tools/compare_play_trace.py`
 
@@ -107,6 +107,51 @@ documented `(port, table)` order throws; and `setInput(table, 1)` does NOT
 drive player 2, it clobbers port 0 (the replay mode skips P2 frames of 0 for
 this reason). `Debug/ScriptWindow/AllowIoOsAccess` must be true and
 `ScriptTimeout` ~60s in settings.json.
+
+## Renderer-level checks
+
+The gameplay comparator intentionally ignores pixels. For pixel-perfect work,
+use the renderer check on the frame(s) you care about:
+
+```sh
+cmake --build build --target contra_play_replay_trace
+tools/render_check.sh tmp/recordings/play.jsonl 12345 12346
+```
+
+`tools/render_check.sh` re-traces the Mesen recording headlessly, replays the
+same input through the native core, and writes `tmp/render/<frame>.png`
+triptychs (`mesen | native | diff`). The diff is palette-independent: it
+compares the rendered structure after deriving a best color bijection, so a
+different RGB palette does not mask tile/sprite/scroll mistakes.
+
+For each requested frame it also writes matching sidecar dumps:
+
+| Surface | Mesen dump | Native dump | Notes |
+|---|---|---|---|
+| CPU RAM | `mesen_ram.bin.<frame>` | `native_ram.bin.<frame>` | 2 KiB CPU RAM |
+| OAM | `mesen_oam.bin.<frame>` | `native_oam.bin.<frame>` | Sprite RAM / native latched OAM |
+| Nametable | `mesen_nametable.bin.<frame>` | `native_nametable.bin.<frame>` | 2 KiB mirrored nametable model |
+| Palette | `mesen_palette.bin.<frame>` | `native_palette.bin.<frame>` | 32-byte palette RAM |
+| CHR / pattern | `mesen_chr.bin.<frame>` | `native_chr.bin.<frame>` | 8 KiB pattern-table bytes |
+| Full PPU view | `mesen_ppu.bin.<frame>` | `native_ppu.bin.<frame>` | 16 KiB PPU address space view |
+| Supertile cache | `mesen_supertile.bin.<frame>` | `native_supertile.bin.<frame>` | ROM `$0600-$067F` vs native screen cache |
+| Framebuffer | `mesen_fb.bin.<frame>` | `native_fb.bin.<frame>` | 256x240 little-endian RGBA/u32 |
+
+Use the sidecars in this order when a rendered frame differs:
+
+1. Compare `CHR`, `nametable`, and `palette` first. If these differ, the port's
+   PPU-facing state is wrong before composition.
+2. Compare `OAM` next. If only sprites differ, this usually identifies missing
+   OAM build, sprite tile, attribute, or priority behavior.
+3. Compare `framebuffer` plus the PNG triptych last. If PPU-facing state and
+   OAM agree but pixels differ, the native compositor is wrong.
+4. Use `RAM`/`supertile` to explain why the PPU-facing state diverged.
+
+Remaining blind spot: these are end-of-frame dumps. They do not prove
+mid-frame raster timing, ordered `$2000-$2007` writes, `$4014` OAM DMA timing,
+or the status-bar scroll split. If a frame differs while the end-of-frame PPU
+state looks identical, the next tool to add is an ordered PPU/register write
+trace with frame/scanline/cycle/PC/value.
 
 ## Schema v5
 
@@ -154,8 +199,8 @@ state at multiple frames in one run (files get a `.<frame>` suffix).
   framebuffer/nametable/pattern/palette hashes are excluded by design (the
   port renders through its own compositor), so background rendering bugs are
   invisible to this pipeline even at ALL GREEN. The v5 `oam` field narrows the
-  gap on the sprite side (inspection); background glitches still need
-  eyeballing or a future renderer-level check.
+  gap on the sprite side (inspection); use `tools/render_check.sh` for
+  renderer-level checks.
 - Mid-frame raster effects (the status-bar scroll split) can't diverge in this
   comparison even when rendering differs — those still need eyeballing.
 - During attract demo segments the game generates its own input; recorded

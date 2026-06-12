@@ -29,7 +29,8 @@
 --   CONTRA_MESEN_PLAY_DUMP_FRAME       with the paths below, dump state at one frame
 --   CONTRA_MESEN_PLAY_DUMP_FRAMES      comma-separated frame list; each dump file gets
 --                                      a ".<frame>" suffix appended to the path
---   CONTRA_MESEN_PLAY_RAM_DUMP_PATH / OAM / NAMETABLE / PALETTE / FRAMEBUFFER _DUMP_PATH
+--   CONTRA_MESEN_PLAY_RAM_DUMP_PATH / OAM / NAMETABLE / PALETTE / FRAMEBUFFER /
+--   CHR / PPU / SUPERTILE _DUMP_PATH
 --   CONTRA_MESEN_PLAY_HEAVY            "1" adds the heavy per-frame fields (bgcol,
 --                                      rampg) during LIVE recording; they are always
 --                                      on in headless re-trace mode. Heavy fields cost
@@ -63,6 +64,9 @@ local oam_dump_path = os.getenv("CONTRA_MESEN_PLAY_OAM_DUMP_PATH")
 local nametable_dump_path = os.getenv("CONTRA_MESEN_PLAY_NAMETABLE_DUMP_PATH")
 local palette_dump_path = os.getenv("CONTRA_MESEN_PLAY_PALETTE_DUMP_PATH")
 local framebuffer_dump_path = os.getenv("CONTRA_MESEN_PLAY_FRAMEBUFFER_DUMP_PATH")
+local chr_dump_path = os.getenv("CONTRA_MESEN_PLAY_CHR_DUMP_PATH")
+local ppu_dump_path = os.getenv("CONTRA_MESEN_PLAY_PPU_DUMP_PATH")
+local supertile_dump_path = os.getenv("CONTRA_MESEN_PLAY_SUPERTILE_DUMP_PATH")
 -- side-channel score trace ("frame score16" per line); does not touch the
 -- recording schema
 local score_trace_path = os.getenv("CONTRA_MESEN_PLAY_SCORE_TRACE_PATH")
@@ -79,6 +83,8 @@ local RAM = emu.memType.nesInternalRam
 local NAMETABLE = emu.memType.nesNametableRam
 local OAM = emu.memType.nesSpriteRam
 local PALETTE = emu.memType.nesPaletteRam
+local PPUMEM = emu.memType.nesPpuMemory
+local CHR = emu.memType.nesChrRam or PPUMEM
 
 local frame = 0
 local pending_raw = { 0, 0 }
@@ -204,6 +210,9 @@ local function dump_region(path, memory_type, length)
     if path == nil then
         return
     end
+    if memory_type == nil then
+        return
+    end
 
     local dump = io.open(path, "wb")
     if dump == nil then
@@ -212,6 +221,22 @@ local function dump_region(path, memory_type, length)
 
     for offset = 0, length - 1 do
         dump:write(string.char(emu.read(offset, memory_type, false)))
+    end
+    dump:close()
+end
+
+local function dump_ram_range(path, start_addr, length)
+    if path == nil then
+        return
+    end
+
+    local dump = io.open(path, "wb")
+    if dump == nil then
+        return
+    end
+
+    for offset = 0, length - 1 do
+        dump:write(string.char(read_ram(start_addr + offset)))
     end
     dump:close()
 end
@@ -231,6 +256,9 @@ local function dump_state(suffix)
     dump_region(with_suffix(oam_dump_path), OAM, 0x100)
     dump_region(with_suffix(nametable_dump_path), NAMETABLE, 0x800)
     dump_region(with_suffix(palette_dump_path), PALETTE, 0x20)
+    dump_region(with_suffix(chr_dump_path), CHR, 0x2000)
+    dump_region(with_suffix(ppu_dump_path), PPUMEM, 0x4000)
+    dump_ram_range(with_suffix(supertile_dump_path), 0x600, 0x80)
 
     local framebuffer_path = with_suffix(framebuffer_dump_path)
     if framebuffer_path ~= nil then

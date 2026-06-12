@@ -22,7 +22,7 @@
  *   CONTRA_NATIVE_PLAY_MAX_FRAME     stop after N frames (default: recording length)
  *   CONTRA_NATIVE_PLAY_DUMP_FRAME    with the paths below, dump full state at one frame
  *   CONTRA_NATIVE_PLAY_RAM_DUMP_PATH / OAM / NAMETABLE / PALETTE / FRAMEBUFFER /
- *   CHR / SUPERTILE _DUMP_PATH
+ *   CHR / PPU / SUPERTILE _DUMP_PATH
  */
 #include <stdbool.h>
 #include <stdint.h>
@@ -49,7 +49,8 @@ typedef struct PlayInputRow
 enum
 {
     ALIGNMENT_WINDOW = 240,
-    ALIGNMENT_MAX_SHIFT = 3
+    ALIGNMENT_MAX_SHIFT = 3,
+    NATIVE_PPU_DUMP_SIZE = 0x4000u
 };
 
 #define SNAPSHOT_MAGIC 0x504E5343u /* "CSNP" little-endian */
@@ -75,6 +76,29 @@ static uint32_t fnv1a_bytes(const void *data, size_t length)
     }
 
     return hash;
+}
+
+static void fill_ppu_dump(uint8_t *dump, const ContraCore *core)
+{
+    unsigned addr;
+
+    for (addr = 0u; addr < NATIVE_PPU_DUMP_SIZE; ++addr)
+    {
+        if (addr < CONTRA_PPU_PATTERN_TABLE_SIZE)
+        {
+            dump[addr] = core->ppu_pattern[addr];
+        }
+        else if (addr < 0x3F00u)
+        {
+            dump[addr] = core->ppu_nametable[
+                (addr - 0x2000u) & (CONTRA_PPU_NAMETABLE_SIZE - 1u)];
+        }
+        else
+        {
+            dump[addr] = core->ppu_palette[
+                (addr - 0x3F00u) & (CONTRA_PPU_PALETTE_SIZE - 1u)];
+        }
+    }
 }
 
 static bool extract_unsigned(const char *line, const char *key, unsigned *out)
@@ -295,6 +319,7 @@ int main(int argc, char **argv)
     const char *const palette_dump_path = getenv("CONTRA_NATIVE_PLAY_PALETTE_DUMP_PATH");
     const char *const framebuffer_dump_path = getenv("CONTRA_NATIVE_PLAY_FRAMEBUFFER_DUMP_PATH");
     const char *const chr_dump_path = getenv("CONTRA_NATIVE_PLAY_CHR_DUMP_PATH");
+    const char *const ppu_dump_path = getenv("CONTRA_NATIVE_PLAY_PPU_DUMP_PATH");
     const char *const supertile_dump_path = getenv("CONTRA_NATIVE_PLAY_SUPERTILE_DUMP_PATH");
     const char *const rng_mode_text = getenv("CONTRA_NATIVE_PLAY_RNG");
     /* side-channel score trace ("frame score16" per line, P1 score at $07E2/3);
@@ -534,6 +559,7 @@ int main(int argc, char **argv)
             }
             if (want_plain || want_suffixed)
             {
+                uint8_t ppu_dump[NATIVE_PPU_DUMP_SIZE];
                 const struct
                 {
                     const char *path;
@@ -546,9 +572,15 @@ int main(int argc, char **argv)
                     {palette_dump_path, core.ppu_palette, sizeof(core.ppu_palette)},
                     {framebuffer_dump_path, core.framebuffer, sizeof(core.framebuffer)},
                     {chr_dump_path, core.ppu_pattern, sizeof(core.ppu_pattern)},
+                    {ppu_dump_path, ppu_dump, sizeof(ppu_dump)},
                     {supertile_dump_path, core.level_screen_supertiles, sizeof(core.level_screen_supertiles)},
                 };
                 size_t dump_index;
+
+                if (ppu_dump_path != NULL)
+                {
+                    fill_ppu_dump(ppu_dump, &core);
+                }
 
                 for (dump_index = 0u; dump_index < (sizeof(dumps) / sizeof(dumps[0])); ++dump_index)
                 {
