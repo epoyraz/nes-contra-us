@@ -5,9 +5,8 @@
  *   - boot the Emscripten module (web/dist/contra.js, factory `ContraModule`)
  *   - drive a 60 Hz fixed-step loop, reading the core's RGBA framebuffer straight
  *     out of wasm memory and blitting it to the <canvas> with putImageData
- *   - merge two input sources into the player-1 button bitmask:
- *       (a) the physical keyboard
- *       (b) the on-screen NES controller (mouse + touch via Pointer Events)
+ *   - merge keyboard + on-screen NES controller input into the local player mask
+ *   - optionally run two-browser co-op through WebSocket input lockstep
  *   - the Konami-code easter egg from the original CodePen (vanilla-JS rewrite)
  */
 
@@ -28,6 +27,9 @@
 
   var FB_WIDTH = 256;
   var FB_HEIGHT = 240;
+  var STEP_MS = 1000 / 60;
+  var NET_INPUT_DELAY = 6;
+  var NET_HASH_INTERVAL = 60;
 
   /* Input is the OR of the keyboard mask and the on-screen-controller mask, so a
      button held on either source counts as pressed. */
@@ -60,6 +62,30 @@
     "start": BTN.START
   };
 
+  var pressables = [];
+  var lastVisualMask = -1;
+
+  var net = {
+    socket: null,
+    wsUrl: "",
+    room: "",
+    player: 0,
+    players: 0,
+    ready: {},
+    running: false,
+    sentFrame: 0,
+    simFrame: 0,
+    inputs: Object.create(null),
+    localHashes: Object.create(null),
+    remoteHashes: Object.create(null),
+    desynced: false,
+    runtime: null
+  };
+
+  function localInputMask() {
+    return keyboardMask | pointerMask;
+  }
+
   function setupKeyboard() {
     window.addEventListener("keydown", function (e) {
       var bit = KEY_MAP[e.code];
@@ -82,12 +108,6 @@
       keyboardMask = 0;
     });
   }
-
-  /* {element, bit} for every on-screen button. The render loop mirrors the
-     combined (keyboard | on-screen) input state onto each button's `pressed`
-     styling — a single source of truth, so physical key presses light up the
-     virtual controller too. */
-  var pressables = [];
 
   function setupOnScreenController() {
     Object.keys(BUTTON_MAP).forEach(function (id) {
@@ -119,9 +139,8 @@
     });
   }
 
-  /* Reflect the combined button bitmask onto the on-screen controller. Only
-     touches the DOM when the mask changes, so it's cheap to call every frame. */
-  var lastVisualMask = -1;
+  /* Reflect the local button bitmask onto the on-screen controller. Only touches
+     the DOM when the mask changes, so it's cheap to call every frame. */
   function syncPressedVisual(mask) {
     if (mask === lastVisualMask) {
       return;
@@ -132,8 +151,6 @@
     }
   }
 
-  /* The Konami-code easter egg from the original pen (up up down down left right
-     left right b a, then Start), rewritten without jQuery. */
   function setupKonami() {
     var codeString = "";
     var on = function (id, fn) {
@@ -171,23 +188,324 @@
     });
   }
 
+  function defaultWebSocketUrl() {
+    var params = new URLSearchParams(window.location.search);
+    var explicit = params.get("ws");
+    if (explicit) {
+      return explicit;
+    }
+    if (window.location.hostname.indexOf("github.io") !== -1) {
+      return "";
+    }
+    if (!window.location.host || window.location.protocol === "file:") {
+      return "";
+    }
+    return (window.location.protocol === "https:" ? "wss://" : "ws://") +
+      window.location.host + "/ws";
+  }
+
+  function setNetStatus(text, className) {
+    var el = document.getElementById("net-status");
+    if (!el) {
+      return;
+    }
+    el.textContent = text;
+    el.className = "net-status " + className;
+  }
+
+  function setRoomInfo(text) {
+    var el = document.getElementById("room-info");
+    if (el) {
+      el.textContent = text;
+    }
+  }
+
+  function updateLobbyButtons(inRoom) {
+    var create = document.getElementById("create-room");
+    var join = document.getElementById("join-room");
+    var room = document.getElementById("room-code");
+    var ready = document.getElementById("ready-room");
+    var leave = document.getElementById("leave-room");
+    var canUseNetwork = net.wsUrl !== "";
+
+    if (create) { create.disabled = !canUseNetwork || inRoom; }
+    if (join) { join.disabled = !canUseNetwork || inRoom; }
+    if (room) { room.disabled = !canUseNetwork || inRoom; }
+    if (ready) { ready.disabled = !inRoom || net.running; }
+    if (leave) { leave.disabled = !inRoom; }
+  }
+
+  function roomSummary() {
+    if (!net.room) {
+      return "Single-player mode. Run node web/multiplayer-server.mjs for local rooms.";
+    }
+    return "Room " + net.room + " · You are P" + net.player +
+      " · players " + net.players + "/2 · ready P1:" +
+      (net.ready[1] ? "yes" : "no") + " P2:" + (net.ready[2] ? "yes" : "no");
+  }
+
+  function sendNet(message) {
+    if (net.socket && net.socket.readyState === WebSocket.OPEN) {
+      net.socket.send(JSON.stringify(message));
+    }
+  }
+
+  function resetNetSimulation() {
+    if (!net.runtime) {
+      return;
+    }
+    net.runtime.reset();
+    net.runtime.applyDebugWarp();
+    net.running = true;
+    net.sentFrame = 0;
+    net.simFrame = 0;
+    net.inputs = Object.create(null);
+    net.localHashes = Object.create(null);
+    net.remoteHashes = Object.create(null);
+    net.desynced = false;
+    setNetStatus("Playing P" + net.player, "online");
+    setRoomInfo(roomSummary() + " · lockstep delay " + NET_INPUT_DELAY + " frames");
+  }
+
+  function storeNetworkInput(player, frame, input) {
+    if (frame < net.simFrame) {
+      return;
+    }
+    if (!net.inputs[frame]) {
+      net.inputs[frame] = [undefined, undefined];
+    }
+    net.inputs[frame][player - 1] = input & 0xFF;
+  }
+
+  function pruneNetworkInputs() {
+    var cutoff = net.simFrame - 120;
+    Object.keys(net.inputs).forEach(function (key) {
+      if (Number(key) < cutoff) {
+        delete net.inputs[key];
+      }
+    });
+    Object.keys(net.localHashes).forEach(function (key) {
+      if (Number(key) < cutoff) {
+        delete net.localHashes[key];
+      }
+    });
+    Object.keys(net.remoteHashes).forEach(function (key) {
+      if (Number(key) < cutoff) {
+        delete net.remoteHashes[key];
+      }
+    });
+  }
+
+  function networkTick(localMask) {
+    var frameToSend;
+    var pair;
+    var hash;
+
+    if (!net.running || !net.player) {
+      return;
+    }
+
+    frameToSend = net.sentFrame;
+    storeNetworkInput(net.player, frameToSend, localMask);
+    sendNet({ type: "input", frame: frameToSend, input: localMask });
+    net.sentFrame += 1;
+
+    if (net.sentFrame <= NET_INPUT_DELAY) {
+      return;
+    }
+
+    pair = net.inputs[net.simFrame];
+    if (!pair || pair[0] === undefined || pair[1] === undefined) {
+      setNetStatus("Waiting", "waiting");
+      return;
+    }
+
+    net.runtime.setInputs(pair[0], pair[1]);
+    net.runtime.step();
+    net.simFrame += 1;
+
+    if ((net.simFrame % NET_HASH_INTERVAL) === 0) {
+      hash = net.runtime.stateHash() >>> 0;
+      net.localHashes[net.simFrame] = hash;
+      sendNet({ type: "hash", frame: net.simFrame, hash: hash });
+      if (net.remoteHashes[net.simFrame] !== undefined &&
+          net.remoteHashes[net.simFrame] !== hash) {
+        net.desynced = true;
+        setNetStatus("Desync", "error");
+        setRoomInfo("Desync detected at frame " + net.simFrame + ". Leave and rejoin the room.");
+      }
+    }
+
+    if (!net.desynced) {
+      setNetStatus("Playing P" + net.player, "online");
+    }
+    pruneNetworkInputs();
+  }
+
+  function handleNetMessage(message) {
+    if (message.type === "room") {
+      net.room = message.room;
+      net.player = message.player;
+      net.players = message.players;
+      net.ready = message.ready || {};
+      setNetStatus("Room " + net.room, "waiting");
+      setRoomInfo(roomSummary());
+      updateLobbyButtons(true);
+      return;
+    }
+    if (message.type === "peer") {
+      net.players = message.players;
+      net.ready = message.ready || {};
+      setRoomInfo(roomSummary());
+      return;
+    }
+    if (message.type === "start") {
+      resetNetSimulation();
+      return;
+    }
+    if (message.type === "input") {
+      storeNetworkInput(message.player, message.frame, message.input);
+      return;
+    }
+    if (message.type === "hash") {
+      if (message.player !== net.player && net.runtime) {
+        var remoteHash = message.hash >>> 0;
+        net.remoteHashes[message.frame] = remoteHash;
+        if (net.localHashes[message.frame] !== undefined &&
+            net.localHashes[message.frame] !== remoteHash) {
+          net.desynced = true;
+          setNetStatus("Desync", "error");
+          setRoomInfo("Desync detected at frame " + message.frame + ". Leave and rejoin the room.");
+        }
+      }
+      return;
+    }
+    if (message.type === "error") {
+      setNetStatus("Error", "error");
+      setRoomInfo(message.message || "Network error");
+    }
+  }
+
+  function connectAndSend(message) {
+    if (!net.wsUrl) {
+      setNetStatus("Offline", "error");
+      setRoomInfo("No WebSocket relay configured. Run node web/multiplayer-server.mjs locally, or open with ?ws=wss://your-relay/ws.");
+      return;
+    }
+
+    if (net.socket && net.socket.readyState === WebSocket.OPEN) {
+      sendNet(message);
+      return;
+    }
+
+    net.socket = new WebSocket(net.wsUrl);
+    setNetStatus("Connecting", "waiting");
+    setRoomInfo("Connecting to " + net.wsUrl + " ...");
+
+    net.socket.addEventListener("open", function () {
+      sendNet(message);
+    });
+    net.socket.addEventListener("message", function (event) {
+      try {
+        handleNetMessage(JSON.parse(event.data));
+      } catch (err) {
+        setNetStatus("Error", "error");
+        setRoomInfo("Bad server message: " + err.message);
+      }
+    });
+    net.socket.addEventListener("close", function () {
+      net.socket = null;
+      net.running = false;
+      net.room = "";
+      net.player = 0;
+      net.players = 0;
+      net.ready = {};
+      setNetStatus("Offline", "offline");
+      setRoomInfo("Disconnected. Single-player mode is active.");
+      updateLobbyButtons(false);
+    });
+    net.socket.addEventListener("error", function () {
+      setNetStatus("Error", "error");
+      setRoomInfo("Could not connect to " + net.wsUrl);
+    });
+  }
+
+  function setupMultiplayer(runtime) {
+    var create = document.getElementById("create-room");
+    var join = document.getElementById("join-room");
+    var room = document.getElementById("room-code");
+    var ready = document.getElementById("ready-room");
+    var leave = document.getElementById("leave-room");
+
+    net.runtime = runtime;
+    net.wsUrl = defaultWebSocketUrl();
+    updateLobbyButtons(false);
+
+    if (!net.wsUrl) {
+      setRoomInfo("Multiplayer needs a WebSocket relay. For local testing run node web/multiplayer-server.mjs, or deploy a relay and open this page with ?ws=wss://your-relay/ws.");
+    } else {
+      setRoomInfo("Multiplayer relay: " + net.wsUrl);
+    }
+
+    if (create) {
+      create.addEventListener("click", function () {
+        connectAndSend({ type: "create" });
+      });
+    }
+    if (join) {
+      join.addEventListener("click", function () {
+        var code = room ? room.value.trim().toUpperCase() : "";
+        if (!code) {
+          setNetStatus("Error", "error");
+          setRoomInfo("Enter a room code to join.");
+          return;
+        }
+        connectAndSend({ type: "join", room: code });
+      });
+    }
+    if (ready) {
+      ready.addEventListener("click", function () {
+        sendNet({ type: "ready" });
+        ready.disabled = true;
+      });
+    }
+    if (leave) {
+      leave.addEventListener("click", function () {
+        sendNet({ type: "leave" });
+        if (net.socket) {
+          net.socket.close();
+        }
+      });
+    }
+    if (room) {
+      room.addEventListener("input", function () {
+        room.value = room.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+      });
+    }
+  }
+
   function start(Module) {
     var canvas = document.getElementById("screen");
     var ctx = canvas.getContext("2d");
     var loading = document.getElementById("loading");
 
     var setInput = Module.cwrap("contra_web_set_input", null, ["number"]);
+    var setInputs = Module.cwrap("contra_web_set_inputs", null, ["number", "number"]);
     var step = Module.cwrap("contra_web_step", null, []);
+    var reset = Module.cwrap("contra_web_reset", null, []);
+    var stateHash = Module.cwrap("contra_web_state_hash", "number", []);
     var framebuffer = Module.cwrap("contra_web_framebuffer", "number", []);
 
-    Module.ccall("contra_web_init", null, [], []);
-
-    /* Optional debug warps via URL hash, e.g. index.html#level2boss */
-    if (location.hash === "#level2boss") {
-      Module.ccall("contra_web_warp_level2_boss", null, [], []);
-    } else if (location.hash === "#level4") {
-      Module.ccall("contra_web_warp_level4", null, [], []);
+    function applyDebugWarp() {
+      if (location.hash === "#level2boss") {
+        Module.ccall("contra_web_warp_level2_boss", null, [], []);
+      } else if (location.hash === "#level4") {
+        Module.ccall("contra_web_warp_level4", null, [], []);
+      }
     }
+
+    Module.ccall("contra_web_init", null, [], []);
+    applyDebugWarp();
 
     var fbPtr = framebuffer();
     var fbBytes = FB_WIDTH * FB_HEIGHT * 4;
@@ -200,23 +518,36 @@
     setupKeyboard();
     setupOnScreenController();
     setupKonami();
+    setupMultiplayer({
+      setInput: setInput,
+      setInputs: setInputs,
+      step: step,
+      reset: reset,
+      stateHash: stateHash,
+      applyDebugWarp: applyDebugWarp
+    });
 
-    var STEP_MS = 1000 / 60;
     var acc = 0;
     var last = performance.now();
 
     function frame(now) {
+      var combined;
+      var steps = 0;
+
       acc += now - last;
       last = now;
 
-      var combined = keyboardMask | pointerMask;
-      setInput(combined);
+      combined = localInputMask();
       syncPressedVisual(combined);
 
       /* Catch up at 60 Hz, but never spiral (cap at 5 steps like the SDL host). */
-      var steps = 0;
       while (acc >= STEP_MS && steps < 5) {
-        step();
+        if (net.running) {
+          networkTick(combined);
+        } else {
+          setInput(combined);
+          step();
+        }
         acc -= STEP_MS;
         steps += 1;
       }

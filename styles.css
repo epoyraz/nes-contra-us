@@ -50,6 +50,109 @@ body {
   color: #aaa;
 }
 
+.multiplayer-panel {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 22px;
+  padding: 14px;
+  border: 1px solid #3c3c3c;
+  border-radius: 10px;
+  background: rgba(15, 15, 15, 0.78);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  text-align: left;
+}
+
+.multiplayer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.multiplayer-header h2 {
+  margin: 0;
+  color: #e8e8e8;
+  font-size: 17px;
+  letter-spacing: 1px;
+}
+
+.net-status {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #2c2c2c;
+  color: #aaa;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.net-status.online {
+  background: #143619;
+  color: #83e18d;
+}
+
+.net-status.waiting {
+  background: #40330b;
+  color: #ffd969;
+}
+
+.net-status.error {
+  background: #431212;
+  color: #ff8787;
+}
+
+.multiplayer-copy,
+.room-info {
+  margin: 10px 0 0;
+  color: #bbb;
+  font-family: "Segoe UI", sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.room-info code {
+  color: #eee;
+}
+
+.lobby-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.lobby-controls button,
+.lobby-controls input {
+  box-sizing: border-box;
+  min-height: 34px;
+  border-radius: 6px;
+  border: 1px solid #555;
+  background: #242424;
+  color: #f0f0f0;
+  font: inherit;
+  font-size: 12px;
+}
+
+.lobby-controls button {
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+.lobby-controls button:hover:not(:disabled) {
+  background: #333;
+}
+
+.lobby-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.lobby-controls input {
+  width: 96px;
+  padding: 0 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
 /* TV / console bezel around the game canvas. */
 .tv {
   background: linear-gradient(#3a3a3a, #2a2a2a);
