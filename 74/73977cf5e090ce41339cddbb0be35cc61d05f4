@@ -1,0 +1,67 @@
+port/contra_core/src/levels/level5_snowfield.inc.c
+  s_d76d7e949c4656::t_af76f8c5facec1 1-968
+tools/port_coverage.py
+  s_d76d7e949c4656::t_e632763811fffd 6-9,13-16,30,94-102,105-112,138
+port/contra_core/src/core.c
+  s_d76d7e949c4656::t_43583cf68e0669 263-278
+  s_d76d7e949c4656::t_099d2501f885c5 259-262
+port/contra_core/src/engine/render_overlays.inc.c
+  s_d76d7e949c4656::t_af76f8c5facec1 1-885
+port/contra_core/src/engine/player_movement.inc.c
+  s_d76d7e949c4656::t_af76f8c5facec1 1-2025
+port/contra_core/src/engine/level_loop.inc.c
+  s_d76d7e949c4656::t_af76f8c5facec1 1-1124
+port/contra_core/src/levels/level6_energy_zone.inc.c
+  s_d76d7e949c4656::t_af76f8c5facec1 1-742
+port/contra_core/src/levels/level3_waterfall.inc.c
+  s_d76d7e949c4656::t_af76f8c5facec1 1-942
+port/contra_core/src/engine/graphics_ppu.inc.c
+  s_d76d7e949c4656::t_af76f8c5facec1 1-1573
+port/CMakeLists.txt
+  s_d76d7e949c4656::t_43583cf68e0669 21-36
+  s_d76d7e949c4656::t_cf7d15ac6ce789 20,37-40,43
+port/contra_core/src/levels/level1_jungle.inc.c
+  s_d76d7e949c4656::t_af76f8c5facec1 1-2263
+port/contra_core/src/README.md
+  s_d76d7e949c4656::t_af76f8c5facec1 1-30
+port/contra_core/src/levels/level7_hangar_and_level8_alien_lair.inc.c
+  s_d76d7e949c4656::t_af76f8c5facec1 1-1560
+port/tests/coverage_manifest_tests.c
+  s_d76d7e949c4656::t_36836bd7251981 121-160,195,259,261-263
+"docs/Native Port Coverage.md"
+  s_d76d7e949c4656::t_7e376acc449a71 171,175
+  s_d76d7e949c4656::t_9423c7661a232e 3,42,45,52-53
+  s_d76d7e949c4656::t_710c59fa9e5359 36,38-39
+port/contra_core/src/engine/player_weapons.inc.c
+  s_d76d7e949c4656::t_af76f8c5facec1 1-1163
+port/contra_core/src/enemies/dispatch_collision_generation.inc.c
+  s_d76d7e949c4656::t_af76f8c5facec1 1-2197
+port/contra_core/src/engine/game_flow.inc.c
+  s_d76d7e949c4656::t_af76f8c5facec1 1-1467
+port/contra_core/src/engine/tables_and_forwards.inc.c
+  s_d76d7e949c4656::t_af76f8c5facec1 1-415
+port/contra_core/src/engine/public_api.inc.c
+  s_d76d7e949c4656::t_af76f8c5facec1 1-337
+"docs/Native Port Reliability.md"
+  s_d76d7e949c4656::t_710c59fa9e5359 180
+port/contra_core/src/levels/level2_4_indoor_bases.inc.c
+  s_d76d7e949c4656::t_af76f8c5facec1 1-2749
+port/contra_core/src/enemies/common_helpers.inc.c
+  s_d76d7e949c4656::t_af76f8c5facec1 1-2015
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "7473977cf5e090ce41339cddbb0be35cc61d05f4",
+  "prompts": {},
+  "sessions": {
+    "s_d76d7e949c4656": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ebd94-b3a9-7a12-a5dd-c40854a39077",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
