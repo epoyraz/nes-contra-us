@@ -17,6 +17,7 @@ port/platform_web/main.c   thin Emscripten host: exports a small C ABI to JS
 web/index.html         page shell: the "TV" canvas + the NES controller markup
 web/styles.css         layout + the CodePen controller (SCSS compiled to plain CSS)
 web/controller.js      boots the wasm module, 60 Hz loop, keyboard + on-screen input
+web/multiplayer-server.mjs  optional dependency-free WebSocket lobby/relay
 web/build.ps1 / .sh    one-command Emscripten build
 web/dist/              build output (git-ignored): contra.js / .wasm / .data
 ```
@@ -24,7 +25,8 @@ web/dist/              build output (git-ignored): contra.js / .wasm / .data
 The core renders into a 256×240 framebuffer in memory; `main.c` repacks it to
 RGBA each frame and the JS loop copies it straight from wasm memory onto the
 canvas with `putImageData`. Input flows the other way: JS computes the NES
-button bitmask and calls the exported `contra_web_set_input`.
+button bitmask and calls the exported `contra_web_set_input` /
+`contra_web_set_inputs`.
 
 `baserom.nes` (CHR / graphics data the core reads at startup) is **embedded into
 the build** via Emscripten's `--preload-file`; it is not committed (it stays
@@ -85,3 +87,26 @@ and pushes. One-time setup: enable Pages with source = `gh-pages`, path = `/`.
 
 Debug warps: open `index.html#level2boss` or `index.html#level4`.
 And yes — the controller still hides the original pen's Konami-code easter egg. 🙂
+
+## Online co-op
+
+The browser build supports two-browser co-op through deterministic input
+lockstep. Both browsers run the same WASM core locally; the server only relays
+per-frame input bytes and periodic state hashes.
+
+For local testing, run the included WebSocket relay:
+
+```bash
+node web/multiplayer-server.mjs
+```
+
+Then open <http://localhost:8787/> in two browser windows:
+
+1. Player 1 clicks **Create Room** and shares the room code.
+2. Player 2 enters the code and clicks **Join Room**.
+3. Both players click **Ready**.
+4. Player 1 selects 2-player mode with **SELECT** / <kbd>Shift</kbd>, then starts.
+
+GitHub Pages can host the static client, but it cannot run the WebSocket relay.
+For a deployed relay, host `web/multiplayer-server.mjs` on a Node-capable
+service and open the Pages build with `?ws=wss://your-relay.example/ws`.

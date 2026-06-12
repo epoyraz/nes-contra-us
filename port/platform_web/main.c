@@ -10,6 +10,7 @@
  *                                  preloads it) for CHR / graphics data.
  *   contra_web_reset()             soft-reset the core.
  *   contra_web_set_input(p1)       latch the player-1 button bitmask
+ *   contra_web_set_inputs(p1, p2)  latch both player button bitmasks
  *                                  (CONTRA_BUTTON_* from contra/buttons.h).
  *   contra_web_step()              advance one 60 Hz frame and refresh the
  *                                  canvas-ready RGBA framebuffer.
@@ -36,6 +37,7 @@
 
 static ContraCore g_core;
 static uint8_t g_input_player1;
+static uint8_t g_input_player2;
 
 /* Canvas-ready RGBA8888 copy of the core's ARGB framebuffer, refreshed each
    step. Static storage so its address is stable across memory growth. */
@@ -45,12 +47,14 @@ EMSCRIPTEN_KEEPALIVE void contra_web_init(void)
 {
     contra_core_init(&g_core);
     g_input_player1 = 0u;
+    g_input_player2 = 0u;
 }
 
 EMSCRIPTEN_KEEPALIVE void contra_web_reset(void)
 {
     contra_core_reset(&g_core);
     g_input_player1 = 0u;
+    g_input_player2 = 0u;
 }
 
 EMSCRIPTEN_KEEPALIVE void contra_web_set_input(int player1_mask)
@@ -58,9 +62,44 @@ EMSCRIPTEN_KEEPALIVE void contra_web_set_input(int player1_mask)
     g_input_player1 = (uint8_t)(player1_mask & 0xFF);
 }
 
+EMSCRIPTEN_KEEPALIVE void contra_web_set_inputs(int player1_mask, int player2_mask)
+{
+    g_input_player1 = (uint8_t)(player1_mask & 0xFF);
+    g_input_player2 = (uint8_t)(player2_mask & 0xFF);
+}
+
+EMSCRIPTEN_KEEPALIVE uint32_t contra_web_state_hash(void)
+{
+    const uint8_t *const ram = contra_core_ram(&g_core);
+    const uint32_t *const framebuffer = contra_core_framebuffer(&g_core);
+    uint32_t hash = 2166136261u;
+    size_t i;
+
+    for (i = 0u; i < CONTRA_CPU_RAM_SIZE; ++i)
+    {
+        hash ^= ram[i];
+        hash *= 16777619u;
+    }
+
+    for (i = 0u; i < (size_t)CONTRA_WEB_PIXELS; ++i)
+    {
+        const uint32_t pixel = framebuffer[i];
+        hash ^= (uint8_t)(pixel & 0xFFu);
+        hash *= 16777619u;
+        hash ^= (uint8_t)((pixel >> 8) & 0xFFu);
+        hash *= 16777619u;
+        hash ^= (uint8_t)((pixel >> 16) & 0xFFu);
+        hash *= 16777619u;
+        hash ^= (uint8_t)((pixel >> 24) & 0xFFu);
+        hash *= 16777619u;
+    }
+
+    return hash;
+}
+
 EMSCRIPTEN_KEEPALIVE void contra_web_step(void)
 {
-    ContraInputSnapshot input = {{g_input_player1, 0u}};
+    ContraInputSnapshot input = {{g_input_player1, g_input_player2}};
     const uint32_t *framebuffer;
     size_t i;
 

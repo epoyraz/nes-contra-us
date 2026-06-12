@@ -4,12 +4,31 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>Contra — NES Native Port (WebAssembly)</title>
-  <link rel="stylesheet" href="styles.css?v=20260610-fontfix">
+  <link rel="stylesheet" href="styles.css?v=20260612-multiplayer">
 </head>
 <body>
   <main class="stage">
     <h1 class="title">CONTRA</h1>
     <p class="subtitle">NES native port — running in your browser via WebAssembly</p>
+
+    <section class="multiplayer-panel" aria-label="Online multiplayer lobby">
+      <div class="multiplayer-header">
+        <h2>Online Co-op</h2>
+        <span id="net-status" class="net-status offline">Offline</span>
+      </div>
+      <p class="multiplayer-copy">
+        Create a room, share the code, then both players press Ready. P1 should
+        pick 2-player mode with <kbd>Shift</kbd> / <b>SELECT</b> before starting.
+      </p>
+      <div class="lobby-controls">
+        <button id="create-room" type="button">Create Room</button>
+        <input id="room-code" type="text" inputmode="latin" maxlength="6" placeholder="ROOM" aria-label="Room code">
+        <button id="join-room" type="button">Join Room</button>
+        <button id="ready-room" type="button" disabled>Ready</button>
+        <button id="leave-room" type="button" disabled>Leave</button>
+      </div>
+      <div id="room-info" class="room-info">Single-player mode. Run <code>node web/multiplayer-server.mjs</code> for local rooms.</div>
+    </section>
 
     <!-- The "TV": the game framebuffer is drawn to this canvas. -->
     <div class="tv">
