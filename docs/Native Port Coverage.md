@@ -1,6 +1,6 @@
 # Native Port Coverage
 
-Last updated: 2026-06-11 (after the all-stages-green milestone)
+Last updated: 2026-06-12 (after splitting the native core into source fragments)
 
 This file tracks native-port coverage by ROM bank and subsystem.
 
@@ -33,24 +33,24 @@ python3 tools/port_coverage.py             # per-bank line-weighted % bar chart
 python3 tools/port_coverage.py --uncited 7 # bank-7 routines not yet cited as ported
 ```
 
-It sums the ASM line ranges that `core.c` cites (convention
+It sums the ASM line ranges that the native core sources cite (convention
 `bank<N>:<from>-<to>`; bare `bank<N>:<line>` citations auto-expand to the
-enclosing routine) and divides by each bank's total lines. The header of
-`core.c` carries the consolidated ledger, including the 2026-06-11 backfill.
+enclosing routine) and divides by each bank's total lines. `core.c` carries the
+consolidated ledger, while included fragments carry local routine citations.
 Cite the ASM range whenever you faithfully port a routine.
 
-Current numbers (2026-06-11):
+Current numbers (2026-06-12):
 
 ```
-bank0  92.5%  ( 9727/10511)  enemy routines
+bank0  92.6%  ( 9738/10511)  enemy routines
 bank1  43.6%  ( 3138/ 7196)  sprite data + decode (the sound engine is the 0%)
 bank2  98.4%  ( 3026/ 3074)  level/spawn data, player sprites, soldier gen
 bank3  96.9%  ( 1541/ 1590)  supertile data, end-of-level routines
 bank4  95.2%  (  767/  806)  graphic data, game-end/credits
 bank5  89.0%  (  235/  264)  graphic data, demo input
 bank6  98.3%  ( 1886/ 1919)  text data, player weapons/bullets
-bank7  76.1%  ( 8222/10800)  engine core, collision, dispatch
-TOTAL  78.9%  (28542/36160 assembly lines)
+bank7  77.1%  ( 8322/10800)  engine core, collision, dispatch
+TOTAL  79.2%  (28653/36160 assembly lines)
 ```
 
 The total excluding the out-of-scope bank 1 sound engine (lines 1-4058) is
@@ -168,8 +168,8 @@ the wall-core aim were all closed; the items below are what remains.)
 ## Tracking plan
 
 - When you faithfully port a routine, cite `bank<N>:<from>-<to>` in a comment
-  (the core.c header ledger or at the function).
+  (the `core.c` header ledger or at the function in the relevant fragment).
 - When a recording of stages 5-8 exists, move L5-L8 systems from
   "ported-but-unverified" to "verified" here.
 - Keep the Known-gaps list in sync with the `DEFERRED`/`not ported` comments
-  in core.c — they are cross-referenced.
+  in the native core sources — they are cross-referenced.

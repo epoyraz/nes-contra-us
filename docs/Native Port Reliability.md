@@ -177,7 +177,7 @@ The native behavior tests currently cover:
 These are not enough to claim full level 1 or level 2 parity. They are the first
 CI-style gates for the areas we are actively stabilizing.
 
-Most recent coverage run for `port/contra_core/src/core.c`:
+Most recent coverage run for the native core translation unit:
 
 - lines executed: 91.23% of 4058
 - branches executed: 94.31% of 2214

@@ -3,16 +3,17 @@
 assembly LINE COUNT (not routine count) so a big routine counts more than a tiny
 one.
 
-The native port (port/contra_core/src/core.c) is a hand reimplementation, not a
-line-by-line transpile, so there is no automatic ASM<->C mapping. Instead the
-port self-reports what it faithfully ports by citing the original ASM line range
-in a comment, using the convention:
+The native port (port/contra_core/src/core.c plus its included implementation
+fragments) is a hand reimplementation, not a line-by-line transpile, so there is
+no automatic ASM<->C mapping. Instead the port self-reports what it faithfully
+ports by citing the original ASM line range in a comment, using the convention:
 
     bank<N>:<from>-<to>      e.g.  bank7:7315-7352   exe_all_enemy_routine
 
-This tool scans port/contra_core/src/core.c for those citations, takes the union
-of cited line ranges per bank (so overlaps aren't double counted), and divides
-by the bank's total line count to get a line-weighted coverage percentage.
+This tool scans the native core source fragments for those citations, takes the
+union of cited line ranges per bank (so overlaps aren't double counted), and
+divides by the bank's total line count to get a line-weighted coverage
+percentage.
 
 A bare single-line citation (bank7:7315) is auto-expanded to the enclosing
 routine's span (from its label line to the next label), so older single-line
@@ -26,7 +27,7 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PORT_C = os.path.join(ROOT, "port", "contra_core", "src", "core.c")
+CORE_SRC = os.path.join(ROOT, "port", "contra_core", "src")
 LABEL_RE = re.compile(r"^([a-zA-Z_][a-zA-Z0-9_]*):")
 # Matches bank7:7315  or  bank7:7315-7352  or  bank2.asm:1518-1614
 CITE_RE = re.compile(r"\bbank(\d+)(?:\.asm)?:(\d+)(?:-(\d+))?\b")
@@ -90,14 +91,25 @@ def union_length(ranges):
     return sum(e - s for s, e in merged), merged
 
 
+def native_source_paths():
+    paths = [os.path.join(CORE_SRC, "core.c")]
+    for dirpath, _dirnames, filenames in os.walk(CORE_SRC):
+        for name in filenames:
+            if name.endswith(".inc.c"):
+                paths.append(os.path.join(dirpath, name))
+    return sorted(paths)
+
+
 def collect():
-    core = open(PORT_C).read()
     per_bank = {}
-    for m in CITE_RE.finditer(core):
-        bank = "bank" + m.group(1)
-        start = int(m.group(2))
-        end = int(m.group(3)) + 1 if m.group(3) else None
-        per_bank.setdefault(bank, []).append((start, end))
+    for path in native_source_paths():
+        with open(path) as handle:
+            source = handle.read()
+        for m in CITE_RE.finditer(source):
+            bank = "bank" + m.group(1)
+            start = int(m.group(2))
+            end = int(m.group(3)) + 1 if m.group(3) else None
+            per_bank.setdefault(bank, []).append((start, end))
     return per_bank
 
 
@@ -123,7 +135,7 @@ def main(argv):
                    if re.fullmatch(r"bank\d+\.asm", b))
 
     print("Contra native-port FAITHFUL coverage, weighted by assembly line count")
-    print("(cited ASM ranges in core.c / total bank lines; an honest lower bound)\n")
+    print("(cited ASM ranges in native sources / total bank lines; an honest lower bound)\n")
     width = 30
     tot_cov = 0
     tot_all = 0

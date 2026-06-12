@@ -17,8 +17,30 @@ function(contra_apply_coverage target_name)
     endif()
 endfunction()
 
+set(CONTRA_CORE_FRAGMENTS
+    contra_core/src/engine/game_flow.inc.c
+    contra_core/src/engine/graphics_ppu.inc.c
+    contra_core/src/engine/level_loop.inc.c
+    contra_core/src/engine/player_movement.inc.c
+    contra_core/src/engine/player_weapons.inc.c
+    contra_core/src/engine/public_api.inc.c
+    contra_core/src/engine/render_overlays.inc.c
+    contra_core/src/engine/tables_and_forwards.inc.c
+    contra_core/src/enemies/common_helpers.inc.c
+    contra_core/src/enemies/dispatch_collision_generation.inc.c
+    contra_core/src/levels/level1_jungle.inc.c
+    contra_core/src/levels/level2_4_indoor_bases.inc.c
+    contra_core/src/levels/level3_waterfall.inc.c
+    contra_core/src/levels/level5_snowfield.inc.c
+    contra_core/src/levels/level6_energy_zone.inc.c
+    contra_core/src/levels/level7_hangar_and_level8_alien_lair.inc.c
+)
+
+set_source_files_properties(${CONTRA_CORE_FRAGMENTS} PROPERTIES HEADER_FILE_ONLY TRUE)
+
 add_library(contra_core STATIC
     contra_core/src/core.c
+    ${CONTRA_CORE_FRAGMENTS}
 )
 
 target_include_directories(contra_core

@@ -118,6 +118,46 @@ static bool tests_source_has_registered_test(const char *tests_source, const cha
     return strstr(tests_source, needle) != NULL;
 }
 
+static bool native_sources_have_token(const char *token)
+{
+    static const char *const paths[] = {
+        "port/contra_core/src/core.c",
+        "port/contra_core/src/engine/tables_and_forwards.inc.c",
+        "port/contra_core/src/engine/graphics_ppu.inc.c",
+        "port/contra_core/src/engine/player_weapons.inc.c",
+        "port/contra_core/src/engine/player_movement.inc.c",
+        "port/contra_core/src/engine/game_flow.inc.c",
+        "port/contra_core/src/enemies/common_helpers.inc.c",
+        "port/contra_core/src/levels/level2_4_indoor_bases.inc.c",
+        "port/contra_core/src/levels/level1_jungle.inc.c",
+        "port/contra_core/src/levels/level3_waterfall.inc.c",
+        "port/contra_core/src/levels/level5_snowfield.inc.c",
+        "port/contra_core/src/levels/level6_energy_zone.inc.c",
+        "port/contra_core/src/levels/level7_hangar_and_level8_alien_lair.inc.c",
+        "port/contra_core/src/enemies/dispatch_collision_generation.inc.c",
+        "port/contra_core/src/engine/level_loop.inc.c",
+        "port/contra_core/src/engine/render_overlays.inc.c",
+        "port/contra_core/src/engine/public_api.inc.c"
+    };
+    static char source[MAX_FILE_BYTES];
+    size_t path_index;
+
+    for (path_index = 0u; path_index < (sizeof(paths) / sizeof(paths[0])); ++path_index)
+    {
+        if (!load_text_file(paths[path_index], source, sizeof(source)))
+        {
+            return false;
+        }
+
+        if (source_contains_token(source, token))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 static bool all_test_refs_exist(const char *tests_source, char *tests_field)
 {
     char *cursor = tests_field;
@@ -146,15 +186,13 @@ static bool all_test_refs_exist(const char *tests_source, char *tests_field)
 int main(void)
 {
     FILE *file = fopen("port/coverage/asm_routines.csv", "r");
-    static char core_source[MAX_FILE_BYTES];
     static char tests_source[MAX_FILE_BYTES];
     char line[MAX_LINE_LENGTH];
     unsigned line_number = 0u;
     unsigned checked_rows = 0u;
     unsigned failures = 0u;
 
-    if (!load_text_file("port/contra_core/src/core.c", core_source, sizeof(core_source)) ||
-        !load_text_file("port/tests/core_behavior_tests.c", tests_source, sizeof(tests_source)))
+    if (!load_text_file("port/tests/core_behavior_tests.c", tests_source, sizeof(tests_source)))
     {
         return 1;
     }
@@ -218,9 +256,11 @@ int main(void)
                 printf("FAIL coverage row %u has %s status without native_symbol\n", line_number, fields[2]);
                 ++failures;
             }
-            else if (!source_contains_token(core_source, fields[3]))
+            else if (!native_sources_have_token(fields[3]))
             {
-                printf("FAIL coverage row %u native_symbol %s was not found in core.c\n", line_number, fields[3]);
+                printf("FAIL coverage row %u native_symbol %s was not found in native sources\n",
+                    line_number,
+                    fields[3]);
                 ++failures;
             }
 
