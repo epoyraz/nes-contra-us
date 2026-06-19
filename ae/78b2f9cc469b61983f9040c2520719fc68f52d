@@ -1,0 +1,37 @@
+web/controller.js
+  s_d76d7e949c4656::t_3bf4d1153ca6f9 79-80,263-264,329,331-336,372-375
+  s_d76d7e949c4656::t_5b12a02a855fe5 8-9,30-32,65-78,81-88,142-143,191-262,265-286,297-328,330,337-371,376-486,493,495-496,499-504,507-509,521-528,534-536,540,545-550
+  s_d76d7e949c4656::t_a74b3b1aedf29a 287-296
+port/platform_web/main.c
+  s_d76d7e949c4656::t_67316e4786ee3b 13,40,50,57,65-99,102
+web/build.ps1
+  s_d76d7e949c4656::t_798fa2c68dcd2f 44
+web/index.html
+  s_d76d7e949c4656::t_e90bc8aaf06d79 7,14-31
+web/README.md
+  s_d76d7e949c4656::t_b26b3e0bb35dde 20,28-29,90-112
+web/styles.css
+  s_d76d7e949c4656::t_f67e973fb04af9 53-155
+web/multiplayer-server.mjs
+  s_d76d7e949c4656::t_f29f36d8add728 1-351
+web/dist/contra.js
+  s_d76d7e949c4656::t_51d676318a8d77 1-2
+web/build.sh
+  s_d76d7e949c4656::t_798fa2c68dcd2f 51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "ae78b2f9cc469b61983f9040c2520719fc68f52d",
+  "prompts": {},
+  "sessions": {
+    "s_d76d7e949c4656": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ebd94-b3a9-7a12-a5dd-c40854a39077",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
