@@ -1511,9 +1511,15 @@ static void contra_write_cpu_sprite_to_oam(
         const uint8_t tile = contra_rom_read_u8(1u, (uint16_t)(sprite_addr + 1u));
         const uint8_t attr = (uint8_t)(contra_rom_read_u8(1u, (uint16_t)(sprite_addr + 2u)) | base_attr);
         const uint8_t sprite_y = (uint8_t)(base_y - 0x08u);
-        const uint8_t sprite_x = (uint8_t)(base_x - 0x04u);
 
-        contra_write_oam_entry(oam, offset, remaining, sprite_y, tile, attr, sprite_x);
+        /* bank1:4205-4210 skips a small sprite when base_x - 4 borrows.
+           Wrapping it to $FF exposes a one-pixel artifact at the right edge. */
+        if (base_x >= 0x04u)
+        {
+            const uint8_t sprite_x = (uint8_t)(base_x - 0x04u);
+
+            contra_write_oam_entry(oam, offset, remaining, sprite_y, tile, attr, sprite_x);
+        }
         return;
     }
 
@@ -1543,12 +1549,27 @@ static void contra_write_cpu_sprite_to_oam(
                 const uint8_t sprite_y = (sprite_effect & 0x80u) != 0u
                     ? (uint8_t)(base_y + (uint8_t)(0xF0u - adjusted_relative_y))
                     : (uint8_t)(base_y + adjusted_relative_y);
-                const uint8_t sprite_x = (sprite_effect & 0x40u) != 0u
-                    ? (uint8_t)(base_x + (uint8_t)(0xF8u - relative_x))
-                    : (uint8_t)(base_x + relative_x);
+                const int16_t relative_x_signed = (sprite_effect & 0x40u) != 0u
+                    ? (int16_t)(int8_t)(uint8_t)(0xF8u - relative_x)
+                    : (int16_t)(int8_t)relative_x;
+                const int16_t sprite_x = (int16_t)base_x + relative_x_signed;
                 const uint8_t attr = (uint8_t)(((tile_attr & attr_mask) | attr_base) ^ sprite_effect);
 
-                contra_write_oam_entry(oam, offset, remaining, sprite_y, tile, attr, sprite_x);
+                /* bank1:4165-4189 uses the ADC carry to reject relative-X
+                   additions that cross either edge instead of wrapping them
+                   around to the opposite side of the screen. */
+                if ((sprite_x >= 0) && (sprite_x <= 0xFF))
+                {
+                    contra_write_oam_entry(
+                        oam,
+                        offset,
+                        remaining,
+                        sprite_y,
+                        tile,
+                        attr,
+                        (uint8_t)sprite_x
+                    );
+                }
                 --sprite_tile_count;
             }
         }
@@ -1796,9 +1817,18 @@ static void contra_render_level_background(ContraCore *core)
     const uint8_t *const ram = core->ram;
     const size_t visible_super_rows = (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u) ? 8u : 7u;
     const size_t visible_tile_rows = visible_super_rows * 4u;
-    const size_t origin_y = (CONTRA_FRAMEBUFFER_HEIGHT > (visible_tile_rows * 8u))
-        ? (CONTRA_FRAMEBUFFER_HEIGHT - (visible_tile_rows * 8u))
-        : 0u;
+    /* Indoor rooms are a 28-tile (224 px) picture displayed at NES scanline 8:
+       eight blank/status-split pixels above and below. Centering by subtracting
+       the room height from 240 placed it at Y=16 and consumed the bottom margin.
+       Sprite OAM already used the ROM's absolute screen coordinates, so that
+       background-only +8 shift made every indoor enemy look eight pixels too
+       high relative to the corridor. */
+    const size_t origin_y =
+        ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u) && (visible_tile_rows == 28u))
+            ? 8u
+            : ((CONTRA_FRAMEBUFFER_HEIGHT > (visible_tile_rows * 8u))
+                ? (CONTRA_FRAMEBUFFER_HEIGHT - (visible_tile_rows * 8u))
+                : 0u);
     size_t visible_tile_columns = 32u;
     size_t tile_y;
 
@@ -2786,90 +2816,35 @@ static void contra_create_spray_bullets(ContraCore *core, uint8_t player_index)
     contra_play_sound(core, 0x0Au);
 }
 
-static unsigned contra_collect_laser_bullet_slots(
-    const ContraCore *core,
-    uint8_t player_index,
-    bool allow_reuse,
-    size_t bullet_slots[CONTRA_LASER_BULLET_COUNT]
-)
-{
-    unsigned count = 0u;
-    size_t bullet_index;
-
-    for (bullet_index = 0u; bullet_index < CONTRA_PLAYER_BULLET_COUNT; ++bullet_index)
-    {
-        if (core->ram[CONTRA_RAM_PLAYER_BULLET_SLOT + bullet_index] == 0u)
-        {
-            bullet_slots[count++] = bullet_index;
-            if (count == CONTRA_LASER_BULLET_COUNT)
-            {
-                return count;
-            }
-        }
-    }
-
-    if (!allow_reuse)
-    {
-        return count;
-    }
-
-    for (bullet_index = 0u; bullet_index < CONTRA_PLAYER_BULLET_COUNT; ++bullet_index)
-    {
-        if ((core->ram[CONTRA_RAM_PLAYER_BULLET_OWNER + bullet_index] == player_index) &&
-            ((core->ram[CONTRA_RAM_PLAYER_BULLET_SLOT + bullet_index] & 0x0Fu) == 0x05u))
-        {
-            bullet_slots[count++] = bullet_index;
-            if (count == CONTRA_LASER_BULLET_COUNT)
-            {
-                return count;
-            }
-        }
-    }
-
-    return count;
-}
-
-static bool contra_player_has_active_laser_bullets(const ContraCore *core, uint8_t player_index)
-{
-    size_t bullet_index;
-
-    for (bullet_index = 0u; bullet_index < CONTRA_PLAYER_BULLET_COUNT; ++bullet_index)
-    {
-        if ((core->ram[CONTRA_RAM_PLAYER_BULLET_OWNER + bullet_index] == player_index) &&
-            ((core->ram[CONTRA_RAM_PLAYER_BULLET_SLOT + bullet_index] & 0x0Fu) == 0x05u))
-        {
-            return true;
-        }
-    }
-
-    return false;
-}
-
 static void contra_create_laser_bullets(ContraCore *core, uint8_t player_index, bool pressed_this_frame)
 {
     uint8_t *const ram = core->ram;
-    size_t bullet_slots[CONTRA_LASER_BULLET_COUNT];
-    const bool can_reuse = pressed_this_frame;
+    const size_t first_slot = (player_index == 0u) ? 0u : 0x0Au;
     const uint8_t aim_dir = contra_normalize_bullet_direction(
         ram[CONTRA_RAM_PLAYER_AIM_DIR + player_index],
         ram[CONTRA_RAM_PLAYER_JUMP_STATUS + player_index]
     );
-    const unsigned bullet_count = contra_collect_laser_bullet_slots(core, player_index, can_reuse, bullet_slots);
     unsigned bullet_num;
 
-    if (!pressed_this_frame && contra_player_has_active_laser_bullets(core, player_index))
+    /* fire_weapon_routine_l (bank6:545-588) owns exactly four fixed slots:
+       P1 0..3, P2 10..13. A fresh B edge overwrites those slots unconditionally.
+       While B is merely held, ANY occupied reserved slot blocks the whole laser
+       volley; it does not search later empty slots. This matters when L is
+       collected while an older weapon's bullets are still in flight. */
+    if (!pressed_this_frame)
     {
-        return;
-    }
-
-    if (bullet_count < CONTRA_LASER_BULLET_COUNT)
-    {
-        return;
+        for (bullet_num = 0u; bullet_num < CONTRA_LASER_BULLET_COUNT; ++bullet_num)
+        {
+            if (ram[CONTRA_RAM_PLAYER_BULLET_SLOT + first_slot + bullet_num] != 0u)
+            {
+                return;
+            }
+        }
     }
 
     for (bullet_num = 0u; bullet_num < CONTRA_LASER_BULLET_COUNT; ++bullet_num)
     {
-        const size_t bullet_slot = bullet_slots[bullet_num];
+        const size_t bullet_slot = first_slot + bullet_num;
 
         contra_init_player_bullet_common(core, bullet_slot, player_index, 0x04u, aim_dir, 0x00u, 0x00u);
         contra_init_player_bullet_position(core, bullet_slot, player_index, aim_dir);
@@ -2884,7 +2859,11 @@ static void contra_create_laser_bullets(ContraCore *core, uint8_t player_index, 
         {
             contra_set_indoor_bullet_velocity(core, bullet_slot, player_index, true);
         }
-        ram[CONTRA_RAM_PLAYER_BULLET_TIMER + bullet_slot] = contra_laser_bullet_delay_tbl[bullet_num];
+        /* fire_weapon_routine_l keeps $00 at 3..0 while X advances through
+           the four reserved slots, so slot 0 gets table[3] (delay 1), slot 1
+           gets table[2], and so on. */
+        ram[CONTRA_RAM_PLAYER_BULLET_TIMER + bullet_slot] =
+            contra_laser_bullet_delay_tbl[(CONTRA_LASER_BULLET_COUNT - 1u) - bullet_num];
     }
 
     contra_play_sound(core, 0x0Au);
@@ -3869,7 +3848,8 @@ static void contra_set_player_death_sprite(ContraCore *core, uint8_t player_inde
 {
     uint8_t *const ram = core->ram;
 
-    if (ram[CONTRA_RAM_PLAYER_SPRITE_SEQUENCE + player_index] == 0x06u)
+    if ((ram[CONTRA_RAM_PLAYER_SPRITE_SEQUENCE + player_index] == 0x06u) ||
+        ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] & 0x80u) != 0u))
     {
         if (ram[CONTRA_RAM_PLAYER_SPECIAL_SPRITE_TIMER + player_index] < 0x1Bu)
         {
@@ -4044,6 +4024,7 @@ static void contra_set_player_water_sprite(ContraCore *core, uint8_t player_inde
 static void contra_set_player_sprite(ContraCore *core, uint8_t player_index)
 {
     uint8_t sequence = core->ram[CONTRA_RAM_PLAYER_SPRITE_SEQUENCE + player_index];
+    const uint8_t location_type = core->ram[CONTRA_RAM_LEVEL_LOCATION_TYPE];
 
     if (core->ram[CONTRA_RAM_PLAYER_WATER_STATE + player_index] != 0u)
     {
@@ -4064,13 +4045,70 @@ static void contra_set_player_sprite(ContraCore *core, uint8_t player_index)
         return;
     }
 
+    /* The base boss room is marked with bit 7 ($80), not the regular indoor
+       value $01.  bank2:880-890 branches to a separate five-entry sprite table:
+       sequences 0-2 all use the facing-up sprite, sequence 3 uses the normal
+       aim-dependent walk table, and sequence 4 uses the indoor death pose. */
+    if ((location_type & 0x80u) != 0u)
+    {
+        if (sequence <= 0x02u)
+        {
+            core->ram[CONTRA_RAM_PLAYER_SPRITE_FLIP + player_index] &= 0x3Fu;
+            core->ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] = 0x50u;
+            return;
+        }
+        if (sequence == 0x04u)
+        {
+            contra_set_player_death_sprite(core, player_index);
+            return;
+        }
+        if (sequence == 0x03u)
+        {
+            uint8_t frame_type =
+                contra_player_frame_sprite_type_tbl[
+                    core->ram[CONTRA_RAM_PLAYER_AIM_DIR + player_index] % 10u];
+            const uint8_t *frame_table = contra_player_frame_sprite_tbl_00;
+
+            if ((frame_type == 0x00u) &&
+                (core->ram[CONTRA_RAM_PLAYER_RECOIL_TIMER + player_index] != 0u))
+            {
+                frame_type = 0x01u;
+            }
+            if (frame_type == 0x01u)
+            {
+                frame_table = contra_player_frame_sprite_tbl_01;
+            }
+            else if (frame_type == 0x02u)
+            {
+                frame_table = contra_player_frame_sprite_tbl_02;
+            }
+            else if (frame_type == 0x03u)
+            {
+                frame_table = contra_player_frame_sprite_tbl_03;
+            }
+
+            core->ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] =
+                frame_table[
+                    core->ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] % 6u];
+            core->ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + player_index] =
+                (uint8_t)(core->ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + player_index] + 1u);
+            if ((core->ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + player_index] & 0x07u) == 0u)
+            {
+                core->ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] =
+                    (uint8_t)((core->ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] + 1u) % 6u);
+            }
+            contra_set_player_horizontal_flip(core, player_index);
+            return;
+        }
+    }
+
     if ((sequence == 0x04u) || (sequence == 0x06u))
     {
         contra_set_player_death_sprite(core, player_index);
         return;
     }
 
-    if (core->ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u)
+    if (location_type != 0u)
     {
         if (sequence == 0x00u)
         {
@@ -4128,6 +4166,8 @@ static void contra_set_player_sprite(ContraCore *core, uint8_t player_index)
                 core->ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] =
                     (uint8_t)((core->ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] + 1u) % 6u);
             }
+            /* set_player_frame_sprite_from_a ends by updating the facing flip. */
+            contra_set_player_horizontal_flip(core, player_index);
         }
         else
         {
@@ -4135,7 +4175,10 @@ static void contra_set_player_sprite(ContraCore *core, uint8_t player_index)
                indoor block, so this effectively only catches the standing pose. */
             core->ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] = 0x50u;
         }
-        contra_set_player_horizontal_flip(core, player_index);
+        /* The other indoor sprite routines return directly. In particular,
+           walking-to-back (sequence 5) preserves the previous flip; applying
+           the generic aim-direction flip here mirrors that animation at the
+           moment Down is pressed. */
         return;
     }
 
@@ -4191,6 +4234,7 @@ static void contra_set_player_sprite_and_attrs(ContraCore *core, uint8_t player_
     uint8_t sprite_code;
     uint8_t attr;
     uint8_t effect_palette = contra_sprite_attr_start_tbl[player_index];
+    uint8_t effect_mask = 0u;
 
     contra_set_player_sprite(core, player_index);
 
@@ -4209,12 +4253,25 @@ static void contra_set_player_sprite_and_attrs(ContraCore *core, uint8_t player_
 
     if (core->ram[CONTRA_RAM_ELECTROCUTED_TIMER + player_index] != 0u)
     {
-        effect_palette = 0x02u;
+        effect_mask = 0x02u;
     }
-    else if ((core->ram[CONTRA_RAM_INVINCIBILITY_TIMER + player_index] != 0u) &&
-             (((uint8_t)(core->ram[CONTRA_RAM_FRAME_COUNTER] ^ contra_player_effect_xor_tbl[player_index]) & 0x04u) != 0u))
+    else if (core->ram[CONTRA_RAM_INVINCIBILITY_TIMER + player_index] != 0u)
     {
-        effect_palette = 0x05u;
+        effect_mask = 0x04u;
+    }
+
+    if (effect_mask != 0u)
+    {
+        /* bank2:797-823 always sets the sprite-code palette-override bit
+           during an effect. FRAME_COUNTER selects palette 0 ($04) or palette
+           1 ($05); electrocution toggles on bit 1, barrier invincibility on
+           bit 2. Leaving the off phase at $00 makes sprite-defined palette
+           bits leak through and gives the shock animation the wrong colors. */
+        effect_palette =
+            (((uint8_t)(core->ram[CONTRA_RAM_FRAME_COUNTER] ^
+                        contra_player_effect_xor_tbl[player_index]) & effect_mask) != 0u)
+                ? 0x05u
+                : 0x04u;
     }
 
     attr = effect_palette;
@@ -5376,7 +5433,11 @@ static void contra_run_player_state_routine(ContraCore *core, uint8_t player_ind
         }
 
         default:
-            contra_set_player_sprite_and_attrs(core, player_index);
+            /* PLAYER_STATE 3 ("can't move") dispatches to the shared
+               player_state_routine_03 label, which does no player sprite work.
+               End-level code may have just installed a special CPU-buffer
+               sprite (for example sprite $91, player on the indoor elevator);
+               rebuilding the normal pose here overwrites it. */
             break;
     }
 }
@@ -6162,6 +6223,7 @@ static void contra_clear_level_runtime_memory(ContraCore *core)
     core->pending_horizontal_attr_write = 0x00u;
     core->l7_tile_update_count = 0x00u;
     core->l7_supertile_update_count = 0x00u;
+    core->l2_persistent_tile_count = 0u;
     /* the ROM's BG_COLLISION_DATA ring is rebuilt from the new level's map;
        stale world-anchored overrides from the previous level would corrupt
        collision at the same world X here */
@@ -7440,6 +7502,9 @@ static const uint8_t contra_bullet_fract_vel_tbl[14] = {
 static const uint8_t contra_bullet_sprite_tbl[6] = {0x1Eu, 0x21u, 0x21u, 0x1Eu, 0x79u, 0x07u};
 static const uint8_t contra_bullet_palette_tbl[6] = {0x01u, 0x02u, 0x02u, 0x01u, 0x01u, 0x02u};
 static const uint8_t contra_bullet_collision_code_tbl[6] = {0x01u, 0x05u, 0x05u, 0x01u, 0x02u, 0x00u};
+/* bullet_04_palette_mirror_tbl (bank0:450): the level-3 boss fireball
+   alternates horizontal/vertical mirroring every four frames. */
+static const uint8_t contra_bullet_04_palette_mirror_tbl[4] = {0x01u, 0x41u, 0xC1u, 0x81u};
 /* cannonball_explosion_sprite_tbl (bank0:498): type-1 bomb ground-explosion frames. */
 static const uint8_t contra_cannonball_explosion_sprite_tbl[3] = {0x37u, 0x36u, 0x37u};
 /* adjust_bullet_velocity speed scaling reduces to vel*mult/8: 0.5x .. 1.875x */
@@ -7629,6 +7694,12 @@ static void contra_rom_enemy_bullet_routine_01(ContraCore *core, uint8_t x)
         {
             contra_rom_remove_enemy(core, x);
         }
+    }
+    else if (core->ram[CONTRA_RAM_ENEMY_VAR_1 + x] == 0x04u)
+    {
+        core->ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] =
+            contra_bullet_04_palette_mirror_tbl[
+                (core->ram[CONTRA_RAM_FRAME_COUNTER] >> 2u) & 0x03u];
     }
 }
 
@@ -9007,6 +9078,30 @@ static void contra_rom_aim_and_create_enemy_bullet(
    structures; the logic, collision, and firing are faithful. */
 static const uint8_t contra_wall_turret_opening_tile_tbl[3] = {0x85u, 0x88u, 0x89u};
 
+static void contra_record_level_2_persistent_tile(ContraCore *core, uint8_t x, uint8_t tile)
+{
+    unsigned i;
+    const uint8_t px = core->ram[CONTRA_RAM_ENEMY_X_POS + x];
+    const uint8_t py = core->ram[CONTRA_RAM_ENEMY_Y_POS + x];
+
+    for (i = 0u; i < core->l2_persistent_tile_count; ++i)
+    {
+        if ((core->l2_persistent_tile_x[i] == px) &&
+            (core->l2_persistent_tile_y[i] == py))
+        {
+            core->l2_persistent_tile_index[i] = tile;
+            return;
+        }
+    }
+    if (core->l2_persistent_tile_count < 16u)
+    {
+        i = core->l2_persistent_tile_count++;
+        core->l2_persistent_tile_x[i] = px;
+        core->l2_persistent_tile_y[i] = py;
+        core->l2_persistent_tile_index[i] = tile;
+    }
+}
+
 static void contra_rom_wall_turret_routine_00(ContraCore *core, uint8_t x)
 {
     const uint8_t idx = (uint8_t)(core->ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x03u);
@@ -9115,6 +9210,7 @@ static void contra_rom_wall_turret_routine_04(ContraCore *core, uint8_t x)
         return;
     }
     core->l2_structure_tile[x] = 0x83u; /* 'core - destroyed' */
+    contra_record_level_2_persistent_tile(core, x, 0x83u);
     contra_rom_advance_enemy_routine(core, x);
 }
 
@@ -9286,6 +9382,7 @@ static void contra_rom_wall_core_routine_04(ContraCore *core, uint8_t x)
     ram[CONTRA_RAM_ENEMY_VAR_2 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_2 + x] - 1u);
     if ((ram[CONTRA_RAM_ENEMY_VAR_2 + x] & 0x80u) != 0u)
     {
+        contra_record_level_2_persistent_tile(core, x, core->l2_structure_tile[x]);
         contra_rom_advance_enemy_routine(core, x); /* plating gone -> routine_05 */
         return;
     }
@@ -10921,7 +11018,9 @@ static void contra_rom_boss_eye_routine_02(ContraCore *core, uint8_t x)
     {
         ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
             (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
-        if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x08u) != 0u)
+        /* bank0:2718 performs three LSRs and branches on the final carry, so
+           it tests original FRAME_COUNTER bit 2 ($04), not bit 3 ($08). */
+        if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x04u) != 0u)
         {
             base = 4u; /* flash the hit frames */
         }
@@ -11752,7 +11851,10 @@ static bool contra_rom_red_turret_load_supertile(ContraCore *core, uint8_t x)
     idx = ram[CONTRA_RAM_ENEMY_FRAME + x];
     if ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x01u) != 0u)
     {
-        idx = (uint8_t)(idx + 3u); /* alternate background variant */
+        /* bank0:1037-1042 leaves carry set by LSR before ADC #$03, so the
+           alternate-background path adds four, not three. Frame 3 must select
+           table entry 7 ($11, fully emerged), not entry 6 ($18, 3/4 emerged). */
+        idx = (uint8_t)(idx + 4u);
     }
     {
         const uint8_t supertile = contra_red_turret_supertile_tbl[(idx < 11u) ? idx : 0u];
@@ -13388,6 +13490,41 @@ static void contra_rom_enemy_routine_explosion_step(ContraCore *core, uint8_t x)
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x0Au;
     ram[CONTRA_RAM_ENEMY_SPRITES + x] =
         large ? explosion_type_01[frame] : explosion_type_00[frame];
+}
+
+/* shared_enemy_routine_03 (bank7:7643): generated indoor soldiers use the
+   small-ring explosion_type_02 sequence, not the generic type selected from
+   ENEMY_STATE_WIDTH. */
+static void contra_rom_indoor_enemy_explosion_step(ContraCore *core, uint8_t x)
+{
+    static const uint8_t explosion_type_02[3] = {0x9Du, 0x9Eu, 0x9Fu};
+    uint8_t *const ram = core->ram;
+    uint8_t frame;
+
+    contra_rom_add_scroll_to_enemy_pos(core, x);
+    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
+        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
+    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
+    {
+        return;
+    }
+    frame = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
+    ram[CONTRA_RAM_ENEMY_FRAME + x] = frame;
+    if (frame >= 0x03u)
+    {
+        contra_rom_advance_enemy_routine(core, x);
+        return;
+    }
+    if (frame == 0x02u)
+    {
+        contra_rom_disable_enemy_collision(core, x);
+    }
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x0Au;
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = explosion_type_02[frame];
 }
 
 /* --- level-1 fortress boss door (enemy type 0x11), bank0.asm:2184 ---
@@ -18611,7 +18748,7 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                     /* table tail (bank0:3423-3425): init_explosion,
                        shared_enemy_routine_03 (explosion_type_02), remove_enemy */
                     case 0x05u: contra_rom_enemy_routine_init_explosion_step(core, x); break;
-                    case 0x06u: contra_rom_enemy_routine_explosion_step(core, x); break;
+                    case 0x06u: contra_rom_indoor_enemy_explosion_step(core, x); break;
                     case 0x07u: contra_rom_enemy_routine_remove_inplace(core, x); break;
                     default: break;
                 }
@@ -18669,7 +18806,7 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                     case 0x04u: contra_rom_shared_indoor_soldier_hit_routine_01(core, x); break;
                     case 0x05u: contra_rom_jumping_soldier_routine_04(core, x); break;
                     case 0x06u: contra_rom_enemy_routine_init_explosion_step(core, x); break;
-                    case 0x07u: contra_rom_enemy_routine_explosion_step(core, x); break;
+                    case 0x07u: contra_rom_indoor_enemy_explosion_step(core, x); break;
                     case 0x08u: contra_rom_enemy_routine_remove_inplace(core, x); break; /* remove_enemy keeps the husk */
                     default: break; /* hit/explosion via the 0xFE actor */
                 }
@@ -18699,7 +18836,7 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                     case 0x05u: contra_rom_shared_indoor_soldier_hit_routine_01(core, x); break;
                     /* table tail (bank0:3812-3814) */
                     case 0x06u: contra_rom_enemy_routine_init_explosion_step(core, x); break;
-                    case 0x07u: contra_rom_enemy_routine_explosion_step(core, x); break;
+                    case 0x07u: contra_rom_indoor_enemy_explosion_step(core, x); break;
                     case 0x08u: contra_rom_enemy_routine_remove_inplace(core, x); break;
                     default: break;
                 }
@@ -18831,7 +18968,7 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                     case 0x03u: contra_rom_shared_indoor_soldier_hit_routine_00(core, x); break;
                     case 0x04u: contra_rom_shared_indoor_soldier_hit_routine_01(core, x); break;
                     case 0x05u: contra_rom_enemy_routine_init_explosion_step(core, x); break;
-                    case 0x06u: contra_rom_enemy_routine_explosion_step(core, x); break;
+                    case 0x06u: contra_rom_indoor_enemy_explosion_step(core, x); break;
                     case 0x07u:
                         contra_rom_enemy_routine_remove_inplace(core, x);
                         core->ram[CONTRA_RAM_GRENADE_LAUNCHER_FLAG] = 0x00u;
@@ -19840,6 +19977,7 @@ static void contra_rom_load_indoor_enemy_data(ContraCore *core)
     ram[CONTRA_RAM_WALL_PLATING_DESTROYED_COUNT] = 0u;
     core->l2_blowopen_quadrants = 0u;
     core->l2_destroyed_struct_count = 0u;
+    core->l2_persistent_tile_count = 0u;
     ram[CONTRA_RAM_INDOOR_RED_SOLDIER_CREATED] = 0u;
     ram[CONTRA_RAM_GRENADE_LAUNCHER_FLAG] = 0u;
     for (slot = 0x0F; slot >= 0; --slot)
@@ -20365,7 +20503,8 @@ static void contra_make_off_screen_player_invisible(ContraCore *core, uint8_t pl
 
     core->ram[CONTRA_RAM_PLAYER_HIDDEN + player_index] = 0xFFu;
     core->ram[CONTRA_RAM_LEVEL_END_LVL_ROUTINE_STATE + player_index] = 0x00u;
-    core->ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] = 0x00u;
+    /* bank3:1560 clears PLAYER_SPRITES (the CPU render buffer), not
+       PLAYER_SPRITE_CODE. Preserve the last logical pose in $338. */
     core->ram[CONTRA_RAM_CPU_SPRITE_BUFFER + player_index] = 0x00u;
 }
 
@@ -21909,6 +22048,21 @@ static void contra_render_level_2_wall_structures(ContraCore *core)
         }
     }
 
+    /* The ROM's nametable retains destroyed regular wall fixtures after their
+       enemy slots are cleared. Reapply those room-scoped 2x2 tile writes. */
+    {
+        unsigned i;
+
+        for (i = 0u; i < core->l2_persistent_tile_count; ++i)
+        {
+            contra_render_level_2_tile_animation(
+                core,
+                (int)core->l2_persistent_tile_x[i],
+                (int)core->l2_persistent_tile_y[i],
+                core->l2_persistent_tile_index[i]);
+        }
+    }
+
     /* back-wall blow-open: 4 destroyed quadrant super-tiles at fixed positions,
        drawn one-by-one by wall_core_routine_08 and persisting until the room
        reloads (same positions the invented path uses). Only valid while the room is
@@ -22162,6 +22316,7 @@ static void contra_render_native_enemies(ContraCore *core)
                     (uint8_t)(contra_boss_mouth_nametable_update_tbl[(frame * 2u) + 1u] & 0x7Fu));
             }
         }
+
     }
 }
 
@@ -22415,13 +22570,23 @@ void contra_core_step_frame(ContraCore *core)
 
     if (core->frame_stall_frames != 0u)
     {
+        /* A multi-frame end-level graphics write does not run the normal
+           sprite/OAM build on every frozen video frame. It latches once on the
+           final routine-reset frame; the later one-frame PPU-only flush does
+           not. Advancing OAMDMA_CPU_BUFFER_OFFSET at any other stall point
+           permanently rotates physical OAM order and changes which sprite
+           survives the NES eight-sprites-per-scanline limit. */
+        const bool update_latches =
+            (core->frame_stall_routine_reset != 0u) &&
+            (core->frame_stall_frames == 0x01u);
+
         core->frame_stall_frames = (uint8_t)(core->frame_stall_frames - 1u);
         if ((core->frame_stall_frames == 0u) && (core->frame_stall_routine_reset != 0u))
         {
             core->frame_stall_routine_reset = 0u;
             core->ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x00u;
         }
-        contra_render_frame(core, true);
+        contra_render_frame(core, update_latches);
         return;
     }
 
@@ -22436,7 +22601,11 @@ void contra_core_step_frame(ContraCore *core)
     contra_apply_controller_state(core);
     contra_exe_game_routine(core);
     contra_flush_cpu_graphics_buffer_to_ppu(core);
-    contra_render_frame(core, core->level_graphics_wait_frames == 0u);
+    contra_render_frame(
+        core,
+        (core->level_graphics_wait_frames == 0u) &&
+        !((core->frame_stall_frames != 0u) &&
+          (core->frame_stall_routine_reset != 0u)));
 }
 
 /* DEBUG (NOT part of the faithful port): warp an initialized core straight to the

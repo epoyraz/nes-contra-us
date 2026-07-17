@@ -24,10 +24,14 @@ Three failure classes are distinguished:
     localize it.
 
 Usage:
-    compare_play_trace.py NATIVE.jsonl MESEN.jsonl [--frame N] [--list N] [--baseline N]
+    compare_play_trace.py NATIVE.jsonl MESEN.jsonl [options]
       --frame N    print the full field diff at frame N and exit
       --list N     show the first N divergent frames (default 5)
       --baseline N exit 1 if the traces diverge before frame N (CI guard)
+      --native-frame-offset N
+                   compare Mesen frame f with native frame f+N
+      --start-frame N
+                   skip earlier startup frames
 """
 import json
 import sys
@@ -69,8 +73,35 @@ def load(path):
     return frames
 
 
+def canonical_visible_oam(value):
+    """Compare displayed sprite content, not rotating physical OAM slots.
+
+    voam entries are slot:y:tile:attr:x. Contra rotates its starting OAM slot
+    every frame, and the high-level port does not use the same absolute slot,
+    but slot identity alone does not move or change a displayed sprite.
+    """
+    if not isinstance(value, str):
+        return value
+    sprites = []
+    for entry in value.split("|"):
+        parts = entry.split(":")
+        if len(parts) == 5:
+            sprites.append(tuple(parts[1:]))
+        elif entry:
+            sprites.append((entry,))
+    return tuple(sorted(sprites))
+
+
 def gameplay_diff(a, b):
-    return [k for k in a if k in b and k not in EXCLUDE and a[k] != b[k]]
+    different = []
+    for k in a:
+        if k not in b or k in EXCLUDE:
+            continue
+        av = canonical_visible_oam(a[k]) if k == "voam" else a[k]
+        bv = canonical_visible_oam(b[k]) if k == "voam" else b[k]
+        if av != bv:
+            different.append(k)
+    return different
 
 
 def print_frame_diff(native, mesen, frame):
@@ -113,17 +144,34 @@ def main(argv):
     want_frame = int(argv[argv.index("--frame") + 1]) if "--frame" in argv else None
     list_count = int(argv[argv.index("--list") + 1]) if "--list" in argv else 5
     baseline = int(argv[argv.index("--baseline") + 1]) if "--baseline" in argv else None
+    native_frame_offset = (
+        int(argv[argv.index("--native-frame-offset") + 1])
+        if "--native-frame-offset" in argv else 0
+    )
+    start_frame = int(argv[argv.index("--start-frame") + 1]) if "--start-frame" in argv else 1
 
-    common = sorted(set(native) & set(mesen))
+    if native_frame_offset:
+        native = {frame - native_frame_offset: row for frame, row in native.items()}
+
+    common = sorted(frame for frame in (set(native) & set(mesen)) if frame >= start_frame)
     if not common:
         print("FAIL: no common frames between the two traces")
         return 1
     print(f"native frames: {len(native)}  mesen frames: {len(mesen)}  "
           f"common: {len(common)} (frame {common[0]}..{common[-1]})")
+    if native_frame_offset:
+        print(f"alignment: Mesen frame f -> native frame f{native_frame_offset:+d}")
 
     if want_frame is not None:
         print_frame_diff(native, mesen, want_frame)
         return 0
+
+    def is_lag_burst_frame(f):
+        prev = mesen.get(f - 1)
+        nxt = mesen.get(f + 1)
+        fc = mesen[f].get("frame_counter")
+        return (prev is not None and prev.get("frame_counter") == fc) or \
+               (nxt is not None and nxt.get("frame_counter") == fc)
 
     divergent = []
     last_match = 0
@@ -135,11 +183,7 @@ def main(argv):
         # (FC increments at iteration START, so the burst's first row is
         # already a torn mid-iteration snapshot). The replay skips stepping
         # those frames (the lag schedule); skip comparing them.
-        prev = mesen.get(f - 1)
-        nxt = mesen.get(f + 1)
-        fc = mesen[f].get("frame_counter")
-        if (prev is not None and prev.get("frame_counter") == fc) or \
-           (nxt is not None and nxt.get("frame_counter") == fc):
+        if is_lag_burst_frame(f):
             continue
         keys = gameplay_diff(native[f], mesen[f])
         if not keys:
@@ -205,7 +249,10 @@ def main(argv):
         if hi - lo < 120:
             continue  # transition blip
         seg_frames = [f for f in range(lo, hi + 1) if f in native and f in mesen]
-        seg_div = [f for f in seg_frames if gameplay_diff(native[f], mesen[f])]
+        seg_div = [
+            f for f in seg_frames
+            if not is_lag_burst_frame(f) and gameplay_diff(native[f], mesen[f])
+        ]
         if not seg_div:
             status = "CLEAN"
         else:

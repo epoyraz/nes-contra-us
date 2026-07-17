@@ -101,6 +101,13 @@ typedef struct ContraCore
     uint8_t l2_destroyed_struct_count;
     uint8_t l2_destroyed_struct_x[8];
     uint8_t l2_destroyed_struct_y[8];
+    /* Regular indoor wall turret/core 2x2 tile-animation writes that must
+       survive after the enemy slot is freed. The ROM leaves these in its
+       nametable; the native room is recomposed every frame. */
+    uint8_t l2_persistent_tile_count;
+    uint8_t l2_persistent_tile_x[16];
+    uint8_t l2_persistent_tile_y[16];
+    uint8_t l2_persistent_tile_index[16];
     /* Faithful level-1 exploding bridge: world positions of the background
        super-tiles whose collision the bridge has cleared (clear_supertile_bg_
        collision) so the player falls through. The native background composes from

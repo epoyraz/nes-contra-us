@@ -60,7 +60,7 @@ alignment warning before trusting the comparison.**
 | Env var | Meaning |
 |---|---|
 | `CONTRA_NATIVE_PLAY_INPUT` | `raw` (default) or `latched` — feed `$F1/$F2` instead; use if a Mesen DPCM controller-read glitch corrupted a raw frame |
-| `CONTRA_NATIVE_PLAY_INPUT_OFFSET` | shift the recording N frames (may be negative) |
+| `CONTRA_NATIVE_PLAY_INPUT_OFFSET` | shift the recording N frames (may be negative); replay length is adjusted so every aligned recording frame is emitted |
 | `CONTRA_NATIVE_PLAY_MAX_FRAME` | stop early |
 | `CONTRA_NATIVE_PLAY_DUMP_FRAME` + `CONTRA_NATIVE_PLAY_{RAM,OAM,NAMETABLE,PALETTE,FRAMEBUFFER,CHR,PPU,SUPERTILE}_DUMP_PATH` | dump full native render/state telemetry at one frame |
 
@@ -81,7 +81,12 @@ divergence (everything after it cascades). It distinguishes three classes:
   localize it.
 
 `--frame N` prints the full field diff at frame N; `--baseline N` makes it a CI
-guard.
+guard. If the recorder and native cold-start timelines have a known fixed
+offset, pass `--native-frame-offset N`; for example, `2` compares recorded
+Mesen frame `f` with native frame `f+2`. Visible OAM is compared by displayed
+`y/tile/attribute/x` content, ignoring only the rotating physical OAM slot
+number. `--start-frame N` can exclude a known cold-start-only frame before the
+aligned gameplay timeline.
 
 ### 4. Deep dive at the divergent frame
 
@@ -94,9 +99,16 @@ frame session), including DPCM glitches:
 ```sh
 CONTRA_MESEN_PLAY_RECORDING_JSONL=out.jsonl \
 CONTRA_MESEN_PLAY_REPLAY_JSONL=recording.jsonl \
+CONTRA_MESEN_PLAY_REPLAY_INPUT_OFFSET=-2 \
 CONTRA_MESEN_PLAY_DUMP_FRAME=N CONTRA_MESEN_PLAY_RAM_DUMP_PATH=mesen.ram \
 Mesen --testRunner --doNotSaveSettings --timeout=900 baserom.nes tools/mesen_play_recorder.lua
 ```
+
+When the headless test runner starts two frames behind the original power-cycle
+recording, pair original frame `f` with headless frame `f+2`, and set
+`CONTRA_MESEN_PLAY_REPLAY_INPUT_OFFSET=-2` so the input consumed at that frame is
+also aligned. Confirm the structural trace remains identical before trusting
+any framebuffer dump.
 
 This also upgrades old recordings to the current schema (new fields are
 re-extracted from the replay). Then `tools/ramdiff.py` the two RAM dumps —
@@ -153,11 +165,22 @@ or the status-bar scroll split. If a frame differs while the end-of-frame PPU
 state looks identical, the next tool to add is an ordered PPU/register write
 trace with frame/scanline/cycle/PC/value.
 
-## Schema v5
+## Schema v6
 
-The recorder emits `"schema":5` in the meta row and adds per-frame fields on
-top of v4 (all v4 field names are unchanged, so older traces and tools keep
-working — the comparators diff the field INTERSECTION across schemas):
+The recorder emits `"schema":6` in the meta row. Schema v6 adds a compared
+`voam` field containing only the visible PPU OAM entries that produced the
+frame (`index:y:tile:attr:x`). This is deliberately different from the legacy
+inspection-only `oam` field: `oam` is the CPU shadow buffer prepared for a
+future DMA, while `voam` is lag-corrected displayed sprite state. Hidden OAM
+entries are omitted because the ROM only changes their Y byte and leaves the
+other bytes stale. The PPU's unused OAM attribute bits 2–4 are masked out.
+
+This makes sprite code, attributes, and final rendered X/Y placement part of
+the normal frame-by-frame comparison, including moving-enemy baseline errors.
+All older field names are unchanged, so older traces and tools keep working —
+the comparators diff the field intersection across schemas.
+
+Schema v5 added these per-frame fields on top of v4:
 
 | Field | Source | Compared? |
 |---|---|---|
@@ -170,6 +193,7 @@ working — the comparators diff the field INTERSECTION across schemas):
 | `bgcol` | BG_COLLISION_DATA $0680–$06FF hex | inspection only (native has no mirror yet) |
 | `rampg` | 16× FNV-1a over 128-byte RAM pages | inspection only |
 | `oam` | OAM shadow $0200–$02FF hex | inspection only (rotating buffer) |
+| `voam` | visible displayed PPU OAM as `index:y:tile:attr:x` groups | structural |
 
 `bgcol`/`rampg`/`oam` are "heavy" (~2400 extra reads/frame): always on in
 headless re-trace mode, opt-in for live recording via

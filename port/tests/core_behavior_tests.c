@@ -1642,6 +1642,126 @@ static bool test_level2_boss_room_wall_cannons_fire_projectiles(void)
     return true;
 }
 
+/* LEVEL_LOCATION_TYPE $80 has its own ROM sprite table.  It must not use the
+   ordinary indoor corridor's shock/crouch/walk sprites. */
+static bool test_level2_boss_room_uses_boss_player_sprite_table(void)
+{
+    ContraCore core;
+
+    CHECK(reach_level2_boss_room(&core));
+    core.ram[CONTRA_RAM_PLAYER_STATE] = 0x01u;
+    core.ram[CONTRA_RAM_PLAYER_JUMP_STATUS] = 0x00u;
+    core.ram[CONTRA_RAM_EDGE_FALL_CODE] = 0x00u;
+    core.ram[CONTRA_RAM_PLAYER_WATER_STATE] = 0x00u;
+    core.ram[CONTRA_RAM_INDOOR_PLAYER_ADV_FLAG] = 0x00u;
+    core.ram[CONTRA_RAM_INDOOR_PLAYER_JUMP_FLAG] = 0x00u;
+    core.ram[CONTRA_RAM_ELECTROCUTED_TIMER] = 0x00u;
+    core.ram[CONTRA_RAM_SPRITE_X_POS] = 0x94u;
+    core.ram[CONTRA_RAM_SPRITE_Y_POS] = 0xC9u;
+
+    step_with_input(&core, CONTRA_BUTTON_UP);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_SPRITE_CODE] == 0x50u);
+
+    core.ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX] = 0x00u;
+    core.ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER] = 0x00u;
+    core.ram[CONTRA_RAM_EDGE_FALL_CODE] = 0x00u;
+    step_with_input(&core, CONTRA_BUTTON_LEFT);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_SPRITE_CODE] == 0x02u);
+    return true;
+}
+
+static bool test_level2_boss_eye_flash_uses_frame_counter_bit_2(void)
+{
+    ContraCore core;
+    size_t eye = 0u;
+
+    CHECK(reach_level2_boss_room(&core));
+    CHECK(find_first_active_enemy_type(&core, 0x10u, &eye));
+
+    core.ram[CONTRA_RAM_ENEMY_ROUTINE + eye] = 0x03u;
+    core.ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + eye] = 0x05u;
+    core.ram[CONTRA_RAM_ENEMY_FRAME + eye] = 0x07u;
+    core.ram[CONTRA_RAM_FRAME_COUNTER] = 0x03u; /* step advances it to $04 */
+    core.ram[CONTRA_RAM_ENEMY_ATTACK_FLAG] = 0x00u;
+
+    step_no_input(&core);
+
+    /* Frame index becomes 1; flash-table base 4 selects entry 5 (sprite $61).
+       The former bit-3 test selected normal entry 1 (sprite $5E). */
+    CHECK(core.ram[CONTRA_RAM_ENEMY_SPRITES + eye] == 0x61u);
+    return true;
+}
+
+static bool test_level2_end_elevator_sprite_survives_player_state_3(void)
+{
+    ContraCore core;
+
+    force_level2_gameplay(&core);
+    core.ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] = 0x80u;
+    core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x09u;
+    core.ram[CONTRA_RAM_END_LEVEL_ROUTINE_INDEX] = 0x01u;
+    core.ram[CONTRA_RAM_LEVEL_END_DELAY_TIMER] = 0x00u;
+    core.ram[CONTRA_RAM_LEVEL_END_LVL_ROUTINE_STATE] = 0x02u;
+    core.ram[CONTRA_RAM_LEVEL_END_LVL_ROUTINE_STATE + 1u] = 0x00u;
+    core.ram[CONTRA_RAM_LEVEL_END_SQ_1_TIMER] = 0xF0u;
+    core.ram[CONTRA_RAM_PLAYER_STATE] = 0x01u;
+    core.ram[CONTRA_RAM_PLAYER_JUMP_STATUS] = 0x00u;
+    core.ram[CONTRA_RAM_PLAYER_HIDDEN] = 0x00u;
+    core.ram[CONTRA_RAM_SPRITE_X_POS] = 0x0Cu;
+    core.ram[CONTRA_RAM_SPRITE_Y_POS] = 0xC9u;
+
+    step_no_input(&core);
+
+    CHECK(core.ram[CONTRA_RAM_PLAYER_STATE] == 0x03u);
+    CHECK(core.ram[CONTRA_RAM_CPU_SPRITE_BUFFER] == 0x91u);
+
+    core.ram[CONTRA_RAM_LEVEL_END_LVL_ROUTINE_STATE] = 0x04u;
+    core.ram[CONTRA_RAM_SPRITE_Y_POS] = 0x08u;
+    core.ram[CONTRA_RAM_PLAYER_SPRITE_CODE] = 0x03u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_HIDDEN] == 0xFFu);
+    CHECK(core.ram[CONTRA_RAM_CPU_SPRITE_BUFFER] == 0x00u);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_SPRITE_CODE] == 0x03u);
+    return true;
+}
+
+static bool test_held_laser_waits_for_reserved_bullet_slots(void)
+{
+    ContraCore core;
+
+    force_level2_gameplay(&core);
+    core.ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] = 0x00u;
+    core.ram[CONTRA_RAM_PLAYER_STATE] = 0x01u;
+    core.ram[CONTRA_RAM_PLAYER_JUMP_STATUS] = 0x00u;
+    core.ram[CONTRA_RAM_EDGE_FALL_CODE] = 0x00u;
+    core.ram[CONTRA_RAM_PLAYER_HIDDEN] = 0x00u;
+    core.ram[CONTRA_RAM_P1_CURRENT_WEAPON] = 0x04u;
+    core.ram[CONTRA_RAM_CONTROLLER_STATE] = CONTRA_BUTTON_B;
+    core.ram[CONTRA_RAM_CTRL_KNOWN_GOOD] = CONTRA_BUTTON_B;
+
+    /* An old F bullet still occupies laser-reserved slot 0 when L is picked up. */
+    core.ram[CONTRA_RAM_PLAYER_BULLET_SLOT] = 0x03u;
+    core.ram[CONTRA_RAM_PLAYER_BULLET_SPRITE_CODE] = 0x22u;
+    core.ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE] = 0x01u;
+    core.ram[CONTRA_RAM_PLAYER_BULLET_X_POS] = 0x60u;
+    core.ram[CONTRA_RAM_PLAYER_BULLET_Y_POS] = 0x70u;
+
+    step_with_input(&core, CONTRA_BUTTON_B); /* held, not a new B edge */
+
+    CHECK(core.ram[CONTRA_RAM_PLAYER_BULLET_SLOT + 1u] == 0x00u);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_BULLET_SLOT + 2u] == 0x00u);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_BULLET_SLOT + 3u] == 0x00u);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_BULLET_SLOT + 6u] == 0x00u);
+
+    clear_player_bullets(&core);
+    step_with_input(&core, CONTRA_BUTTON_B);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_BULLET_SPRITE_CODE + 0u] != 0x00u);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_BULLET_SPRITE_CODE + 1u] == 0x00u);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_BULLET_SPRITE_CODE + 2u] == 0x00u);
+    CHECK(core.ram[CONTRA_RAM_PLAYER_BULLET_SPRITE_CODE + 3u] == 0x00u);
+    return true;
+}
+
 static bool test_level4_first_room_loads_rom_enemy_data(void)
 {
     ContraCore core;
@@ -2849,6 +2969,10 @@ static bool test_level2_electrocution_shows_shock_sprite(void)
         if ((core.ram[CONTRA_RAM_ELECTROCUTED_TIMER] != 0u) &&
             (core.ram[CONTRA_RAM_PLAYER_SPRITE_CODE] == 0x55u))
         {
+            const uint8_t expected_palette =
+                ((core.ram[CONTRA_RAM_FRAME_COUNTER] & 0x02u) != 0u) ? 0x05u : 0x04u;
+
+            CHECK((core.ram[CONTRA_RAM_SPRITE_ATTR] & 0x07u) == expected_palette);
             shock = true;
             break;
         }
@@ -2904,6 +3028,117 @@ static bool test_level2_indoor_player_walk_animates(void)
     return true;
 }
 
+static bool test_sprite_tiles_do_not_wrap_across_screen_edges(void)
+{
+    ContraCore core;
+    size_t oam_index;
+    bool saw_visible_tile = false;
+
+    contra_core_init(&core);
+    core.startup_wait_frames = 0u;
+    core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0xFFu;
+    core.ram[CONTRA_RAM_CPU_SPRITE_BUFFER + 25u] = 0x2Fu;
+    core.ram[CONTRA_RAM_SPRITE_Y_POS + 25u] = 0x4Au;
+    core.ram[CONTRA_RAM_SPRITE_X_POS + 25u] = 0x0Bu;
+    core.ram[CONTRA_RAM_SPRITE_ATTR + 25u] = 0x05u;
+
+    step_no_input(&core);
+
+    for (oam_index = 0u; oam_index < 64u; ++oam_index)
+    {
+        const size_t offset = oam_index * 4u;
+        const uint8_t y = core.latched_oam[offset + 0u];
+        const uint8_t tile = core.latched_oam[offset + 1u];
+        const uint8_t x = core.latched_oam[offset + 3u];
+
+        if (y < 0xEFu)
+        {
+            saw_visible_tile = true;
+        }
+        CHECK(!((y == 0x42u) && (tile == 0x1Au) && (x == 0xFFu)));
+    }
+
+    CHECK(saw_visible_tile);
+    return true;
+}
+
+static bool test_transition_stall_preserves_oam_rotation(void)
+{
+    ContraCore core;
+
+    contra_core_init(&core);
+    core.startup_wait_frames = 0u;
+    core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0xFFu;
+    core.ram[CONTRA_RAM_OAMDMA_CPU_BUFFER_OFFSET] = 0x40u;
+    core.frame_stall_frames = 0x02u;
+    core.frame_stall_routine_reset = 0x01u;
+
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_OAMDMA_CPU_BUFFER_OFFSET] == 0x40u);
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_OAMDMA_CPU_BUFFER_OFFSET] == 0x8Cu);
+
+    core.frame_stall_frames = 0x01u;
+    step_no_input(&core);
+    CHECK(core.ram[CONTRA_RAM_OAMDMA_CPU_BUFFER_OFFSET] == 0x8Cu);
+    return true;
+}
+
+static bool test_level3_boss_fireball_animates_mirroring(void)
+{
+    ContraCore core;
+    const uint8_t slot = 4u;
+
+    force_level2_gameplay(&core);
+    core.ram[CONTRA_RAM_CURRENT_LEVEL] = 0x02u;
+    core.ram[CONTRA_RAM_FRAME_COUNTER] = 0x1Cu;
+    core.ram[CONTRA_RAM_ENEMY_TYPE + slot] = 0x01u;
+    core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] = 0x02u;
+    core.ram[CONTRA_RAM_ENEMY_VAR_1 + slot] = 0x04u;
+    core.ram[CONTRA_RAM_ENEMY_X_POS + slot] = 0xD0u;
+    core.ram[CONTRA_RAM_ENEMY_Y_POS + slot] = 0x40u;
+    core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + slot] = 0x00u;
+    core.ram[CONTRA_RAM_ENEMY_X_VELOCITY_FRACT + slot] = 0x00u;
+    core.ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + slot] = 0x00u;
+    core.ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + slot] = 0x00u;
+
+    step_no_input(&core);
+
+    CHECK(core.ram[CONTRA_RAM_ENEMY_SPRITES + slot] == 0x79u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + slot] == 0x81u);
+    return true;
+}
+
+static bool test_level1_red_turret_variant_fully_emerges(void)
+{
+    ContraCore core;
+    const uint8_t slot = 15u;
+    unsigned i;
+
+    contra_core_init(&core);
+    CHECK(run_until_gameplay(&core, 2400u));
+
+    for (i = 0u; i < 16u; ++i)
+    {
+        core.ram[CONTRA_RAM_ENEMY_ROUTINE + i] = 0u;
+        core.l1_supertile[i] = 0xFFu;
+    }
+
+    core.ram[CONTRA_RAM_ENEMY_TYPE + slot] = 0x07u;
+    core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] = 0x03u;
+    core.ram[CONTRA_RAM_ENEMY_ATTRIBUTES + slot] = 0x01u;
+    core.ram[CONTRA_RAM_ENEMY_FRAME + slot] = 0x03u;
+    core.ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + slot] = 0x01u;
+    core.ram[CONTRA_RAM_ENEMY_X_POS + slot] = 0x7Au;
+    core.ram[CONTRA_RAM_ENEMY_Y_POS + slot] = 0x40u;
+
+    step_no_input(&core);
+
+    CHECK(core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x04u);
+    CHECK(core.l1_supertile[slot] == 0x11u);
+    return true;
+}
+
 int main(void)
 {
     const TestCase tests[] = {
@@ -2937,6 +3172,10 @@ int main(void)
         {"level2_demo_p2_survives_high_descending_bullet", test_level2_demo_p2_survives_high_descending_bullet},
         {"level2_boss_room_loads_rom_enemy_data", test_level2_boss_room_loads_rom_enemy_data},
         {"level2_boss_room_wall_cannons_fire_projectiles", test_level2_boss_room_wall_cannons_fire_projectiles},
+        {"level2_boss_room_uses_boss_player_sprite_table", test_level2_boss_room_uses_boss_player_sprite_table},
+        {"level2_boss_eye_flash_uses_frame_counter_bit_2", test_level2_boss_eye_flash_uses_frame_counter_bit_2},
+        {"level2_end_elevator_sprite_survives_player_state_3", test_level2_end_elevator_sprite_survives_player_state_3},
+        {"held_laser_waits_for_reserved_bullet_slots", test_held_laser_waits_for_reserved_bullet_slots},
         {"level4_first_room_loads_rom_enemy_data", test_level4_first_room_loads_rom_enemy_data},
         {"level4_first_room_renders_wall_core_target", test_level4_first_room_renders_wall_core_target},
         {"level4_debug_env_lives_and_weapon", test_level4_debug_env_lives_and_weapon},
@@ -2962,6 +3201,10 @@ int main(void)
         {"level2_killed_indoor_soldier_explodes_not_freezes", test_level2_killed_indoor_soldier_explodes_not_freezes},
         {"level2_electrocution_shows_shock_sprite", test_level2_electrocution_shows_shock_sprite},
         {"level2_indoor_player_walk_animates", test_level2_indoor_player_walk_animates},
+        {"sprite_tiles_do_not_wrap_across_screen_edges", test_sprite_tiles_do_not_wrap_across_screen_edges},
+        {"transition_stall_preserves_oam_rotation", test_transition_stall_preserves_oam_rotation},
+        {"level3_boss_fireball_animates_mirroring", test_level3_boss_fireball_animates_mirroring},
+        {"level1_red_turret_variant_fully_emerges", test_level1_red_turret_variant_fully_emerges},
         {"broad_weapon_gameover_and_alt_graphics_matrix", test_broad_weapon_gameover_and_alt_graphics_matrix},
         {"broad_player_ui_and_end_level_matrix", test_broad_player_ui_and_end_level_matrix}
     };

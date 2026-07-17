@@ -78,6 +78,46 @@ static uint32_t fnv1a_bytes(const void *data, size_t length)
     return hash;
 }
 
+static void format_visible_oam(
+    const uint8_t oam[0x100u],
+    char *output,
+    size_t output_size
+)
+{
+    size_t length = 0u;
+    unsigned slot;
+
+    if (output_size == 0u)
+    {
+        return;
+    }
+    output[0] = '\0';
+    for (slot = 0u; slot < 64u; ++slot)
+    {
+        const unsigned offset = slot * 4u;
+
+        if (oam[offset] < 0xEFu)
+        {
+            const int written = snprintf(
+                output + length,
+                output_size - length,
+                "%u:%02X:%02X:%02X:%02X|",
+                slot,
+                (unsigned)oam[offset],
+                (unsigned)oam[offset + 1u],
+                (unsigned)(oam[offset + 2u] & 0xE3u),
+                (unsigned)oam[offset + 3u]);
+
+            if ((written < 0) || ((size_t)written >= (output_size - length)))
+            {
+                output[output_size - 1u] = '\0';
+                return;
+            }
+            length += (size_t)written;
+        }
+    }
+}
+
 static void fill_ppu_dump(uint8_t *dump, const ContraCore *core)
 {
     unsigned addr;
@@ -348,6 +388,7 @@ int main(int argc, char **argv)
     const unsigned dump_frame = (dump_frame_text != NULL) ? (unsigned)strtoul(dump_frame_text, NULL, 10) : 0u;
     uint8_t native_fc[ALIGNMENT_WINDOW];
     unsigned native_fc_count = 0u;
+    uint8_t displayed_oam[0x100u];
     PlayInputRow *rows;
     bool digest_v2 = false;
     unsigned last_frame;
@@ -366,7 +407,15 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    max_frame = last_frame;
+    /* The input offset maps native frame F to recording frame F+offset.
+       Therefore a negative startup offset needs extra native frames at the
+       end to consume every recorded row; stopping at last_frame would leave
+       the final -offset rows silently untested. */
+    {
+        const int64_t aligned_last_frame = (int64_t)last_frame - (int64_t)input_offset;
+
+        max_frame = (aligned_last_frame > 0) ? (unsigned)aligned_last_frame : 0u;
+    }
     if (max_frame_text != NULL)
     {
         const unsigned limit = (unsigned)strtoul(max_frame_text, NULL, 10);
@@ -424,6 +473,7 @@ int main(int argc, char **argv)
         native_fc_count = ALIGNMENT_WINDOW;
         fprintf(stderr, "resumed from snapshot at frame %u\n", resume_frame);
     }
+    memcpy(displayed_oam, core.latched_oam, sizeof(displayed_oam));
 
     for (frame = resume_frame + 1u; frame <= max_frame; ++frame)
     {
@@ -434,6 +484,7 @@ int main(int argc, char **argv)
         size_t enemies_len = 0u;
         char pbullets[512] = {0};
         size_t pbullets_len = 0u;
+        char visible_oam[1400];
         uint8_t p1_fed;
         uint8_t p2_fed;
         unsigned slot;
@@ -489,8 +540,20 @@ int main(int argc, char **argv)
 
         if (!lag_frame)
         {
+            /* The step renders the OAM latched by the preceding step, then
+               prepares core.latched_oam for the next frame. Preserve the former
+               so telemetry describes what was actually displayed. */
+            memcpy(displayed_oam, core.latched_oam, sizeof(displayed_oam));
             contra_core_set_input(&core, &input);
             contra_core_step_frame(&core);
+        }
+        if ((core.ram[CONTRA_RAM_PPUMASK_SETTINGS] & 0x10u) != 0u)
+        {
+            format_visible_oam(displayed_oam, visible_oam, sizeof(visible_oam));
+        }
+        else
+        {
+            visible_oam[0] = '\0';
         }
 
         if (native_fc_count < ALIGNMENT_WINDOW)
@@ -567,7 +630,7 @@ int main(int argc, char **argv)
                     size_t size;
                 } dumps[] = {
                     {ram_dump_path, core.ram, sizeof(core.ram)},
-                    {oam_dump_path, core.latched_oam, sizeof(core.latched_oam)},
+                    {oam_dump_path, displayed_oam, sizeof(displayed_oam)},
                     {nametable_dump_path, core.ppu_nametable, sizeof(core.ppu_nametable)},
                     {palette_dump_path, core.ppu_palette, sizeof(core.ppu_palette)},
                     {framebuffer_dump_path, core.framebuffer, sizeof(core.framebuffer)},
@@ -630,7 +693,7 @@ int main(int argc, char **argv)
             "\"seq\":%u,\"p2_seq\":%u,\"sprite\":%u,\"p2_sprite\":%u,"
             "\"new_life\":%u,\"p2_new_life\":%u,\"inv\":%u,\"p2_inv\":%u,"
             "\"lives\":%u,\"game_over\":%u,\"p2_game_over\":%u,\"demo_end\":%u,"
-            "\"oam_offset\":%u,\"enemies\":\"%s\",\"pbul\":\"%s\","
+            "\"oam_offset\":%u,\"enemies\":\"%s\",\"pbul\":\"%s\",\"voam\":\"%s\","
             "\"ram_hash\":\"%08X\",\"pattern_hash\":\"%08X\",\"nametable_hash\":\"%08X\","
             "\"palette_hash\":\"%08X\",\"framebuffer_hash\":\"%08X\"",
             frame,
@@ -700,6 +763,7 @@ int main(int argc, char **argv)
             (unsigned)ram[CONTRA_RAM_OAMDMA_CPU_BUFFER_OFFSET],
             enemies,
             pbullets,
+            visible_oam,
             fnv1a_bytes(core.ram, sizeof(core.ram)),
             fnv1a_bytes(core.ppu_pattern, sizeof(core.ppu_pattern)),
             fnv1a_bytes(core.ppu_nametable, sizeof(core.ppu_nametable)),

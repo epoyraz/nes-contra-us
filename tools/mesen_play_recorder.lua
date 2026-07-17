@@ -26,6 +26,11 @@
 --                                      reproduces the session exactly -- including
 --                                      DPCM controller glitches -- with the current
 --                                      schema's extra fields)
+--   CONTRA_MESEN_PLAY_REPLAY_INPUT_OFFSET
+--                                      add N to the recording frame used for each
+--                                      headless frame (for example -2 when a cold
+--                                      test-runner start is two frames behind the
+--                                      original power-cycle recording)
 --   CONTRA_MESEN_PLAY_DUMP_FRAME       with the paths below, dump state at one frame
 --   CONTRA_MESEN_PLAY_DUMP_FRAMES      comma-separated frame list; each dump file gets
 --                                      a ".<frame>" suffix appended to the path
@@ -37,7 +42,12 @@
 --                                      ~2200 extra RAM reads per frame -- fine
 --                                      headless, may lag a live session.
 --
--- Schema v5 (this recorder) adds per row: score/p2_score (P1/P2 score16),
+-- Schema v6 (this recorder) adds `voam`: the visible entries in the PPU OAM
+-- that produced this frame, formatted as index:y:tile:attr:x groups. Unlike the
+-- legacy heavy `oam` field (the CPU shadow buffer for the next DMA), this catches
+-- rendered sprite placement while ignoring stale bytes in hidden OAM entries.
+--
+-- Schema v5 added per row: score/p2_score (P1/P2 score16),
 -- wstr ($2F), atkflag ($8E), gen (soldier-generator timer:routine:x:y:
 -- genscreen:count), zp ($06-$0F hex), lag (FRAME_COUNTER froze vs previous
 -- row), and in heavy mode bgcol (BG_COLLISION_DATA $0680-$06FF hex) and
@@ -48,6 +58,7 @@ local output_path = os.getenv("CONTRA_MESEN_PLAY_RECORDING_JSONL") or "contra_pl
 local max_frame = tonumber(os.getenv("CONTRA_MESEN_PLAY_MAX_FRAME") or "0")
 local no_reset = os.getenv("CONTRA_MESEN_PLAY_NO_RESET") == "1"
 local replay_path = os.getenv("CONTRA_MESEN_PLAY_REPLAY_JSONL")
+local replay_input_offset = tonumber(os.getenv("CONTRA_MESEN_PLAY_REPLAY_INPUT_OFFSET") or "0")
 local dump_frame = tonumber(os.getenv("CONTRA_MESEN_PLAY_DUMP_FRAME") or "0")
 local dump_frames = {}
 do
@@ -165,8 +176,9 @@ end
 local function on_input_polled()
     if replay_p1 ~= nil then
         -- the poll belongs to the frame whose endFrame has not fired yet
-        local v1 = replay_p1[frame + 1] or 0
-        local v2 = replay_p2[frame + 1] or 0
+        local source_frame = frame + 1 + replay_input_offset
+        local v1 = replay_p1[source_frame] or 0
+        local v2 = replay_p2[source_frame] or 0
 
         emu.setInput(buttons_from_byte(v1), 0)
         -- Mesen 2.1.1 quirk (field-tested): emu.setInput(table, 1) does NOT
@@ -295,6 +307,7 @@ local prev_frame_counter = -1
 local function emit_frame()
     local enemies = {}
     local pbullets = {}
+    local visible_oam = {}
 
     if dump_frame ~= 0 and frame == dump_frame then
         dump_state(nil)
@@ -339,6 +352,25 @@ local function emit_frame()
                 read_ram(0x3F8 + slot),
                 read_ram(0x438 + slot)
             )
+        end
+    end
+
+    -- PPU OAM is the sprite state actually displayed during this frame. Only
+    -- include visible entries: the ROM hides unused entries by writing Y=$F4
+    -- while deliberately leaving their tile/attribute/X bytes stale.
+    if (read_ram(0xFE) & 0x10) ~= 0 then
+        for slot = 0, 63 do
+            local addr = slot * 4
+            local y = emu.read(addr, OAM, false)
+            if y < 0xEF then
+                visible_oam[#visible_oam + 1] = string.format(
+                    "%u:%02X:%02X:%02X:%02X|",
+                    slot,
+                    y,
+                    emu.read(addr + 1, OAM, false),
+                    emu.read(addr + 2, OAM, false) & 0xE3,
+                    emu.read(addr + 3, OAM, false))
+            end
         end
     end
 
@@ -419,7 +451,7 @@ local function emit_frame()
         "\"seq\":%u,\"p2_seq\":%u,\"sprite\":%u,\"p2_sprite\":%u," ..
         "\"new_life\":%u,\"p2_new_life\":%u,\"inv\":%u,\"p2_inv\":%u," ..
         "\"lives\":%u,\"game_over\":%u,\"p2_game_over\":%u,\"demo_end\":%u," ..
-        "\"oam_offset\":%u,\"enemies\":\"%s\",\"pbul\":\"%s\"," ..
+        "\"oam_offset\":%u,\"enemies\":\"%s\",\"pbul\":\"%s\",\"voam\":\"%s\"," ..
         "\"ram_hash\":\"00000000\",\"pattern_hash\":\"00000000\",\"nametable_hash\":\"00000000\"," ..
         "\"palette_hash\":\"00000000\",\"framebuffer_hash\":\"00000000\"%s}\n",
         frame,
@@ -490,6 +522,7 @@ local function emit_frame()
         read_ram(0x35),
         table.concat(enemies),
         table.concat(pbullets),
+        table.concat(visible_oam),
         v5_fields
     ))
     -- live recording flushes every frame for crash-safety; the headless
@@ -553,7 +586,7 @@ if not no_reset and (booted_frames == nil or booted_frames > 10) then
 end
 
 output:write(string.format(
-    "{\"meta\":1,\"recorder\":\"mesen_play_recorder\",\"schema\":5,\"raw_source\":\"%s\"}\n",
+    "{\"meta\":1,\"recorder\":\"mesen_play_recorder\",\"schema\":6,\"raw_source\":\"%s\"}\n",
     raw_source
 ))
 output:flush()
