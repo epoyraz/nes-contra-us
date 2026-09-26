@@ -1807,8 +1807,11 @@ static void contra_render_level_background(ContraCore *core)
     const uint8_t *const ram = core->ram;
     const size_t visible_super_rows = (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u) ? 8u : 7u;
     const size_t visible_tile_rows = visible_super_rows * 4u;
+    /* The indoor 224px nametable view starts at scanline 8, centered within
+       the 240px frame. Bottom-aligning it at 16px left a black strip above
+       the room and made the floor sit eight pixels below the enemy sprites. */
     const size_t origin_y = (CONTRA_FRAMEBUFFER_HEIGHT > (visible_tile_rows * 8u))
-        ? (CONTRA_FRAMEBUFFER_HEIGHT - (visible_tile_rows * 8u))
+        ? ((CONTRA_FRAMEBUFFER_HEIGHT - (visible_tile_rows * 8u)) / 2u)
         : 0u;
     size_t visible_tile_columns = 32u;
     size_t tile_y;
