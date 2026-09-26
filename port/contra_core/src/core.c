@@ -1513,7 +1513,10 @@ static void contra_write_cpu_sprite_to_oam(
         const uint8_t sprite_y = (uint8_t)(base_y - 0x08u);
         const uint8_t sprite_x = (uint8_t)(base_x - 0x04u);
 
-        contra_write_oam_entry(oam, offset, remaining, sprite_y, tile, attr, sprite_x);
+        if (base_x >= 0x04u)
+        {
+            contra_write_oam_entry(oam, offset, remaining, sprite_y, tile, attr, sprite_x);
+        }
         return;
     }
 
@@ -1543,12 +1546,20 @@ static void contra_write_cpu_sprite_to_oam(
                 const uint8_t sprite_y = (sprite_effect & 0x80u) != 0u
                     ? (uint8_t)(base_y + (uint8_t)(0xF0u - adjusted_relative_y))
                     : (uint8_t)(base_y + adjusted_relative_y);
-                const uint8_t sprite_x = (sprite_effect & 0x40u) != 0u
-                    ? (uint8_t)(base_x + (uint8_t)(0xF8u - relative_x))
-                    : (uint8_t)(base_x + relative_x);
+                const uint8_t x_offset = (sprite_effect & 0x40u) != 0u
+                    ? (uint8_t)(0xF8u - relative_x)
+                    : relative_x;
+                const int x_position = (int)base_x + (int)(int8_t)x_offset;
                 const uint8_t attr = (uint8_t)(((tile_attr & attr_mask) | attr_base) ^ sprite_effect);
 
-                contra_write_oam_entry(oam, offset, remaining, sprite_y, tile, attr, sprite_x);
+                /* load_sprite_to_cpu_mem (bank1) skips a tile when ADC of its
+                   signed X offset crosses either edge. Keeping the wrapped
+                   byte makes a capsule exiting right flash on the left. */
+                if ((x_position >= 0) && (x_position <= 0xFF))
+                {
+                    contra_write_oam_entry(oam, offset, remaining, sprite_y, tile, attr,
+                                           (uint8_t)x_position);
+                }
                 --sprite_tile_count;
             }
         }
@@ -1801,10 +1812,27 @@ static void contra_render_level_background(ContraCore *core)
         : 0u;
     size_t visible_tile_columns = 32u;
     size_t tile_y;
+    uint8_t indoor_visible_supertiles[CONTRA_LEVEL_SCREEN_SUPERTILES_SIZE];
+    const uint8_t *render_supertiles = core->level_screen_supertiles;
 
     if (!contra_load_rom_image())
     {
         return;
+    }
+
+    /* The indoor walk streams the NEXT perspective screen into the off-screen
+       nametable for 32 frames. level_screen_supertiles is that write buffer;
+       the visible nametable stays on the current screen until the swap advances
+       LEVEL_SCREEN_SCROLL_OFFSET. Keep the render view on the visible screen. */
+    if ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0x01u) &&
+        (ram[CONTRA_RAM_INDOOR_SCROLL] != 0u))
+    {
+        const uint8_t visible_screen = (uint8_t)(
+            (ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] * 4u) +
+            ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET]);
+
+        contra_decode_level_screen_supertiles(core, visible_screen, indoor_visible_supertiles, 0u);
+        render_supertiles = indoor_visible_supertiles;
     }
 
     /* Boss room: recompose the flat mechanical-wall super-tile layout each frame.
@@ -1857,7 +1885,7 @@ static void contra_render_level_background(ContraCore *core)
             const size_t supertile_column = tile_x / 4u;
             const size_t supertile_row = tile_y / 4u;
             const size_t supertile_offset = (supertile_row * 8u) + supertile_column;
-            const uint8_t supertile_index = core->level_screen_supertiles[supertile_offset];
+            const uint8_t supertile_index = render_supertiles[supertile_offset];
             const size_t supertile_data_addr = (size_t)supertile_index * 16u;
             const uint16_t supertile_ptr = (uint16_t)(
                 (uint16_t)ram[CONTRA_RAM_LEVEL_SUPERTILE_DATA_PTR] |
@@ -11752,7 +11780,10 @@ static bool contra_rom_red_turret_load_supertile(ContraCore *core, uint8_t x)
     idx = ram[CONTRA_RAM_ENEMY_FRAME + x];
     if ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x01u) != 0u)
     {
-        idx = (uint8_t)(idx + 3u); /* alternate background variant */
+        /* bank0: red_turret_load_supertile uses LSR on attributes, then
+           ADC #$03 with the bit-0 carry still set. The alternate variant
+           therefore starts four table entries later, not three. */
+        idx = (uint8_t)(idx + 4u);
     }
     {
         const uint8_t supertile = contra_red_turret_supertile_tbl[(idx < 11u) ? idx : 0u];
@@ -21909,14 +21940,11 @@ static void contra_render_level_2_wall_structures(ContraCore *core)
         }
     }
 
-    /* back-wall blow-open: 4 destroyed quadrant super-tiles at fixed positions,
-       drawn one-by-one by wall_core_routine_08 and persisting until the room
-       reloads (same positions the invented path uses). Only valid while the room is
-       static -- during the walk-into-screen transition (INDOOR_SCROLL != 0) the room
-       re-composes at the perspective scroll offsets, so these fixed-position quadrants
-       would float as a misaligned block over the receding back wall. */
+    /* The destroyed core remains on the visible first perspective screen while
+       the next screen is streamed off-screen. Once the first swap advances the
+       perspective offset, its fixed-position quadrants are no longer visible. */
     if ((core->l2_blowopen_quadrants != 0u) &&
-        (core->ram[CONTRA_RAM_INDOOR_SCROLL] == 0u))
+        (core->ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] == 0u))
     {
         unsigned q;
 
@@ -21926,8 +21954,8 @@ static void contra_render_level_2_wall_structures(ContraCore *core)
             {
                 contra_render_level_2_overlay_supertile(
                     core,
-                    (int)contra_level_2_wall_core_update_x_tbl[q],
-                    (int)contra_level_2_wall_core_update_y_tbl[q],
+                    ((int)contra_level_2_wall_core_update_x_tbl[q] - 12) & ~7,
+                    ((int)contra_level_2_wall_core_update_y_tbl[q] - 12) & ~7,
                     contra_level_2_wall_core_update_supertile_tbl[q]);
             }
         }
