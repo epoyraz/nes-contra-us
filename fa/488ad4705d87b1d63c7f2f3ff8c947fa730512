@@ -1,0 +1,19 @@
+port/contra_core/src/core.c
+  s_13271ee0bacf91::t_ba38451ca586e1 1516-1519,1549-1552,1555-1562,1815-1816,1823-1837,1888,11783-11786,21943-21945,21947,21957-21958
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fa488ad4705d87b1d63c7f2f3ff8c947fa730512",
+  "prompts": {},
+  "sessions": {
+    "s_13271ee0bacf91": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d0b20649-130f-4c95-9e8d-81a47e95607e",
+        "model": "unknown"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
