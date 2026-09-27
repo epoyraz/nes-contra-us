@@ -128,10 +128,17 @@ if(CONTRA_PORT_BUILD_TESTS)
     )
 
     if(CONTRA_PORT_ENABLE_MESEN_TRACE_TESTS)
-        find_program(CONTRA_MESEN_EXECUTABLE NAMES Mesen.exe Mesen mesen)
+        find_program(CONTRA_MESEN_EXECUTABLE NAMES Mesen.exe Mesen mesen
+            HINTS "$ENV{HOME}/Applications/Mesen.app/Contents/MacOS"
+                  "/Applications/Mesen.app/Contents/MacOS")
+        if(EXISTS "${CMAKE_SOURCE_DIR}/contra.nes")
+            set(CONTRA_MESEN_ROM "${CMAKE_SOURCE_DIR}/contra.nes")
+        elseif(EXISTS "${CMAKE_SOURCE_DIR}/baserom.nes")
+            set(CONTRA_MESEN_ROM "${CMAKE_SOURCE_DIR}/baserom.nes")
+        endif()
         set(CONTRA_MESEN_TRACE_JSONL "${CMAKE_CURRENT_BINARY_DIR}/mesen_checkpoint_trace.jsonl")
 
-        if(CONTRA_MESEN_EXECUTABLE AND EXISTS "${CMAKE_SOURCE_DIR}/contra.nes")
+        if(CONTRA_MESEN_EXECUTABLE AND CONTRA_MESEN_ROM)
             add_executable(contra_mesen_trace_export_tests
                 tests/mesen_trace_export_tests.c
             )
@@ -162,10 +169,10 @@ if(CONTRA_PORT_BUILD_TESTS)
                     --testRunner
                     --enableStdout
                     --doNotSaveSettings
-                    --timeout=30
+                    --timeout=900
                     --debug.scriptWindow.allowIoOsAccess=true
+                    "${CONTRA_MESEN_ROM}"
                     "${CMAKE_SOURCE_DIR}/tools/mesen_checkpoint_trace.lua"
-                    "${CMAKE_SOURCE_DIR}/contra.nes"
             )
 
             add_test(
@@ -195,8 +202,54 @@ if(CONTRA_PORT_BUILD_TESTS)
             set_tests_properties(contra_checkpoint_trace_compare_level2_room_chain_semantics PROPERTIES
                 DEPENDS "contra_mesen_checkpoint_trace_export;contra_checkpoint_trace_export"
             )
+
+            find_package(Python3 COMPONENTS Interpreter REQUIRED)
+            if(NOT CONTRA_PORT_VISUAL_MESEN_RECORDING)
+                set(CONTRA_PORT_VISUAL_MESEN_RECORDING
+                    "${CMAKE_CURRENT_BINARY_DIR}/indoor_visual_recording.jsonl")
+                set(CONTRA_PORT_VISUAL_NATIVE_RECORDING "${CONTRA_PORT_VISUAL_MESEN_RECORDING}")
+                add_test(
+                    NAME contra_indoor_visual_recording
+                    COMMAND "${Python3_EXECUTABLE}"
+                        "${CMAKE_SOURCE_DIR}/tools/prepare_indoor_visual_recording.py"
+                        "${CONTRA_PORT_VISUAL_MESEN_RECORDING}"
+                )
+                set_tests_properties(contra_indoor_visual_recording PROPERTIES
+                    FIXTURES_SETUP indoor_visual_recording)
+            else()
+                if(NOT EXISTS "${CONTRA_PORT_VISUAL_MESEN_RECORDING}")
+                    message(FATAL_ERROR "Visual parity recording not found: ${CONTRA_PORT_VISUAL_MESEN_RECORDING}")
+                endif()
+                if(NOT CONTRA_PORT_VISUAL_NATIVE_RECORDING)
+                    set(CONTRA_PORT_VISUAL_NATIVE_RECORDING "${CONTRA_PORT_VISUAL_MESEN_RECORDING}")
+                endif()
+                if(NOT EXISTS "${CONTRA_PORT_VISUAL_NATIVE_RECORDING}")
+                    message(FATAL_ERROR "Native visual parity recording not found: ${CONTRA_PORT_VISUAL_NATIVE_RECORDING}")
+                endif()
+            endif()
+            add_test(
+                NAME contra_indoor_visual_parity
+                COMMAND "${Python3_EXECUTABLE}"
+                    "${CMAKE_SOURCE_DIR}/tools/indoor_visual_check.py"
+                    "${CONTRA_MESEN_EXECUTABLE}"
+                    "$<TARGET_FILE:contra_play_replay_trace>"
+                    "${CONTRA_MESEN_ROM}"
+                    "${CONTRA_PORT_VISUAL_MESEN_RECORDING}"
+                    "${CONTRA_PORT_VISUAL_NATIVE_RECORDING}"
+                    "${CONTRA_PORT_VISUAL_FRAME}"
+                    "${CONTRA_PORT_VISUAL_MAX_MISMATCHES}"
+                    "${CMAKE_CURRENT_BINARY_DIR}/indoor_visual"
+            )
+            if(TARGET Python3::Interpreter AND
+               CONTRA_PORT_VISUAL_MESEN_RECORDING STREQUAL "${CMAKE_CURRENT_BINARY_DIR}/indoor_visual_recording.jsonl")
+                set_tests_properties(contra_indoor_visual_parity PROPERTIES
+                    FIXTURES_REQUIRED indoor_visual_recording)
+            endif()
         else()
-            message(STATUS "Mesen original-ROM trace tests disabled: Mesen executable or contra.nes not found.")
+            if(CONTRA_PORT_REQUIRE_MESEN_TRACE_TESTS OR CONTRA_PORT_REQUIRE_VISUAL_PARITY_TEST OR CONTRA_PORT_VISUAL_MESEN_RECORDING)
+                message(FATAL_ERROR "Mesen trace tests require Mesen and contra.nes or baserom.nes. Set CONTRA_MESEN_EXECUTABLE and place a ROM in the source root.")
+            endif()
+            message(STATUS "Mesen original-ROM trace tests disabled: Mesen executable or ROM not found.")
         endif()
     endif()
 endif()

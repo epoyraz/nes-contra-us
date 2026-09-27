@@ -12,7 +12,10 @@ set -e
 
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
-MESEN="${CONTRA_MESEN_APP:-$HOME/Applications/Mesen.app}/Contents/MacOS/Mesen"
+MESEN="${CONTRA_RENDER_MESEN_EXECUTABLE:-${CONTRA_MESEN_APP:-$HOME/Applications/Mesen.app}/Contents/MacOS/Mesen}"
+NATIVE="${CONTRA_RENDER_NATIVE_EXECUTABLE:-$ROOT/build/port/contra_play_replay_trace}"
+ROM="${CONTRA_RENDER_ROM:-$ROOT/baserom.nes}"
+MAX_MISMATCHES="${CONTRA_RENDER_MAX_MISMATCHES:-0}"
 
 [ $# -ge 1 ] || { echo "usage: tools/render_check.sh [RECORDING.jsonl] FRAME [FRAME...]" >&2; exit 2; }
 
@@ -52,7 +55,7 @@ CONTRA_MESEN_PLAY_PPU_DUMP_PATH="$ROOT/tmp/render/mesen_ppu.bin" \
 CONTRA_MESEN_PLAY_SUPERTILE_DUMP_PATH="$ROOT/tmp/render/mesen_supertile.bin" \
 CONTRA_MESEN_PLAY_MAX_FRAME="$MAXF" \
 "$MESEN" --testRunner --doNotSaveSettings --timeout=900 \
-    "$ROOT/baserom.nes" "$ROOT/tools/mesen_play_recorder.lua" > /dev/null 2>&1
+    "$ROM" "$ROOT/tools/mesen_play_recorder.lua" > /dev/null 2>&1
 
 echo "== native replay (telemetry dumps at: $FRAMES)"
 CONTRA_NATIVE_PLAY_INPUT="$NATIVE_INPUT" \
@@ -66,14 +69,14 @@ CONTRA_NATIVE_PLAY_CHR_DUMP_PATH="$ROOT/tmp/render/native_chr.bin" \
 CONTRA_NATIVE_PLAY_PPU_DUMP_PATH="$ROOT/tmp/render/native_ppu.bin" \
 CONTRA_NATIVE_PLAY_SUPERTILE_DUMP_PATH="$ROOT/tmp/render/native_supertile.bin" \
 CONTRA_NATIVE_PLAY_MAX_FRAME="$MAXF" \
-./build/port/contra_play_replay_trace "$NATIVE_RECORDING" > /dev/null
+"$NATIVE" "$NATIVE_RECORDING" > /dev/null
 
 STATUS=0
 for f in "$@"; do
     echo "== frame $f"
     if python3 tools/render_diff.py \
         "tmp/render/mesen_fb.bin.$f" "tmp/render/native_fb.bin.$f" \
-        "tmp/render/$f"; then
+        "tmp/render/$f" "$MAX_MISMATCHES"; then
         :
     else
         STATUS=1

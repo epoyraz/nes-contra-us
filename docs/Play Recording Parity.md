@@ -124,6 +124,17 @@ triptychs (`mesen | native | diff`). The diff is palette-independent: it
 compares the rendered structure after deriving a best color bijection, so a
 different RGB palette does not mask tile/sprite/scroll mistakes.
 
+When Mesen and the ROM are available, CTest automatically generates the
+checked-in indoor input fixture and runs `contra_indoor_visual_parity`. The
+default checkpoint is frame 9321 and the threshold is 1200 mismatched pixels.
+This threshold was reviewed against the recorded indoor frame: 887 pixels
+differ around actors and effects; a synthetic eight-pixel image shift produces
+over 31,000 differences. The fixture stores controller, RNG, and frame-counter
+bytes only, with no ROM graphics or framebuffer pixels. For another session,
+set `CONTRA_PORT_VISUAL_MESEN_RECORDING`,
+`CONTRA_PORT_VISUAL_NATIVE_RECORDING`, `CONTRA_PORT_VISUAL_FRAME`, and
+`CONTRA_PORT_VISUAL_MAX_MISMATCHES` when configuring CMake.
+
 For each requested frame it also writes matching sidecar dumps:
 
 | Surface | Mesen dump | Native dump | Notes |

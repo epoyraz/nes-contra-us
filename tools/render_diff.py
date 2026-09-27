@@ -14,7 +14,7 @@ collisions, e.g. the multiple blacks) a small false-positive count appears --
 judge by the diff image, not by a zero threshold.
 
 Usage:
-    render_diff.py MESEN.bin NATIVE.bin [OUT_PREFIX]
+    render_diff.py MESEN.bin NATIVE.bin [OUT_PREFIX] [MAX_MISMATCHES]
 
 Writes OUT_PREFIX.png: a triptych (mesen | native | diff) where diff pixels
 are red on the grayscale mesen image. Prints the mismatch count and the
@@ -69,6 +69,9 @@ def main():
         raise SystemExit(__doc__)
     mesen_path, native_path = sys.argv[1], sys.argv[2]
     out_prefix = sys.argv[3] if len(sys.argv) > 3 else "render_diff"
+    max_mismatches = int(sys.argv[4]) if len(sys.argv) > 4 else 0
+    if max_mismatches < 0:
+        raise SystemExit("max_mismatches must be non-negative")
 
     mesen = load_u32(mesen_path)
     native = load_u32(native_path)
@@ -103,7 +106,8 @@ def main():
         rows.append(bytes(row))
     write_png(out_prefix + ".png", W * 3, H, rows)
     print(f"wrote {out_prefix}.png  (mesen | native | diff)")
-    return 0 if not mism else 1
+    return 0 if len(mism) <= max_mismatches else 1
 
 
-sys.exit(main())
+if __name__ == "__main__":
+    sys.exit(main())

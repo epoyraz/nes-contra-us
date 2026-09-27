@@ -21,7 +21,8 @@ repeatable tests, coverage output, and a machine-readable routine ledger.
    `contra_checkpoint_trace_export_tests` validates that exported schema,
    ordering, frame anchors, scenario names, and hash fields. The
    `contra_checkpoint_trace_compare_self` CTest target keeps the JSONL
-   comparator compiled and runnable. When Mesen and `contra.nes` are available,
+   comparator compiled and runnable. When Mesen and `contra.nes` or
+   `baserom.nes` are available,
    `contra_mesen_checkpoint_trace_export` runs the original ROM in Mesen's
    `--testRunner` mode through `tools/mesen_checkpoint_trace.lua`, and
    `contra_mesen_trace_export_tests` validates the original-ROM JSONL schema.
@@ -44,6 +45,21 @@ repeatable tests, coverage output, and a machine-readable routine ledger.
    and boss-room entry with relative-frame and player-position tolerances.
    Full strict hash comparison remains expected to fail until the native
    timing/state model is brought into parity.
+
+   The newly enabled Mesen comparisons currently expose two failing gates:
+   the native attract exporter captures only the first two Level 2 rows while
+   Mesen captures six, and the seeded boss-defeat row differs in relative
+   frame, lives, and indoor-clear state. These are open parity findings; do not
+   treat a passing native checkpoint hash test as ROM equivalence.
+
+   On macOS, CMake also looks for Mesen in the user's Applications folder.
+   Set `CONTRA_PORT_REQUIRE_MESEN_TRACE_TESTS=ON` for a fail-closed ROM trace
+   configuration. With Mesen and the ROM available, CTest generates the
+   checked-in indoor input fixture and runs `contra_indoor_visual_parity`.
+   Set `CONTRA_PORT_REQUIRE_VISUAL_PARITY_TEST=ON` to fail configuration if
+   that gate cannot run. Custom recordings may be supplied with
+   `CONTRA_PORT_VISUAL_MESEN_RECORDING` and
+   `CONTRA_PORT_VISUAL_NATIVE_RECORDING`.
 
 2. C code coverage
 

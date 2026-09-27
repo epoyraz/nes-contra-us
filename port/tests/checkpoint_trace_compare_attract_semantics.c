@@ -243,10 +243,14 @@ int main(int argc, char **argv)
         printf("FAIL attract trace row count expected=%u actual=%u\n",
                (unsigned)expected.count,
                (unsigned)actual.count);
-        return 1;
+        for (index = actual.count; index < expected.count; ++index)
+        {
+            printf("FAIL native attract trace missing %s\n", expected.rows[index].name);
+        }
+        ++failures;
     }
 
-    for (index = 0u; index < expected.count; ++index)
+    for (index = 0u; index < expected.count && index < actual.count; ++index)
     {
         if (!compare_row(&expected.rows[index], &actual.rows[index], (unsigned)(index + 1u)))
         {
