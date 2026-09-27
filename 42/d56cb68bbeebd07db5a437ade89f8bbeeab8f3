@@ -1,0 +1,56 @@
+tools/indoor_visual_check.py
+  s_9d839740e616cd::t_973ba5eb0428bc 1-64
+"docs/Play Recording Parity.md"
+  s_9d839740e616cd::t_0e7aed1580acd5 137
+  s_9d839740e616cd::t_b2f76b2e530de7 127-136
+tools/render_check.sh
+  s_9d839740e616cd::t_c9930dadcfb7e3 15-18,58,72,79
+port/tests/checkpoint_trace_tests.c
+  s_9d839740e616cd::t_2dba7e27b2751d 380-384
+  s_9d839740e616cd::t_f7a21cc7f764b9 83-84,88-92
+tools/prepare_indoor_visual_recording.py
+  s_9d839740e616cd::t_563a81fc5dff5b 1-47
+CMakeLists.txt
+  s_9d839740e616cd::t_3d75a126d959dc 21-22,26
+  s_9d839740e616cd::t_bf872183b735d9 15,23-25
+  s_9d839740e616cd::t_80b956ec5fcbb4 27-30
+  s_9d839740e616cd::t_79230c3222e410 16-19
+  s_9d839740e616cd::t_6fb8d20f105f71 13-14
+  s_9d839740e616cd::t_8cd1fde23a292d 20
+tools/fixtures/indoor_9321_inputs.b64
+  s_9d839740e616cd::t_f6354f9c70341b 1
+"docs/Native Port Reliability.md"
+  s_9d839740e616cd::t_0e7aed1580acd5 24-25,55-56,61
+  s_9d839740e616cd::t_58b2ef9cbfb5f3 49-54
+  s_9d839740e616cd::t_b2f76b2e530de7 57-60,62
+  s_9d839740e616cd::t_7639d50079a31b 63
+port/CMakeLists.txt
+  s_9d839740e616cd::t_6fb8d20f105f71 131,134-138,141,174,250-252
+  s_9d839740e616cd::t_d996b7b5f5a179 206,232-238,240-241
+  s_9d839740e616cd::t_3d75a126d959dc 132-133
+  s_9d839740e616cd::t_b075b3e4dec629 207-219,229-231,239,242-246
+  s_9d839740e616cd::t_79230c3222e410 205,220-228,247
+  s_9d839740e616cd::t_bf872183b735d9 249
+  s_9d839740e616cd::t_fa1f3eac39cefd 172
+tools/render_diff.py
+  s_9d839740e616cd::t_27247488954020 17,112-113
+  s_9d839740e616cd::t_c9930dadcfb7e3 72-74,109
+port/tests/checkpoint_trace_compare_attract_semantics.c
+  s_9d839740e616cd::t_960945c1b02597 246-250,253
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "42d56cb68bbeebd07db5a437ade89f8bbeeab8f3",
+  "prompts": {},
+  "sessions": {
+    "s_9d839740e616cd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e4a9-06d7-7ce2-b662-efb5cc04311b",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
