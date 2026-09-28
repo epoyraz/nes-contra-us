@@ -1,0 +1,45 @@
+tools/boss_visual_check.py
+  s_9d839740e616cd::t_eff358b8527018 1-30,32-40
+  s_9d839740e616cd::t_4c685b9e02791a 31
+port/tests/checkpoint_trace_tests.c
+  s_9d839740e616cd::t_f7af617938c0e1 95-96
+tools/mesen_checkpoint_trace.lua
+  s_9d839740e616cd::t_150b446a8ee3aa 296-297
+  s_9d839740e616cd::t_b51875d3f0d030 350-352
+  s_9d839740e616cd::t_5f555065ca237b 23,151,286-288,295,298-299
+  s_9d839740e616cd::t_2c3ab7ebf0bf0e 289-294
+  s_9d839740e616cd::t_c450d65530ba77 34,75-94,149-150,152
+  s_9d839740e616cd::t_393df6bdc721d4 300-301
+port/tests/checkpoint_trace_export_tests.c
+  s_9d839740e616cd::t_b51875d3f0d030 30-33,38
+port/CMakeLists.txt
+  s_9d839740e616cd::t_f02f9a99309f83 59-67
+  s_9d839740e616cd::t_eff358b8527018 216-224
+port/tools/level2_boss_framebuffer.c
+  s_9d839740e616cd::t_fb99b5246fe951 63-71
+  s_9d839740e616cd::t_2c3ab7ebf0bf0e 55-62
+  s_9d839740e616cd::t_150b446a8ee3aa 8,25-49
+  s_9d839740e616cd::t_f02f9a99309f83 1-7,9-12,14-24,72-99
+  s_9d839740e616cd::t_f1215cdda9dc09 13,50-54
+"docs/Native Port Reliability.md"
+  s_9d839740e616cd::t_4c685b9e02791a 68
+  s_9d839740e616cd::t_3dbe4793ea277e 64-67,69-75
+port/contra_core/src/core.c
+  s_9d839740e616cd::t_aeb7333a763231 1813-1814,1816-1817
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a1248d3c04aa1afa22469061e12dae7c49f1a543",
+  "prompts": {},
+  "sessions": {
+    "s_9d839740e616cd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e4a9-06d7-7ce2-b662-efb5cc04311b",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
