@@ -1,0 +1,25 @@
+port/tests/checkpoint_trace_tests.c
+  s_9d839740e616cd::t_c8ae3839f848e8 511-514,519-521,523-524,526
+  s_9d839740e616cd::t_71bc994626f501 84,384-386,391-403,423-441
+  s_9d839740e616cd::t_311603b73fc754 85-88
+  s_9d839740e616cd::t_6c12a8b42a0c9f 96
+  s_9d839740e616cd::t_781c768c3497c5 442
+"docs/Native Port Reliability.md"
+  s_9d839740e616cd::t_9ed05a93e04e5a 49-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f5e30132a892f37b322091003e3f4859b24126e0",
+  "prompts": {},
+  "sessions": {
+    "s_9d839740e616cd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e4a9-06d7-7ce2-b662-efb5cc04311b",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
