@@ -61,6 +61,18 @@ repeatable tests, coverage output, and a machine-readable routine ledger.
    `CONTRA_PORT_VISUAL_MESEN_RECORDING` and
    `CONTRA_PORT_VISUAL_NATIVE_RECORDING`.
 
+   `contra_level2_boss_visual_parity` separately compares the boss arena 120
+   frames after boss entry, before forcing boss defeat. Both probes must reach
+   the boss room. Its 3,000-pixel mismatch budget accommodates the seeded
+   routes' HUD, player-position, and projectile differences; the former
+   eight-pixel background error produced 21,498 mismatches. This protects boss
+   arena geometry, while synchronized boss combat remains an open parity gate.
+
+   Before interactive validation, configure `CONTRA_PORT_BUILD_SDL=ON` and
+   explicitly build `contra_port_sdl`. An old SDL executable can survive in a
+   build directory after that target is disabled; passing headless tests does
+   not prove that the interactive executable contains the tested code.
+
 2. C code coverage
 
    `CONTRA_PORT_ENABLE_COVERAGE=ON` instruments the native C targets with

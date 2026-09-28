@@ -1810,8 +1810,11 @@ static void contra_render_level_background(ContraCore *core)
     /* The indoor 224px nametable view starts at scanline 8, centered within
        the 240px frame. Bottom-aligning it at 16px left a black strip above
        the room and made the floor sit eight pixels below the enemy sprites. */
+    /* The boss arena switches VERTICAL_SCROLL to $E0 and uses the outdoor
+       nametable placement: its 224px background begins at scanline 16. */
     const size_t origin_y = (CONTRA_FRAMEBUFFER_HEIGHT > (visible_tile_rows * 8u))
-        ? ((CONTRA_FRAMEBUFFER_HEIGHT - (visible_tile_rows * 8u)) / 2u)
+        ? ((CONTRA_FRAMEBUFFER_HEIGHT - (visible_tile_rows * 8u)) /
+           ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] & 0x80u) != 0u ? 1u : 2u))
         : 0u;
     size_t visible_tile_columns = 32u;
     size_t tile_y;

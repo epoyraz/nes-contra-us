@@ -20,6 +20,7 @@ local room_chain_checkpoint_index = 1
 local phase = "level1"
 local room_chain_forced = false
 local boss_damage_started = false
+local boss_visual_settle_frames = 0
 local level1_checkpoints = {
     { name = "level1-title", frame = 180 },
     { name = "level1-gameplay-start", frame = 900 },
@@ -30,6 +31,7 @@ local level1_checkpoints = {
 local RAM = emu.memType.nesInternalRam
 local NAMETABLE = emu.memType.nesNametableRam
 local PALETTE = emu.memType.nesPaletteRam
+local boss_framebuffer_path = os.getenv("CONTRA_MESEN_BOSS_FRAMEBUFFER_DUMP_PATH")
 
 local function band(value, mask)
     return value & mask
@@ -68,6 +70,26 @@ local function hash_screen()
     end
 
     return hash
+end
+
+local function dump_screen(path)
+    local output_file = io.open(path, "wb")
+    local screen = emu.getScreenBuffer()
+
+    if output_file == nil then
+        emu.log("FAIL could not open boss framebuffer dump " .. path)
+        return
+    end
+    for index = 1, #screen do
+        local value = screen[index]
+
+        output_file:write(string.char(
+            value & 0xFF,
+            (value >> 8) & 0xFF,
+            (value >> 16) & 0xFF,
+            (value >> 24) & 0xFF))
+    end
+    output_file:close()
 end
 
 local function read_ram(addr)
@@ -124,6 +146,10 @@ local function capture(scenario, name, capture_frame)
         hex32(hash_screen())
     ))
     output:flush()
+    if scenario == "level2_room_chain" and name == "level2-boss-state" and
+       boss_framebuffer_path ~= nil then
+        boss_visual_settle_frames = 120
+    end
 end
 
 local function input_for_next_frame()
@@ -257,6 +283,22 @@ local function on_end_frame()
             force_level2_room_chain()
         end
 
+        if boss_visual_settle_frames > 0 then
+            boss_visual_settle_frames = boss_visual_settle_frames - 1
+            if boss_visual_settle_frames == 0 then
+                if read_ram(0x18) ~= 0x05 or read_ram(0x2C) ~= 0x04 or
+                   read_ram(0x40) ~= 0x80 or read_ram(0x64) ~= 0x05 then
+                    output:close()
+                    emu.stop(1)
+                    return
+                end
+                dump_screen(boss_framebuffer_path)
+                output:close()
+                emu.stop(0)
+            end
+            return
+        end
+
         if room_chain_checkpoint_index == 5 and boss_damage_started then
             if read_ram(0x30) == 0x01 and
                 read_ram(0x40) == 0x80 and
@@ -305,6 +347,9 @@ local function on_end_frame()
             if should_capture then
                 capture("level2_room_chain", name, frame)
                 room_chain_checkpoint_index = room_chain_checkpoint_index + 1
+                if boss_visual_settle_frames > 0 then
+                    return
+                end
             end
 
             if read_ram(0x40) == 0x80 then

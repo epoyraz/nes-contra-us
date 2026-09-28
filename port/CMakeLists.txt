@@ -56,6 +56,15 @@ target_link_libraries(contra_play_replay_trace PRIVATE contra_core)
 contra_apply_warnings(contra_play_replay_trace)
 contra_apply_coverage(contra_play_replay_trace)
 
+add_executable(contra_level2_boss_framebuffer
+    tools/level2_boss_framebuffer.c
+)
+
+target_link_libraries(contra_level2_boss_framebuffer PRIVATE contra_core)
+
+contra_apply_warnings(contra_level2_boss_framebuffer)
+contra_apply_coverage(contra_level2_boss_framebuffer)
+
 if(CONTRA_PORT_BUILD_TESTS)
     add_executable(contra_core_tests
         tests/core_behavior_tests.c
@@ -204,6 +213,15 @@ if(CONTRA_PORT_BUILD_TESTS)
             )
 
             find_package(Python3 COMPONENTS Interpreter REQUIRED)
+            add_test(
+                NAME contra_level2_boss_visual_parity
+                COMMAND "${Python3_EXECUTABLE}"
+                    "${CMAKE_SOURCE_DIR}/tools/boss_visual_check.py"
+                    "${CONTRA_MESEN_EXECUTABLE}"
+                    "$<TARGET_FILE:contra_level2_boss_framebuffer>"
+                    "${CONTRA_MESEN_ROM}"
+                    "${CMAKE_CURRENT_BINARY_DIR}/boss_visual"
+            )
             if(NOT CONTRA_PORT_VISUAL_MESEN_RECORDING)
                 set(CONTRA_PORT_VISUAL_MESEN_RECORDING
                     "${CMAKE_CURRENT_BINARY_DIR}/indoor_visual_recording.jsonl")

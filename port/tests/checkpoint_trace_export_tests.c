@@ -27,11 +27,15 @@ static const ExpectedTraceRow expected_rows[] = {
     {"attract_level1_demo", "level1-enemy-window", 1500u, 0u, 0u, 2u, 0u, 0u, 0u},
     {"attract_level2_demo", "level2-attract-first-room", 3008u, 1u, 1u, 0u, 0u, 0u, 0u},
     {"attract_level2_demo", "level2-wall-core-loaded", 3009u, 1u, 1u, 0u, 0u, 0u, 1u},
+    {"attract_level2_demo", "level2-wall-core-destroyed", 3495u, 1u, 1u, 0u, 0u, 0u, 0u},
+    {"attract_level2_demo", "level2-room-cleared", 3519u, 1u, 1u, 0u, 0u, 1u, 0u},
+    {"attract_level2_demo", "level2-after-room-1", 3763u, 1u, 1u, 1u, 0u, 0u, 1u},
+    {"attract_level2_demo", "level2-demo-finished", 4625u, 1u, 1u, 1u, 0u, 0u, 1u},
     {"level2_room_chain", "level2-first-room", 238u, 1u, 1u, 0u, 0u, 0u, 1u},
     {"level2_room_chain", "level2-after-room-1", 405u, 1u, 1u, 1u, 0u, 0u, 1u},
     {"level2_room_chain", "level2-after-room-4", 957u, 1u, 1u, 4u, 0u, 0u, 1u},
     {"level2_room_chain", "level2-boss-state", 1141u, 1u, 128u, 5u, 0u, 0u, 1u},
-    {"level2_room_chain", "level2-boss-defeated", 1529u, 1u, 128u, 5u, 0u, 0u, 1u}
+    {"level2_room_chain", "level2-boss-defeated", 1142u, 1u, 128u, 5u, 0u, 1u, 1u}
 };
 
 static bool contains_string_field(const char *line, const char *key, const char *value)
