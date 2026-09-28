@@ -4536,11 +4536,6 @@ static bool contra_handle_indoor_player_up_input(ContraCore *core, uint8_t playe
     ram[CONTRA_RAM_PLAYER_SPRITE_SEQUENCE + player_index] = 0x01u;
     if (ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] == 0u)
     {
-        if (ram[CONTRA_RAM_DEMO_MODE] != 0u)
-        {
-            return true;
-        }
-
         ram[CONTRA_RAM_ELECTROCUTED_TIMER + player_index] = 0x30u;
         contra_play_sound(core, 0x1Cu);
         return true;

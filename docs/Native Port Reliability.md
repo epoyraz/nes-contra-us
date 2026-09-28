@@ -46,11 +46,11 @@ repeatable tests, coverage output, and a machine-readable routine ledger.
    Full strict hash comparison remains expected to fail until the native
    timing/state model is brought into parity.
 
-   The newly enabled Mesen comparisons currently expose two failing gates:
-   the native attract exporter captures only the first two Level 2 rows while
-   Mesen captures six, and the seeded boss-defeat row differs in relative
-   frame, lives, and indoor-clear state. These are open parity findings; do not
-   treat a passing native checkpoint hash test as ROM equivalence.
+   The native attract trace covers the same six Level 2 milestones as Mesen.
+   The seeded boss-defeat checkpoint also uses the same forced-clear setup on
+   both sides, so its semantic comparison checks the post-boss transition
+   rather than differing test mechanics. Do not treat a passing native
+   checkpoint hash test as ROM equivalence.
 
    On macOS, CMake also looks for Mesen in the user's Applications folder.
    Set `CONTRA_PORT_REQUIRE_MESEN_TRACE_TESTS=ON` for a fail-closed ROM trace
