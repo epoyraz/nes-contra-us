@@ -1,0 +1,27 @@
+port/tests/checkpoint_trace_tests.c
+  s_d5aecae3542bf9::t_a8773874280df9 66-68,73-75,83-88,93-96
+port/contra_core/src/core.c
+  s_d5aecae3542bf9::t_d60ed07090247a 20552,20614,20618,20622,20626,20628-20629,20633
+  s_d5aecae3542bf9::t_e77e22c54b5f1b 12357-12358,12370-12372
+  s_d5aecae3542bf9::t_eb2b27c0bfb991 10787,11207-11213,11559,11579-11580,11599-11600,11603-11604
+  s_d5aecae3542bf9::t_f9f024de6f55c8 5025,5029-5046
+  s_d5aecae3542bf9::t_7294e53205a81d 5904-5909,5911-5913,5925
+  s_d5aecae3542bf9::t_d69c3b9cbac5d0 20144,20155-20160,20474-20535
+  s_d5aecae3542bf9::t_824024915aa4fa 5047,20536
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5f3858a3f5d633c0146961bfdff2b97f6c9c3e12",
+  "prompts": {},
+  "sessions": {
+    "s_d5aecae3542bf9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3a9c687b-8fc3-4aca-a14d-ef7e5296862d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
