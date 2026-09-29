@@ -1,0 +1,25 @@
+port/contra_core/src/core.c
+  s_d5aecae3542bf9::t_9db8f0a8b38abb 2740-2780,14930-14933,14937-14938,14947-14950,15041-15043,15052-15053,15071,15073
+  s_d5aecae3542bf9::t_eb58483ae89c69 2738-2739
+  s_d5aecae3542bf9::t_6bb0c3410e2f00 9146-9152
+  s_d5aecae3542bf9::t_693c24d1f99d9c 9220-9221
+  s_d5aecae3542bf9::t_c1ff953683a816 8727,9369,9371-9375
+  s_d5aecae3542bf9::t_383517074c583a 8665-8667,8670-8673,8723-8726
+  s_d5aecae3542bf9::t_339f0fbde541bc 23195-23196
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bfc605594ab16888fd95dfe3b9246ddd6f4aed9e",
+  "prompts": {},
+  "sessions": {
+    "s_d5aecae3542bf9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3a9c687b-8fc3-4aca-a14d-ef7e5296862d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
