@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 
+#include "contra/ppu.h"
 #include "contra/ram.h"
 
 typedef struct ContraInputSnapshot
@@ -26,9 +27,33 @@ enum
 typedef struct ContraCore
 {
     uint8_t ram[CONTRA_CPU_RAM_SIZE];
+    /* PPU memory: CHR RAM, CIRAM (vertical mirroring), palette RAM, OAM */
     uint8_t ppu_pattern[CONTRA_PPU_PATTERN_TABLE_SIZE];
     uint8_t ppu_nametable[CONTRA_PPU_NAMETABLE_SIZE];
     uint8_t ppu_palette[CONTRA_PPU_PALETTE_SIZE];
+    uint8_t ppu_oam[0x100u];
+    /* PPU registers as the CPU last left them ($2000-$2006 loopy state) */
+    ContraPpuRegs ppu;
+    /* the frame as the PPU scanned it out: one palette color (0-63) per pixel */
+    uint8_t frame_colors[CONTRA_FRAMEBUFFER_WIDTH * CONTRA_FRAMEBUFFER_HEIGHT];
+    /* UNROM: the PRG bank mapped at $8000 (BANK_NUMBER, the first byte of
+       every bank, reads it back); the ROM's bank bookkeeping in RAM
+       (PREVIOUS_ROM_BANK/_1) is mirrored from it */
+    uint8_t prg_bank;
+    /* a load routine inside this frame's game loop switched rendering off
+       while the picture was being scanned out: scanline * 341 + dot + 1 of
+       the $2001 write (0 = none) */
+    uint16_t raster_cut;
+    /* replay input, like an injected RANDOM_NUM: where in the picture the
+       original's $2001 write of this frame landed (scanline * 341 + dot + 1;
+       0 = unknown). That position depends on the CPU cycles spent before it
+       -- NMI entry jitter and the sound engine -- which the port does not
+       count; without a hint each load uses its typical measured timing.
+       Consumed (cleared) by every step. */
+    uint16_t raster_cut_hint;
+    /* this frame's picture came from the PPU model (not the legacy stage 3-8
+       compositor) */
+    uint8_t frame_from_ppu_model;
     uint8_t level_screen_supertiles[CONTRA_LEVEL_SCREEN_SUPERTILES_SIZE];
     uint32_t framebuffer[CONTRA_FRAMEBUFFER_WIDTH * CONTRA_FRAMEBUFFER_HEIGHT];
     uint8_t background_opaque[CONTRA_FRAMEBUFFER_WIDTH * CONTRA_FRAMEBUFFER_HEIGHT];
@@ -153,9 +178,17 @@ typedef struct ContraCore
 } ContraCore;
 
 void contra_core_init(ContraCore *core);
+/* NOT a ROM path (tests, debug warps): contra_core_init plus the power-on
+   frames (the reset code clears RAM on frame 3; the intro graphics load ends
+   on frame 10), leaving the RAM a game started from the title screen has --
+   attract mode off, delay timer 0. Afterwards RAM may be poked to start
+   directly in a level. */
+void contra_core_boot(ContraCore *core);
 void contra_core_reset(ContraCore *core);
 void contra_core_set_input(ContraCore *core, const ContraInputSnapshot *input);
 void contra_core_step_frame(ContraCore *core);
+/* replay tools: a real-NES lag frame (nested NMI: mask/scroll only, no logic) */
+void contra_core_step_lag_frame(ContraCore *core);
 
 const uint32_t *contra_core_framebuffer(const ContraCore *core);
 const uint8_t *contra_core_ram(const ContraCore *core);

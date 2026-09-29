@@ -1,5 +1,9 @@
 # Parity Pipeline Improvements (backlog — not yet implemented)
 
+> Largely superseded by [Parity Telemetry](Parity%20Telemetry.md): the Mesen
+> archive now carries all of RAM (engine globals, BG_COLLISION_DATA, full enemy
+> and bullet state), the PPU and the framebuffer for every frame.
+
 Ideas collected while working the stage-3 frontier (June 2026). Each item exists
 because a concrete divergence cost real time that the improvement would have
 avoided. Nothing here is implemented yet; this is the pick-up-later plan.

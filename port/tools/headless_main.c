@@ -775,7 +775,7 @@ int main(void)
         );
     }
 
-    contra_core_init(&bullet_core);
+    contra_core_boot(&bullet_core);
     bullet_core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
     bullet_core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x04u;
     bullet_core.ram[CONTRA_RAM_PPU_READY] = 0x00u;
@@ -823,7 +823,7 @@ int main(void)
 
     printf("\n");
 
-    contra_core_init(&game_over_core);
+    contra_core_boot(&game_over_core);
     game_over_core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
     game_over_core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x04u;
     game_over_core.ram[CONTRA_RAM_PPU_READY] = 0x00u;

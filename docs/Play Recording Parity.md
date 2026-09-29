@@ -1,5 +1,10 @@
 # Play Recording Parity
 
+> For the exhaustive byte/register/pixel comparison against the ROM (every RAM
+> byte, nametable, palette, OAM, CHR and pixel, every frame) see
+> [Parity Telemetry](Parity%20Telemetry.md). This page covers the semantic
+> gameplay-field trace.
+
 Frame-by-frame comparison of the native port against the real ROM on **arbitrary
 human play** — not just the attract demo. Play the game in Mesen until a bug
 shows; the pipeline replays your exact inputs through the native core and names

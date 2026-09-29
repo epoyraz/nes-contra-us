@@ -1016,7 +1016,7 @@ PPUCTRL_SETTINGS:
 .export VIBRATO_AMOUNT               ; $0180
 .export LEVEL_END_DELAY_TIMER        ; $0190
 .export LEVEL_END_SQ_1_TIMER         ; $0191
-.export LEVEL_END_LVL_ROUTINE_STATE  ; $0193
+.export LEVEL_END_LVL_ROUTINE_STATE  ; $0192
 .export LEVEL_END_PLAYERS_ALIVE      ; $0194
 .export SOLDIER_GEN_SCREEN           ; $0195
 .export SCREEN_GEN_SOLDIERS          ; $0196

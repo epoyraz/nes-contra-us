@@ -32,10 +32,10 @@ static const ExpectedTraceRow expected_rows[] = {
     {"attract_level2_demo", "level2-after-room-1", 3763u, 1u, 1u, 1u, 0u, 0u, 1u},
     {"attract_level2_demo", "level2-demo-finished", 4625u, 1u, 1u, 1u, 0u, 0u, 1u},
     {"level2_room_chain", "level2-first-room", 238u, 1u, 1u, 0u, 0u, 0u, 1u},
-    {"level2_room_chain", "level2-after-room-1", 405u, 1u, 1u, 1u, 0u, 0u, 1u},
-    {"level2_room_chain", "level2-after-room-4", 957u, 1u, 1u, 4u, 0u, 0u, 1u},
-    {"level2_room_chain", "level2-boss-state", 1141u, 1u, 128u, 5u, 0u, 0u, 1u},
-    {"level2_room_chain", "level2-boss-defeated", 1142u, 1u, 128u, 5u, 0u, 1u, 1u}
+    {"level2_room_chain", "level2-after-room-1", 406u, 1u, 1u, 1u, 0u, 0u, 1u},
+    {"level2_room_chain", "level2-after-room-4", 964u, 1u, 1u, 4u, 0u, 0u, 1u},
+    {"level2_room_chain", "level2-boss-state", 1150u, 1u, 128u, 5u, 0u, 0u, 1u},
+    {"level2_room_chain", "level2-boss-defeated", 1151u, 1u, 128u, 5u, 0u, 1u, 1u}
 };
 
 static bool contains_string_field(const char *line, const char *key, const char *value)

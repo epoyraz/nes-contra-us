@@ -120,37 +120,6 @@ static uint32_t hash_bytes(const void *data, size_t length)
     return hash;
 }
 
-static uint32_t hash_framebuffer_region(
-    const uint32_t *framebuffer,
-    unsigned start_x,
-    unsigned start_y,
-    unsigned width,
-    unsigned height
-)
-{
-    uint32_t hash = 2166136261u;
-    unsigned y;
-
-    for (y = start_y; y < (start_y + height); ++y)
-    {
-        unsigned x;
-
-        for (x = start_x; x < (start_x + width); ++x)
-        {
-            const uint32_t pixel = framebuffer[(size_t)y * CONTRA_FRAMEBUFFER_WIDTH + (size_t)x];
-            size_t byte;
-
-            for (byte = 0u; byte < sizeof(pixel); ++byte)
-            {
-                hash ^= (uint8_t)(pixel >> (byte * 8u));
-                hash *= 16777619u;
-            }
-        }
-    }
-
-    return hash;
-}
-
 static bool nametable_has_text(const ContraCore *core, uint16_t ppu_addr, const uint8_t *text, size_t length)
 {
     size_t index;
@@ -276,16 +245,15 @@ static bool l2_enemy_core_destroyable(const ContraCore *core, size_t i)
     return (core->ram[CONTRA_RAM_ENEMY_STATE_WIDTH + i] & 0x80u) == 0u;
 }
 /* The destroyed core runs its destruction chain (routine 5+, the analogue of the
-   invented "destroyed" state 0x08), and the back-wall blow-open is tracked in
-   l2_blowopen_quadrants (the analogue of the invented per-enemy flags). */
+   invented "destroyed" state 0x08); the back-wall blow-open reaches the PPU as
+   super-tile writes into nametable RAM (through CPU_GRAPHICS_BUFFER). */
 static bool l2_core_destroying(const ContraCore *core, size_t i)
 {
     return core->ram[CONTRA_RAM_ENEMY_ROUTINE + i] >= 0x05u;
 }
-static bool l2_blowopen_started(const ContraCore *core, size_t i)
+static bool l2_blowopen_started(const ContraCore *core, uint32_t initial_nametable_hash)
 {
-    (void)i;
-    return core->l2_blowopen_quadrants != 0u;
+    return hash_bytes(core->ppu_nametable, sizeof(core->ppu_nametable)) != initial_nametable_hash;
 }
 /* Inject a *fresh* live player bullet at (x,y), simulating one shot from a stream
    of fired bullets. The faithful bullet-vs-enemy collision (bullet_enemy_collision_
@@ -365,7 +333,7 @@ static void force_level2_gameplay(ContraCore *core)
 {
     unsigned frame;
 
-    contra_core_init(core);
+    contra_core_boot(core);
     core->ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
     core->ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x00u;
     core->ram[CONTRA_RAM_CURRENT_LEVEL] = 0x01u;
@@ -390,7 +358,7 @@ static void force_level4_gameplay(ContraCore *core)
 {
     unsigned frame;
 
-    contra_core_init(core);
+    contra_core_boot(core);
     core->ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
     core->ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x00u;
     core->ram[CONTRA_RAM_CURRENT_LEVEL] = 0x03u;
@@ -415,7 +383,7 @@ static void force_level5_gameplay(ContraCore *core)
 {
     unsigned frame;
 
-    contra_core_init(core);
+    contra_core_boot(core);
     core->ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
     core->ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x00u;
     core->ram[CONTRA_RAM_CURRENT_LEVEL] = 0x04u;
@@ -440,7 +408,7 @@ static void force_level8_gameplay(ContraCore *core)
 {
     unsigned frame;
 
-    contra_core_init(core);
+    contra_core_boot(core);
     core->ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
     core->ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x00u;
     core->ram[CONTRA_RAM_CURRENT_LEVEL] = 0x07u;
@@ -465,7 +433,7 @@ static void force_level6_gameplay(ContraCore *core)
 {
     unsigned frame;
 
-    contra_core_init(core);
+    contra_core_boot(core);
     core->ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
     core->ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x00u;
     core->ram[CONTRA_RAM_CURRENT_LEVEL] = 0x05u;
@@ -1260,6 +1228,7 @@ static bool test_level2_wall_core_destroy_updates_back_wall_quadrants(void)
     unsigned frame;
     size_t wall_core_index = 0u;
     uint32_t initial_framebuffer_hash;
+    uint32_t initial_nametable_hash;
     bool saw_quadrant_update = false;
 
     force_level2_gameplay(&core);
@@ -1286,6 +1255,7 @@ static bool test_level2_wall_core_destroy_updates_back_wall_quadrants(void)
     CHECK(l2_enemy_type(&core, wall_core_index) == 0x14u);
     CHECK(l2_core_destroying(&core, wall_core_index));
     initial_framebuffer_hash = hash_bytes(core.framebuffer, sizeof(core.framebuffer));
+    initial_nametable_hash = hash_bytes(core.ppu_nametable, sizeof(core.ppu_nametable));
 
     /* the destruction chain registers the kill (WALL_CORE_REMAINING) and blows the
        back wall open over the next frames (the faithful chain is multi-frame, where
@@ -1293,9 +1263,12 @@ static bool test_level2_wall_core_destroy_updates_back_wall_quadrants(void)
     for (frame = 0u; frame < 48u; ++frame)
     {
         step_no_input(&core);
-        if (l2_blowopen_started(&core, wall_core_index))
+        if (l2_blowopen_started(&core, initial_nametable_hash))
         {
             saw_quadrant_update = true;
+        }
+        if (saw_quadrant_update && (core.ram[CONTRA_RAM_WALL_CORE_REMAINING] == 0x00u))
+        {
             break;
         }
     }
@@ -1500,6 +1473,7 @@ static bool test_game_over_delay_expiry_loads_screen_without_glitch(void)
     static const uint8_t continue_text[8] = {0x43u, 0x4Fu, 0x4Eu, 0x54u, 0x49u, 0x4Eu, 0x55u, 0x45u};
     static const uint8_t end_text[3] = {0x45u, 0x4Eu, 0x44u};
     ContraCore core;
+    unsigned frame;
 
     contra_core_init(&core);
     CHECK(run_until_gameplay(&core, 900u));
@@ -1522,6 +1496,16 @@ static bool test_game_over_delay_expiry_loads_screen_without_glitch(void)
     CHECK(core.ram[CONTRA_RAM_NUM_CONTINUES] == 0x00u);
     CHECK(count_active_enemy_type(&core, 0x10u) == 0u);
     CHECK(count_active_projectiles_from_owner(&core, 0x10u) == 0u);
+    /* show_game_over_screen's text goes through CPU_GRAPHICS_BUFFER: it reaches
+       the nametables at an NMI after the screen's (multi-frame) graphics load */
+    for (frame = 0u; (frame < 24u) &&
+                     (!nametable_has_text(&core, 0x222Au, game_over_text, sizeof(game_over_text)) ||
+                      !framebuffer_region_has_detail(contra_core_framebuffer(&core), 72u, 128u, 112u, 40u, 2u));
+         ++frame)
+    {
+        step_no_input(&core); /* configure_PPU keeps rendering off for 5 NMIs */
+    }
+    CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x06u);
     CHECK(nametable_has_text(&core, 0x222Au, game_over_text, sizeof(game_over_text)));
     CHECK(nametable_has_text(&core, 0x228Cu, continue_text, sizeof(continue_text)));
     CHECK(nametable_has_text(&core, 0x22CCu, end_text, sizeof(end_text)));
@@ -1667,47 +1651,34 @@ static bool test_level4_first_room_loads_rom_enemy_data(void)
 
 static bool test_level4_first_room_renders_wall_core_target(void)
 {
+    static const uint8_t closed_core_tiles[4] = {0xE2u, 0xE3u, 0xE4u, 0xE5u};
     ContraCore core;
     size_t wall_core_index = 0u;
-    uint32_t target_hash;
-    uint32_t suppressed_hash;
     unsigned frame;
+    bool core_tiles_written = false;
 
     force_level4_gameplay(&core);
     CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x04u);
+    core.ram[CONTRA_RAM_INVINCIBILITY_TIMER] = 0xFFu;
 
-    for (frame = 0u; frame < 80u; ++frame)
+    /* the core draws itself (level_2_4_tile_animation, "core - closed") into
+       the nametable under its position through CPU_GRAPHICS_BUFFER */
+    for (frame = 0u; (frame < 320u) && !core_tiles_written; ++frame)
     {
         step_no_input(&core);
-        if (find_first_active_wall_core(&core, &wall_core_index) &&
-            (core.l2_structure_tile[wall_core_index] != 0u))
+        if (find_first_active_wall_core(&core, &wall_core_index))
         {
-            break;
+            /* indoor rooms scroll the nametable up 8 px (VERTICAL_SCROLL $E8) */
+            const unsigned row = (unsigned)(l2_enemy_y(&core, wall_core_index) - 8u) / 8u - 1u;
+            const unsigned col = (unsigned)l2_enemy_x(&core, wall_core_index) / 8u - 1u;
+            const uint8_t *nt = &core.ppu_nametable[row * 32u + col];
+
+            core_tiles_written = (nt[0] == closed_core_tiles[0]) && (nt[1] == closed_core_tiles[1]) &&
+                                 (nt[32] == closed_core_tiles[2]) && (nt[33] == closed_core_tiles[3]);
         }
     }
-
-    CHECK(frame < 80u);
+    CHECK(core_tiles_written);
     CHECK(core.ram[CONTRA_RAM_CURRENT_LEVEL] == 0x03u);
-    CHECK(core.l2_structure_tile[wall_core_index] != 0u);
-
-    target_hash = hash_framebuffer_region(
-        contra_core_framebuffer(&core),
-        (unsigned)(l2_enemy_x(&core, wall_core_index) - 8u),
-        (unsigned)(l2_enemy_y(&core, wall_core_index) - 8u),
-        24u,
-        24u);
-
-    core.l2_structure_tile[wall_core_index] = 0u;
-    step_no_input(&core);
-
-    suppressed_hash = hash_framebuffer_region(
-        contra_core_framebuffer(&core),
-        (unsigned)(l2_enemy_x(&core, wall_core_index) - 8u),
-        (unsigned)(l2_enemy_y(&core, wall_core_index) - 8u),
-        24u,
-        24u);
-
-    CHECK(target_hash != suppressed_hash);
     return true;
 }
 
@@ -1913,7 +1884,7 @@ static bool test_game_end_sequence_returns_to_level_1(void)
     unsigned frame;
     bool saw_credits = false;
 
-    contra_core_init(&core);
+    contra_core_boot(&core);
     /* the state level_routine_05 leaves after the last level is beaten */
     core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x06u;
     core.ram[CONTRA_RAM_CURRENT_LEVEL] = 0x09u;
@@ -2412,7 +2383,7 @@ static bool test_broad_weapon_gameover_and_alt_graphics_matrix(void)
     CHECK(alt_graphics_finished);
     CHECK(hash_bytes(core.ppu_pattern, sizeof(core.ppu_pattern)) != initial_pattern_hash);
 
-    contra_core_init(&core);
+    contra_core_boot(&core);
     core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
     core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x05u;
     core.ram[CONTRA_RAM_CURRENT_LEVEL] = 0x00u;
@@ -2426,7 +2397,7 @@ static bool test_broad_weapon_gameover_and_alt_graphics_matrix(void)
     step_with_input(&core, CONTRA_BUTTON_START);
     CHECK(core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] == 0x00u);
 
-    contra_core_init(&core);
+    contra_core_boot(&core);
     core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
     core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x05u;
     core.ram[CONTRA_RAM_CURRENT_LEVEL] = 0x00u;
@@ -2437,7 +2408,7 @@ static bool test_broad_weapon_gameover_and_alt_graphics_matrix(void)
     step_with_input(&core, CONTRA_BUTTON_START);
     CHECK(core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] == 0x00u);
 
-    contra_core_init(&core);
+    contra_core_boot(&core);
     core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
     core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x05u;
     core.ram[CONTRA_RAM_CURRENT_LEVEL] = 0x07u;
@@ -2504,7 +2475,7 @@ static bool test_broad_player_ui_and_end_level_matrix(void)
     step_no_input(&core);
     CHECK((core.ram[CONTRA_RAM_PLAYER_WATER_STATE] & 0x08u) == 0x00u);
 
-    contra_core_init(&core);
+    contra_core_boot(&core);
     core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
     core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x06u;
     core.ram[CONTRA_RAM_CONT_END_SELECTION] = 0x00u;
@@ -2524,7 +2495,7 @@ static bool test_broad_player_ui_and_end_level_matrix(void)
     CHECK(core.ram[CONTRA_RAM_PLAYER_1_SCORE_LOW] == 0x00u);
     CHECK(core.ram[CONTRA_RAM_P1_NUM_LIVES] != 0x00u);
 
-    contra_core_init(&core);
+    contra_core_boot(&core);
     core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
     core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x07u;
     core.ram[CONTRA_RAM_PLAYER_MODE] = 0x01u;
@@ -2533,7 +2504,7 @@ static bool test_broad_player_ui_and_end_level_matrix(void)
     step_no_input(&core);
     CHECK(core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] == 0x05u);
 
-    contra_core_init(&core);
+    contra_core_boot(&core);
     core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
     core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x04u;
     core.ram[CONTRA_RAM_P1_GAME_OVER_STATUS] = 0x01u;
@@ -2543,7 +2514,7 @@ static bool test_broad_player_ui_and_end_level_matrix(void)
     CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x0Au);
     CHECK(core.ram[CONTRA_RAM_GAME_OVER_DELAY_TIMER] != 0x00u);
 
-    contra_core_init(&core);
+    contra_core_boot(&core);
     core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
     core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x08u;
     core.ram[CONTRA_RAM_DELAY_TIME_LOW_BYTE] = 0xFFu;
@@ -2561,7 +2532,7 @@ static bool test_broad_player_ui_and_end_level_matrix(void)
     CHECK(core.ram[CONTRA_RAM_LEVEL_END_PLAYERS_ALIVE] != 0x00u);
     CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x09u);
 
-    contra_core_init(&core);
+    contra_core_boot(&core);
     core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
     core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x09u;
     core.ram[CONTRA_RAM_CURRENT_LEVEL] = 0x00u;
@@ -2584,7 +2555,7 @@ static bool test_broad_player_ui_and_end_level_matrix(void)
     step_no_input(&core);
     CHECK(core.ram[CONTRA_RAM_LEVEL_END_LVL_ROUTINE_STATE] >= 0x03u);
 
-    contra_core_init(&core);
+    contra_core_boot(&core);
     core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
     core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x01u;
     core.ram[CONTRA_RAM_DEMO_MODE] = 0x00u;
@@ -2594,7 +2565,7 @@ static bool test_broad_player_ui_and_end_level_matrix(void)
     step_no_input(&core);
     CHECK(core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0x02u);
 
-    contra_core_init(&core);
+    contra_core_boot(&core);
     core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
     core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x01u;
     core.ram[CONTRA_RAM_DEMO_MODE] = 0x00u;

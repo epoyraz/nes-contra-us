@@ -21,25 +21,43 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    contra_core_init(&core);
+    contra_core_boot(&core);
     core.ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 5u;
     core.ram[CONTRA_RAM_CURRENT_LEVEL] = 1u;
     core.ram[CONTRA_RAM_PLAYER_MODE_1D] = 1u;
     core.ram[CONTRA_RAM_P2_GAME_OVER_STATUS] = 1u;
     core.ram[CONTRA_RAM_P1_NUM_LIVES] = 2u;
-    for (index = 0u; index < 3000u; ++index)
+    for (index = 0u; (index < 3000u) && (core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] != 4u); ++index)
     {
-        if (core.ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 4u)
+        contra_core_set_input(&core, &input);
+        contra_core_step_frame(&core);
+    }
+    /* room chain (checkpoint trace advance_level2_room_once): once the player
+       has landed, mark the room cleared and walk Up into the next one */
+    for (index = 0u; (index < 16u) && (core.ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 128u); ++index)
+    {
+        const uint8_t screen = core.ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER];
+        unsigned frame;
+
+        input.player[0] = 0u;
+        for (frame = 0u; frame < 180u; ++frame)
         {
-            if (core.ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 128u)
+            contra_core_set_input(&core, &input);
+            contra_core_step_frame(&core);
+            if ((core.ram[CONTRA_RAM_PLAYER_JUMP_STATUS] == 0u) && (core.ram[CONTRA_RAM_EDGE_FALL_CODE] == 0u))
             {
                 break;
             }
-            core.ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] = 1u;
-            input.player[0] = CONTRA_BUTTON_UP;
         }
-        contra_core_set_input(&core, &input);
-        contra_core_step_frame(&core);
+        core.ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] = 1u;
+        input.player[0] = CONTRA_BUTTON_UP;
+        for (frame = 0u; (frame < 420u) && (core.ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] == screen) &&
+                         (core.ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 128u);
+             ++frame)
+        {
+            contra_core_set_input(&core, &input);
+            contra_core_step_frame(&core);
+        }
     }
     if (core.ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 128u)
     {

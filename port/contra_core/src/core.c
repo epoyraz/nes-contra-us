@@ -256,8 +256,6 @@
 
 #include "contra/buttons.h"
 
-static void contra_render_level_1_nametable_update_supertile(
-    ContraCore *core, int enemy_x, int enemy_y, uint8_t supertile_index);
 static void contra_rom_update_enemy_pos(ContraCore *core, uint8_t x);
 static void contra_rom_bullet_generation(
     ContraCore *core, uint8_t aim, uint8_t speed, uint8_t px, uint8_t py);
@@ -269,7 +267,6 @@ static void contra_rom_add_player_score(ContraCore *core, uint8_t player, uint8_
 static void contra_rom_create_explosion_at(ContraCore *core, uint8_t px, uint8_t py);
 static void contra_rom_create_explosion_sequence(
     ContraCore *core, uint8_t px, uint8_t py, uint8_t state_width, uint8_t routine);
-static void contra_load_next_supertiles_screen_indexes(ContraCore *core);
 static void contra_rom_reverse_enemy_x_direction(ContraCore *core, uint8_t x);
 static uint8_t contra_rom_player_enemy_x_dist(const ContraCore *core, uint8_t x);
 
@@ -342,42 +339,11 @@ static const uint8_t contra_level_headers[8][0x20] = {
         0x09u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u
     }
 };
-static const uint8_t contra_level_graphic_data_lists[13][10] = {
-    {0x03u, 0x13u, 0x19u, 0x1Au, 0x14u, 0x16u, 0x05u, 0xFFu, 0xFFu, 0xFFu},
-    {0x03u, 0x04u, 0x06u, 0x0Au, 0x0Fu, 0x10u, 0x11u, 0xFFu, 0xFFu, 0xFFu},
-    {0x03u, 0x13u, 0x19u, 0x1Au, 0x14u, 0x16u, 0x07u, 0xFFu, 0xFFu, 0xFFu},
-    {0x03u, 0x04u, 0x06u, 0x0Au, 0x0Fu, 0x10u, 0x11u, 0x12u, 0xFFu, 0xFFu},
-    {0x03u, 0x13u, 0x19u, 0x1Au, 0x15u, 0x16u, 0x0Bu, 0xFFu, 0xFFu, 0xFFu},
-    {0x03u, 0x13u, 0x19u, 0x1Au, 0x15u, 0x16u, 0x0Cu, 0xFFu, 0xFFu, 0xFFu},
-    {0x03u, 0x13u, 0x19u, 0x1Au, 0x15u, 0x16u, 0x0Du, 0xFFu, 0xFFu, 0xFFu},
-    {0x03u, 0x13u, 0x19u, 0x0Eu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu},
-    {0x03u, 0x04u, 0x13u, 0x08u, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu},
-    {0x03u, 0x04u, 0x13u, 0x08u, 0x09u, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu},
-    {0x01u, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu},
-    {0x01u, 0x02u, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu},
-    {0x01u, 0x03u, 0x17u, 0x18u, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu}
-};
-
-typedef struct ContraGraphicDataRef
-{
-    uint16_t cpu_addr;
-    uint8_t bank_code;
-} ContraGraphicDataRef;
-
-static const ContraGraphicDataRef contra_graphic_data_ptrs[27] = {
-    {0xCB36u, 0x00u}, {0xAA2Du, 0x04u}, {0x9097u, 0x02u}, {0x8001u, 0x04u}, {0x85AEu, 0x04u},
-    {0x8001u, 0x05u}, {0x99FCu, 0x04u}, {0x8A61u, 0x05u}, {0x886Cu, 0x04u}, {0x99CDu, 0x04u},
-    {0xA005u, 0x04u}, {0x93E0u, 0x05u}, {0x8001u, 0x06u}, {0x8CDCu, 0x06u}, {0x9BD6u, 0x06u},
-    {0xA346u, 0x04u}, {0xA003u, 0x84u}, {0xA3E7u, 0x04u}, {0xA940u, 0x04u}, {0x87A1u, 0x04u},
-    {0xA814u, 0x05u}, {0xB07Au, 0x06u}, {0xB15Cu, 0x06u}, {0xADDFu, 0x05u}, {0xB30Du, 0x05u},
-    {0xA31Bu, 0x05u}, {0xA500u, 0x05u}
-};
-
 static const uint32_t contra_nes_palette_rgba[64] = {
     /* index 0x00 is NES medium gray, not green -- it was duplicating 0x09's value,
        which turned every 0x00 background (e.g. the level-2 base walls) green. */
     0x00666666u, 0x00002A88u, 0x001412A7u, 0x003B00A4u, 0x005C007Eu, 0x006E0040u, 0x006C0600u, 0x00561D00u,
-    0x00333500u, 0x000B4800u, 0x00000000u, 0x00004F08u, 0x0000404Du, 0x00000000u, 0x00000000u, 0x00000000u,
+    0x00333500u, 0x000B4800u, 0x00005200u, 0x00004F08u, 0x0000404Du, 0x00000000u, 0x00000000u, 0x00000000u,
     0x00ADADADu, 0x00155FD9u, 0x004240FFu, 0x007527FEu, 0x00A01ACCu, 0x00B71E7Bu, 0x00B53120u, 0x00994E00u,
     0x006B6D00u, 0x00388700u, 0x000C9300u, 0x00008F32u, 0x00007C8Du, 0x00000000u, 0x00000000u, 0x00000000u,
     0x00FFFEFFu, 0x0064B0FFu, 0x009290FFu, 0x00C676FFu, 0x00F36AFFu, 0x00FE6ECCu, 0x00FE8170u, 0x00EA9E22u,
@@ -396,18 +362,6 @@ static const uint8_t contra_player_effect_xor_tbl[2] = {0x00u, 0xFFu};
 static const uint8_t contra_weapon_strength_tbl[5] = {0x00u, 0x02u, 0x01u, 0x03u, 0x02u};
 static const uint8_t contra_weapon_bullet_sprite_code_tbl[5] = {0x1Eu, 0x1Fu, 0x22u, 0x1Fu, 0x00u};
 static const uint8_t contra_weapon_item_sprite_code_tbl[7] = {0x33u, 0x34u, 0x31u, 0x2Fu, 0x32u, 0x30u, 0x4Eu};
-static const uint8_t contra_player_small_seq_sprite_tbl[3] = {0x0Fu, 0x16u, 0x17u};
-static const uint8_t contra_player_frame_sprite_type_tbl[10] = {0x00u, 0x02u, 0x00u, 0x03u, 0x00u, 0x00u, 0x03u, 0x00u, 0x02u, 0x00u};
-static const uint8_t contra_player_frame_sprite_tbl_00[6] = {0x02u, 0x03u, 0x04u, 0x05u, 0x03u, 0x06u};
-static const uint8_t contra_player_frame_sprite_tbl_01[6] = {0x0Du, 0x0Eu, 0x0Fu, 0x0Du, 0x0Eu, 0x0Fu};
-static const uint8_t contra_player_frame_sprite_tbl_02[6] = {0x10u, 0x11u, 0x12u, 0x10u, 0x11u, 0x12u};
-static const uint8_t contra_player_frame_sprite_tbl_03[6] = {0x13u, 0x14u, 0x15u, 0x13u, 0x14u, 0x15u};
-/* player_frame_sprite_tbl_04 (bank2:978): the indoor (base) level walk frames. */
-static const uint8_t contra_player_frame_sprite_tbl_04[6] = {0x51u, 0x52u, 0x53u, 0x51u, 0x52u, 0x53u};
-static const uint8_t contra_player_curled_sprite_code_tbl[4] = {0x08u, 0x09u, 0x08u, 0x09u};
-static const uint8_t contra_player_death_sprite_tbl[5][2] = {
-    {0x0Au, 0x00u}, {0x0Bu, 0x00u}, {0x0Au, 0xC0u}, {0x0Bu, 0xC0u}, {0x0Cu, 0x00u}
-};
 static const uint8_t contra_player_dead_sequence_tbl[3] = {0x04u, 0x04u, 0x06u};
 static const int8_t contra_player_died_x_velocity_tbl[3] = {-1, 0, 0};
 static const uint8_t contra_player_water_sprite_tbl[10][2] = {
@@ -602,24 +556,6 @@ static const uint8_t contra_level_2_wall_core_update_supertile_tbl[4] = {0x02u, 
 static const uint8_t contra_level_2_wall_core_update_x_tbl[4] = {0x70u, 0x90u, 0x90u, 0x70u};
 static const uint8_t contra_level_2_wall_core_update_y_tbl[4] = {0x78u, 0x78u, 0x58u, 0x58u};
 
-typedef struct ContraAltGraphicDataRef
-{
-    uint16_t ppu_addr;
-    uint16_t cpu_addr;
-    uint8_t chunk_count;
-} ContraAltGraphicDataRef;
-
-static const ContraAltGraphicDataRef contra_alt_graphic_data_refs[8] = {
-    {0x1A80u, 0x9252u, 0x2Cu},
-    {0x1000u, 0x9252u, 0x00u},
-    {0x1460u, 0x97D2u, 0x5Du},
-    {0x1000u, 0x9252u, 0x00u},
-    {0x16A0u, 0xA372u, 0x1Du},
-    {0x0A80u, 0xA712u, 0x22u},
-    {0x1000u, 0x9252u, 0x00u},
-    {0x1B60u, 0xAB52u, 0x25u}
-};
-
 enum
 {
     CONTRA_RAM_ALT_GFX_PPU_ADDR_LO = 0x6Cu,
@@ -646,28 +582,10 @@ static void contra_clear_memory_3(ContraCore *core);
 static void contra_load_palettes_color_to_cpu(ContraCore *core, uint8_t num_colors);
 static void contra_load_alternate_graphics(ContraCore *core);
 static void contra_load_bank_6_write_text_palette_to_mem(ContraCore *core, uint8_t text_code);
-static void contra_init_apu_channels(ContraCore *core);
+static void contra_init_apu_channels(ContraCore *core, uint8_t y);
 static void contra_run_level_routine(ContraCore *core);
 static void contra_finish_level_graphics_load(ContraCore *core);
-static void contra_write_level_1_nametable_update_supertile_to_ppu(
-    ContraCore *core,
-    int enemy_x,
-    int enemy_y,
-    uint8_t supertile_index
-);
-static void contra_calculate_level_1_nametable_update_supertile_ppu_addr(
-    const ContraCore *core,
-    int enemy_x,
-    int enemy_y,
-    uint16_t *tile_ppu_addr,
-    uint16_t *attr_ppu_addr
-);
-static void contra_write_level_1_nametable_update_supertile_to_ppu_addr(
-    ContraCore *core,
-    uint16_t tile_ppu_addr,
-    uint16_t attr_ppu_addr,
-    uint8_t supertile_index
-);
+static void contra_note_raster_cut(ContraCore *core, uint16_t scanline, uint16_t dot);
 
 static bool contra_load_rom_image(void)
 {
@@ -821,198 +739,2099 @@ static void contra_write_ppu_byte(ContraCore *core, uint16_t ppu_addr, uint8_t v
     }
 }
 
-static void contra_write_cpu_graphics_buffer_byte(ContraCore *core, uint8_t value)
+
+/* ==========================================================================
+   NMI / PPU pipeline -- faithful ports of bank7 nmi_start and the routines it
+   runs every frame. The CPU-side state the ROM prepares during a frame
+   (OAMDMA_CPU_BUFFER, PALETTE_CPU_BUFFER + NUM_PALETTES_TO_LOAD,
+   CPU_GRAPHICS_BUFFER, the scroll/ctrl/mask settings) reaches the PPU model
+   exactly when and how the ROM moves it, register write by register write,
+   so the loopy v/t/x state and PPU memory match the hardware at every frame.
+   ========================================================================== */
+
+static ContraPpuMemory contra_ppu_memory(ContraCore *core)
 {
-    const uint8_t offset = core->ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET];
+    ContraPpuMemory mem;
 
-    if (offset >= CONTRA_CPU_GRAPHICS_BUFFER_SIZE)
-    {
-        return;
-    }
-
-    core->ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER + offset] = value;
-    core->ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = (uint8_t)(offset + 1u);
+    mem.chr = core->ppu_pattern;
+    mem.ciram = core->ppu_nametable;
+    mem.palette = core->ppu_palette;
+    mem.oam = core->ppu_oam;
+    return mem;
 }
 
-static void contra_flush_cpu_graphics_buffer_to_ppu(ContraCore *core)
+/* sta PPUDATA */
+static void contra_ppu_store_data(ContraCore *core, uint8_t value)
+{
+    const ContraPpuMemory mem = contra_ppu_memory(core);
+
+    contra_ppu_write_data(&core->ppu, &mem, value);
+}
+
+/* bank7 clear_ppu: PPUADDR = $0000, PPUCTRL = 0 (NMI off), PPUMASK = 0 */
+static void contra_clear_ppu(ContraCore *core)
+{
+    contra_ppu_write_addr(&core->ppu, 0x00u);
+    contra_ppu_write_addr(&core->ppu, 0x00u);
+    contra_ppu_write_ctrl(&core->ppu, 0x00u);
+    contra_ppu_write_mask(&core->ppu, 0x00u);
+}
+
+/* bank7 configure_PPU: NMI on, 8x16 sprites, BG at $1000; PPU_READY holds
+   PPUMASK at 0 for the next 5 NMIs */
+static void contra_configure_ppu(ContraCore *core)
+{
+    core->ram[CONTRA_RAM_PPU_READY] = 0x05u;
+    core->ram[CONTRA_RAM_PPUCTRL_SETTINGS] = 0xB0u;
+    contra_ppu_write_ctrl(&core->ppu, 0xB0u);
+    core->ram[CONTRA_RAM_PPU_READY] = 0x05u;
+}
+
+/* bank7 set_ppu_scroll */
+static void contra_set_ppu_scroll(ContraCore *core)
+{
+    contra_ppu_read_status(&core->ppu);
+    contra_ppu_write_scroll(&core->ppu, core->ram[CONTRA_RAM_HORIZONTAL_SCROLL]);
+    contra_ppu_write_scroll(&core->ppu, core->ram[CONTRA_RAM_VERTICAL_SCROLL]);
+    contra_ppu_write_ctrl(&core->ppu, core->ram[CONTRA_RAM_PPUCTRL_SETTINGS]);
+}
+
+/* bank7 set_ppu_addr_to_nametables */
+static void contra_set_ppu_addr_to_nametables(ContraCore *core)
+{
+    contra_ppu_read_status(&core->ppu);
+    contra_ppu_write_addr(&core->ppu, 0x20u);
+    contra_ppu_write_addr(&core->ppu, 0x00u);
+    contra_set_ppu_scroll(core);
+}
+
+/* UNROM bank bookkeeping (bank7:462-510). The mapper register is write-only,
+   so the ROM keeps the mapped bank's number in RAM: load_bank_number saves the
+   outgoing bank to PREVIOUS_ROM_BANK, load_bank_1 to PREVIOUS_ROM_BANK_1. */
+static void contra_load_bank_number(ContraCore *core, uint8_t bank)
+{
+    core->ram[CONTRA_RAM_PREVIOUS_ROM_BANK] = core->prg_bank;
+    core->prg_bank = bank;
+}
+
+static void contra_load_previous_bank(ContraCore *core)
+{
+    core->prg_bank = core->ram[CONTRA_RAM_PREVIOUS_ROM_BANK];
+}
+
+static void contra_load_bank_1(ContraCore *core)
+{
+    core->ram[CONTRA_RAM_PREVIOUS_ROM_BANK_1] = core->prg_bank;
+    core->prg_bank = 0x01u;
+}
+
+static void contra_local_previous_1_bank(ContraCore *core)
+{
+    core->prg_bank = core->ram[CONTRA_RAM_PREVIOUS_ROM_BANK_1];
+}
+
+/* bank7 write_palette_colors_to_ppu */
+static void contra_write_palette_colors_to_ppu(ContraCore *core)
 {
     uint8_t *const ram = core->ram;
-    size_t read_offset = 0u;
+    uint8_t count = ram[CONTRA_RAM_NUM_PALETTES_TO_LOAD];
+    uint8_t y = 0x00u;
 
-    if (ram[CONTRA_RAM_GRAPHICS_BUFFER_MODE] != 0u)
+    if ((count == 0u) || (ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] >= 0x30u))
     {
         return;
     }
 
-    while (read_offset < CONTRA_CPU_GRAPHICS_BUFFER_SIZE)
+    contra_ppu_write_ctrl(&core->ppu, (uint8_t)(ram[CONTRA_RAM_PPUCTRL_SETTINGS] & 0x18u));
+    contra_ppu_write_addr(&core->ppu, 0x3Fu);
+    contra_ppu_write_addr(&core->ppu, 0x00u);
+    do
     {
-        const uint8_t increment_mode = ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER + read_offset++];
-        uint16_t ppu_addr;
-
-        if (increment_mode == 0u)
-        {
-            break;
-        }
-
-        if ((read_offset + 1u) >= CONTRA_CPU_GRAPHICS_BUFFER_SIZE)
-        {
-            break;
-        }
-
-        ppu_addr = (uint16_t)(
-            ((uint16_t)ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER + read_offset] << 8u) |
-            (uint16_t)ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER + read_offset + 1u]
-        );
-        read_offset += 2u;
-
-        if (increment_mode == 0x03u)
-        {
-            uint8_t count;
-
-            if (read_offset >= CONTRA_CPU_GRAPHICS_BUFFER_SIZE)
-            {
-                break;
-            }
-
-            count = ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER + read_offset++];
-            while ((count-- != 0u) && (read_offset < CONTRA_CPU_GRAPHICS_BUFFER_SIZE))
-            {
-                contra_write_ppu_byte(core, ppu_addr++, ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER + read_offset++]);
-            }
-
-            continue;
-        }
-
-        for (;;)
-        {
-            const uint16_t increment = (increment_mode == 0x02u) ? 0x20u : 0x01u;
-            uint8_t value;
-
-            if (read_offset >= CONTRA_CPU_GRAPHICS_BUFFER_SIZE)
-            {
-                break;
-            }
-
-            value = ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER + read_offset];
-
-            if (value == 0xFFu)
-            {
-                if ((read_offset + 1u) >= CONTRA_CPU_GRAPHICS_BUFFER_SIZE)
-                {
-                    ++read_offset;
-                    break;
-                }
-
-                if (ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER + read_offset + 1u] < 0x04u)
-                {
-                    ++read_offset;
-                    break;
-                }
-            }
-
-            contra_write_ppu_byte(core, ppu_addr, value);
-            ppu_addr = (uint16_t)(ppu_addr + increment);
-            ++read_offset;
-
-            if (read_offset >= CONTRA_CPU_GRAPHICS_BUFFER_SIZE)
-            {
-                break;
-            }
-        }
-    }
-
-    memset(&ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER], 0, CONTRA_CPU_GRAPHICS_BUFFER_SIZE);
-    ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = 0x00u;
+        contra_ppu_store_data(core, ram[CONTRA_RAM_PALETTE_CPU_BUFFER + y]);
+        ++y;
+    } while (--count != 0u);
+    /* the palette-corruption workaround: PPUADDR $3F00 then $0000 */
+    contra_ppu_write_addr(&core->ppu, 0x3Fu);
+    contra_ppu_write_addr(&core->ppu, 0x00u);
+    contra_ppu_write_addr(&core->ppu, 0x00u);
+    contra_ppu_write_addr(&core->ppu, 0x00u);
+    ram[CONTRA_RAM_NUM_PALETTES_TO_LOAD] = 0x00u;
 }
 
-static void contra_apply_graphic_data_to_ppu(ContraCore *core, uint8_t graphic_index)
-{
-    const ContraGraphicDataRef ref = contra_graphic_data_ptrs[graphic_index];
-    const bool flip_horizontal = (ref.bank_code & 0x80u) != 0u;
-    const uint8_t bank = (uint8_t)((ref.bank_code & 0x07u) == 0u ? 7u : (ref.bank_code & 0x07u));
-    uint16_t read_addr = ref.cpu_addr;
-    uint16_t ppu_addr;
+/* bank7 vram_address_increment: the label sits on an RTS ($60), so the table
+   the drain indexes by the buffer's mode byte reads {$60, $00, $04, $00} */
+static const uint8_t contra_vram_address_increment[4] = {0x60u, 0x00u, 0x04u, 0x00u};
 
-    if (!contra_load_rom_image())
+/* bank7 write_cpu_graphics_buffer_to_ppu. Both formats: GRAPHICS_BUFFER_MODE 0
+   (mode byte 1/2 = $FF-terminated run across/down, mode 3 = counted block that
+   ENDS the drain) and nonzero (length/blocks headers, used by the level-start
+   nametable streaming). Only byte 0 is cleared afterwards: the rest of the
+   buffer keeps its stale bytes, exactly like RAM on the NES. */
+static void contra_write_cpu_graphics_buffer_to_ppu(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t *const buf = &ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER];
+
+    if (ram[CONTRA_RAM_GRAPHICS_BUFFER_MODE] == 0u)
+    {
+        uint8_t y = 0x00u;
+
+        ram[0x08u] = 0x00u;
+        for (;;)
+        {
+            uint8_t x;
+
+            /* @read_cpu_mem_to_ppu */
+            if (ram[0x08u] == 0x3Fu)
+            {
+                contra_ppu_write_addr(&core->ppu, 0x3Fu);
+                contra_ppu_write_addr(&core->ppu, 0x00u);
+                contra_ppu_write_addr(&core->ppu, 0x00u);
+                contra_ppu_write_addr(&core->ppu, 0x00u);
+            }
+            x = buf[y];
+            if (x == 0u)
+            {
+                break;
+            }
+            contra_ppu_write_ctrl(&core->ppu,
+                                  (uint8_t)((ram[CONTRA_RAM_PPUCTRL_SETTINGS] & 0x18u) |
+                                            contra_vram_address_increment[x & 0x03u]));
+            ++y;
+            contra_ppu_read_status(&core->ppu);
+            ram[0x08u] = buf[y];
+            contra_ppu_write_addr(&core->ppu, buf[y]);
+            ++y;
+            contra_ppu_write_addr(&core->ppu, buf[y]);
+            ++y;
+            if (x == 0x03u)
+            {
+                ram[0x09u] = buf[y];
+                do
+                {
+                    ++y;
+                    contra_ppu_store_data(core, buf[y]);
+                    ram[0x09u] = (uint8_t)(ram[0x09u] - 1u);
+                } while (ram[0x09u] != 0u);
+                break; /* falls into @reset_graphics_buffer */
+            }
+            /* @flush_graphics_buffer */
+            for (;;)
+            {
+                const uint8_t value = buf[y++];
+
+                if (value != 0xFFu)
+                {
+                    contra_ppu_store_data(core, value);
+                    continue;
+                }
+                if (buf[y] >= 0x04u)
+                {
+                    contra_ppu_store_data(core, 0xFFu); /* a literal $FF tile */
+                    continue;
+                }
+                break; /* next header at buf[y] */
+            }
+        }
+    }
+    else
+    {
+        uint8_t x = 0x00u;
+
+        ram[0x02u] = (uint8_t)(ram[CONTRA_RAM_PPUCTRL_SETTINGS] & 0x18u);
+        for (;;)
+        {
+            const uint8_t mode = buf[x];
+
+            if (mode == 0u)
+            {
+                break;
+            }
+            contra_ppu_write_ctrl(&core->ppu,
+                                  (uint8_t)(ram[0x02u] | contra_vram_address_increment[mode & 0x03u]));
+            ++x;
+            ram[0x00u] = buf[x];
+            ++x;
+            ram[0x01u] = buf[x];
+            do
+            {
+                uint8_t count = ram[0x00u];
+
+                ++x;
+                contra_ppu_write_addr(&core->ppu, buf[x]);
+                ++x;
+                contra_ppu_write_addr(&core->ppu, buf[x]);
+                do
+                {
+                    ++x;
+                    contra_ppu_store_data(core, buf[x]);
+                } while (--count != 0u);
+                ram[0x01u] = (uint8_t)(ram[0x01u] - 1u);
+            } while (ram[0x01u] != 0u);
+            ++x;
+            if (x == 0u)
+            {
+                break;
+            }
+        }
+    }
+
+    /* @reset_graphics_buffer */
+    buf[0] = 0x00u;
+    ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = 0x00u;
+    contra_ppu_write_ctrl(&core->ppu, ram[CONTRA_RAM_PPUCTRL_SETTINGS]);
+}
+
+/* bank7 write_0_to_cpu_graphics_buffer (end of every NMI): terminate the
+   buffer at GRAPHICS_BUFFER_OFFSET and step past the terminator */
+static void contra_write_0_to_cpu_graphics_buffer(ContraCore *core)
+{
+    const uint8_t x = core->ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET];
+
+    core->ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER + x] = 0x00u;
+    core->ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = (uint8_t)(x + 1u);
+}
+
+/* bank1 set_x_adv_OAMDMA_addr / adv_OAMDMA_addr */
+static uint8_t contra_oam_set_x_advance(ContraCore *core, uint8_t x, uint8_t sprite_x)
+{
+    core->ram[CONTRA_RAM_OAMDMA_CPU_BUFFER + (uint8_t)(x + 3u)] = sprite_x;
+    core->ram[0x07u] = (uint8_t)(core->ram[0x07u] - 1u);
+    return (uint8_t)(x + 0xC4u);
+}
+
+static uint16_t contra_read_sprite_ptr(uint8_t sprite_code);
+
+/* bank1 load_sprite_to_cpu_mem ($00 attr, $01 Y, $02 X in; $04/$07 updated).
+   Mirrors the ROM byte for byte: a tile whose X falls off either edge still
+   gets its Y/tile/attr written at the current slot (the slot is simply not
+   advanced), and the per-sprite tile loop does not check the OAM budget. */
+static void contra_load_sprite_to_cpu_mem(ContraCore *core, uint8_t sprite_code)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t *const oam = &ram[CONTRA_RAM_OAMDMA_CPU_BUFFER];
+    uint16_t ptr = contra_read_sprite_ptr(sprite_code);
+    uint8_t y;
+    uint8_t x;
+    uint8_t count;
+
+    ram[0x08u] = (uint8_t)(ptr & 0xFFu);
+    ram[0x09u] = (uint8_t)(ptr >> 8);
+    count = contra_rom_read_u8(1u, ptr);
+    if (count == 0u)
     {
         return;
     }
+    y = 0x01u;
 
-    ppu_addr = contra_rom_read_u16(bank, read_addr);
-    read_addr = (uint16_t)(read_addr + (flip_horizontal ? 4u : 2u));
+    if (count == 0xFEu)
+    {
+        /* @load_small_sprite */
+        x = ram[0x04u];
+        oam[x] = (uint8_t)(0xF8u + ram[0x01u]);
+        oam[(uint8_t)(x + 1u)] = contra_rom_read_u8(1u, (uint16_t)(ptr + y));
+        ++y;
+        oam[(uint8_t)(x + 2u)] = (uint8_t)(contra_rom_read_u8(1u, (uint16_t)(ptr + y)) | ram[0x00u]);
+        if (ram[0x02u] >= 0x04u)
+        {
+            x = contra_oam_set_x_advance(core, x, (uint8_t)(ram[0x02u] - 0x04u));
+            ram[0x04u] = x;
+        }
+        return;
+    }
+
+    ram[0x03u] = count;
+    ram[0x0Bu] = (uint8_t)(ram[0x00u] & 0xC8u);
+    if ((ram[0x00u] & 0x04u) != 0u)
+    {
+        ram[0x00u] = (uint8_t)(ram[0x00u] & 0x23u);
+        ram[0x0Du] = 0xFCu;
+    }
+    else
+    {
+        ram[0x00u] = (uint8_t)(ram[0x00u] & 0x20u);
+        ram[0x0Du] = 0xFFu;
+    }
+    x = ram[0x04u];
 
     for (;;)
     {
-        const uint8_t command = contra_rom_read_u8(bank, read_addr++);
-        unsigned index;
+        uint8_t value;
+        uint8_t rel;
 
-        if (command == 0xFFu)
+        /* @write_sprite_tile */
+        value = contra_rom_read_u8(1u, (uint16_t)(ptr + y));
+        if (value == 0x80u)
         {
-            return;
+            ram[0x0Bu] = (uint8_t)(ram[0x0Bu] & 0xF7u);
+            ++y;
+            ram[0x06u] = contra_rom_read_u8(1u, (uint16_t)(ptr + y));
+            ++y;
+            ram[0x09u] = contra_rom_read_u8(1u, (uint16_t)(ptr + y));
+            ram[0x08u] = ram[0x06u];
+            ptr = (uint16_t)(ram[0x08u] | ((uint16_t)ram[0x09u] << 8));
+            y = 0x00u;
         }
 
-        if (command == 0x7Fu)
+        /* @continue: relative Y (+1 when bit 3 of the effect, flipped for bit 7) */
+        ram[0x0Cu] = contra_rom_read_u8(1u, (uint16_t)(ptr + y));
+        if ((ram[0x0Bu] & 0x08u) != 0u)
         {
-            ppu_addr = contra_rom_read_u16(bank, read_addr);
-            read_addr = (uint16_t)(read_addr + (flip_horizontal ? 4u : 2u));
-            continue;
+            ram[0x0Cu] = (uint8_t)(ram[0x0Cu] + 1u);
+        }
+        rel = ram[0x0Cu];
+        if ((ram[0x0Bu] & 0x80u) != 0u)
+        {
+            rel = (uint8_t)(0xF0u - ram[0x0Cu]);
+        }
+        oam[x] = (uint8_t)(rel + ram[0x01u]);
+        ++y;
+        oam[(uint8_t)(x + 1u)] = contra_rom_read_u8(1u, (uint16_t)(ptr + y));
+        ++y;
+        oam[(uint8_t)(x + 2u)] = (uint8_t)(((contra_rom_read_u8(1u, (uint16_t)(ptr + y)) & ram[0x0Du]) |
+                                            ram[0x00u]) ^ ram[0x0Bu]);
+        ++y;
+
+        /* relative X (mirrored for bit 6); N of the final value picks the
+           edge test: negative offsets need the add to carry, positive ones
+           must not */
+        rel = contra_rom_read_u8(1u, (uint16_t)(ptr + y));
+        if ((ram[0x0Bu] & 0x40u) != 0u)
+        {
+            ram[0x0Cu] = rel;
+            rel = (uint8_t)(0xF8u - ram[0x0Cu]);
+        }
+        {
+            const unsigned sum = (unsigned)rel + (unsigned)ram[0x02u];
+            const bool carry = sum > 0xFFu;
+            const bool visible = ((rel & 0x80u) != 0u) ? carry : !carry;
+
+            if (visible)
+            {
+                x = contra_oam_set_x_advance(core, x, (uint8_t)sum);
+            }
         }
 
-        if ((command & 0x80u) == 0u)
+        /* @move_next_sprite_tile */
+        ++y;
+        ram[0x03u] = (uint8_t)(ram[0x03u] - 1u);
+        if (ram[0x03u] == 0u)
         {
-            uint8_t value = contra_rom_read_u8(bank, read_addr++);
+            break;
+        }
+    }
+    ram[0x04u] = x;
+}
 
-            if (flip_horizontal)
+/* bank1 draw_hud_sprites */
+static void contra_draw_hud_sprites(ContraCore *core)
+{
+    static const uint8_t hud_sprites[8] = {0x0Au, 0x0Au, 0x0Au, 0x0Au, 0x02u, 0x04u, 0x06u, 0x08u};
+    static const uint8_t sprite_medal_x_offset[8] = {0x10u, 0x1Cu, 0x28u, 0x34u, 0x10u, 0x1Cu, 0x28u, 0x34u};
+    uint8_t *const ram = core->ram;
+    uint8_t *const oam = &ram[CONTRA_RAM_OAMDMA_CPU_BUFFER];
+    uint8_t x;
+
+    ram[0x00u] = (ram[CONTRA_RAM_DEMO_MODE] != 0u) ? 0x01u : ram[CONTRA_RAM_PLAYER_MODE];
+    x = ram[0x04u];
+
+    for (;;)
+    {
+        uint8_t y = 0x04u;
+        uint8_t count;
+
+        if (ram[CONTRA_RAM_DEMO_MODE] != 0u)
+        {
+            count = 0x04u;
+        }
+        else if ((ram[CONTRA_RAM_P1_GAME_OVER_STATUS + ram[0x00u]] & 0x01u) != 0u)
+        {
+            count = 0x04u;
+        }
+        else
+        {
+            count = ram[CONTRA_RAM_P1_NUM_LIVES + ram[0x00u]];
+            y = 0x00u;
+            if (count >= 0x04u)
             {
-                value = contra_horizontal_flip_graphic_byte(value);
+                count = 0x04u;
             }
+        }
+        ram[0x01u] = count;
 
-            for (index = 0u; index < command; ++index)
+        for (;;)
+        {
+            uint8_t sprite_x;
+
+            ram[0x01u] = (uint8_t)(ram[0x01u] - 1u);
+            if ((ram[0x01u] & 0x80u) != 0u)
             {
-                contra_write_ppu_byte(core, ppu_addr++, value);
+                break;
             }
-
-            continue;
+            oam[x] = 0x10u;
+            oam[(uint8_t)(x + 1u)] = hud_sprites[y];
+            oam[(uint8_t)(x + 2u)] = ram[0x00u];
+            sprite_x = sprite_medal_x_offset[y];
+            if ((ram[0x00u] & 0x01u) != 0u)
+            {
+                sprite_x = (uint8_t)(sprite_x + 0xB0u); /* adc #$af with carry set */
+            }
+            x = contra_oam_set_x_advance(core, x, sprite_x);
+            ++y;
         }
 
-        for (index = 0u; index < (unsigned)(command & 0x7Fu); ++index)
+        ram[0x00u] = (uint8_t)(ram[0x00u] - 1u);
+        if ((ram[0x00u] & 0x80u) != 0u)
         {
-            uint8_t value = contra_rom_read_u8(bank, read_addr++);
+            break;
+        }
+    }
+    ram[0x04u] = x;
+}
 
-            if (flip_horizontal)
-            {
-                value = contra_horizontal_flip_graphic_byte(value);
-            }
+/* bank1 draw_sprites: the rotating ("flicker") OAM buffer build. Unused slots
+   only get Y = $F4 -- their tile/attr/X bytes keep last frame's values. */
+static void contra_draw_sprites(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t x;
+    uint8_t y;
 
-            contra_write_ppu_byte(core, ppu_addr++, value);
+    ram[CONTRA_RAM_OAMDMA_CPU_BUFFER_OFFSET] = (uint8_t)(ram[CONTRA_RAM_OAMDMA_CPU_BUFFER_OFFSET] + 0x4Cu);
+    ram[0x04u] = ram[CONTRA_RAM_OAMDMA_CPU_BUFFER_OFFSET];
+    ram[0x07u] = 0x3Fu;
+    if (ram[CONTRA_RAM_SPRITE_LOAD_TYPE] != 0u)
+    {
+        contra_draw_hud_sprites(core);
+    }
+
+    x = 0x19u;
+    for (;;)
+    {
+        ram[0x05u] = x;
+        if (ram[CONTRA_RAM_CPU_SPRITE_BUFFER + x] != 0u)
+        {
+            ram[0x00u] = ram[CONTRA_RAM_SPRITE_ATTR + x];
+            ram[0x01u] = ram[CONTRA_RAM_SPRITE_Y_POS + x];
+            ram[0x02u] = ram[CONTRA_RAM_SPRITE_X_POS + x];
+            contra_load_sprite_to_cpu_mem(core, ram[CONTRA_RAM_CPU_SPRITE_BUFFER + x]);
+        }
+        /* @adv_sprite */
+        y = ram[0x07u];
+        if ((y & 0x80u) != 0u)
+        {
+            return; /* OAM full */
+        }
+        x = ram[0x05u];
+        if (x == 0u)
+        {
+            break;
+        }
+        --x;
+    }
+
+    /* @fill_unused_OAM */
+    x = ram[0x04u];
+    for (;;)
+    {
+        ram[CONTRA_RAM_OAMDMA_CPU_BUFFER + x] = 0xF4u;
+        x = (uint8_t)(x + 0xC4u);
+        if (y-- == 0u)
+        {
+            break;
         }
     }
 }
 
-static void contra_load_graphic_data_list(ContraCore *core, uint8_t list_index)
+/* CPU read of the PRG ROM as the 6502 sees it: $8000-$BFFF is the bank the
+   UNROM register currently maps, $C000-$FFFF is fixed bank 7 */
+static uint8_t contra_cpu_read_rom(const ContraCore *core, uint16_t addr)
 {
-    const uint8_t *const graphic_list = contra_level_graphic_data_lists[list_index];
-    unsigned entry_index;
+    return contra_rom_read_u8((addr >= 0xC000u) ? 7u : core->prg_bank, addr);
+}
+
+enum
+{
+    CONTRA_LEVEL_GRAPHIC_DATA_TBL = 0xC8E3u, /* bank7 level_graphic_data_tbl */
+    CONTRA_GRAPHIC_DATA_PTR_TBL = 0xC950u    /* bank7 graphic_data_ptr_tbl */
+};
+
+/* bank7 advance_graphic_read_addr (x = 0): the 16-bit read pointer at $00/$01 */
+static void contra_advance_graphic_read_addr(ContraCore *core, uint8_t amount)
+{
+    const uint16_t ptr = (uint16_t)(core->ram[0x00u] | ((uint16_t)core->ram[0x01u] << 8));
+    const uint16_t next = (uint16_t)(ptr + amount);
+
+    core->ram[0x00u] = (uint8_t)(next & 0xFFu);
+    core->ram[0x01u] = (uint8_t)(next >> 8);
+}
+
+/* bank7 horizontal_flip_graphic_byte: $03 is shifted out to 0 */
+static uint8_t contra_flip_graphic_byte(ContraCore *core, uint8_t value)
+{
+    core->ram[0x03u] = 0x00u;
+    return contra_horizontal_flip_graphic_byte(value);
+}
+
+/* bank7 write_graphic_data_to_ppu: decompress one graphic_data_ptr_tbl entry
+   straight to the PPU (rendering and NMI off), then configure_PPU */
+static void contra_write_graphic_data_to_ppu(ContraCore *core, uint8_t graphic)
+{
+    uint8_t *const ram = core->ram;
+    const uint16_t entry = (uint16_t)(CONTRA_GRAPHIC_DATA_PTR_TBL + (uint16_t)(uint8_t)(graphic * 3u));
+    const uint8_t code = contra_rom_read_u8(7u, (uint16_t)(entry + 2u));
 
     if (!contra_load_rom_image())
     {
         return;
     }
 
-    memset(core->ppu_pattern, 0, sizeof(core->ppu_pattern));
+    ram[0x00u] = contra_rom_read_u8(7u, entry);
+    ram[0x01u] = contra_rom_read_u8(7u, (uint16_t)(entry + 1u));
+    ram[0x04u] = (uint8_t)(code & 0x80u);
+    contra_load_bank_number(core, (uint8_t)(code & 0x07u));
+    contra_clear_ppu(core);
+    ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = 0x00u;
+    ram[CONTRA_RAM_VERTICAL_SCROLL] = 0x00u;
+    ram[CONTRA_RAM_HORIZONTAL_SCROLL] = 0x00u;
 
-    for (entry_index = 0u; entry_index < 10u; ++entry_index)
+    for (;;)
     {
-        const uint8_t graphic_index = graphic_list[entry_index];
+        uint16_t ptr;
 
-        if (graphic_index == 0xFFu)
+        /* begin_ppu_graphics_block_write */
+        ptr = (uint16_t)(ram[0x00u] | ((uint16_t)ram[0x01u] << 8));
+        contra_ppu_read_status(&core->ppu);
+        contra_ppu_write_addr(&core->ppu, contra_cpu_read_rom(core, (uint16_t)(ptr + 1u)));
+        contra_ppu_write_addr(&core->ppu, contra_cpu_read_rom(core, ptr));
+        contra_advance_graphic_read_addr(core, ((ram[0x04u] & 0x80u) != 0u) ? 0x04u : 0x02u);
+
+        for (;;)
+        {
+            uint8_t command;
+
+            ptr = (uint16_t)(ram[0x00u] | ((uint16_t)ram[0x01u] << 8));
+            command = contra_cpu_read_rom(core, ptr);
+            if (command == 0xFFu)
+            {
+                /* end_graphic_code */
+                contra_load_previous_bank(core);
+                contra_configure_ppu(core);
+                return;
+            }
+            if (command == 0x7Fu)
+            {
+                contra_advance_graphic_read_addr(core, 0x01u);
+                break; /* change_ppu_write_address */
+            }
+            if ((command & 0x80u) == 0u)
+            {
+                /* write_graphic_byte_a_times (RLE) */
+                uint8_t value = contra_cpu_read_rom(core, (uint16_t)(ptr + 1u));
+                uint8_t y = command;
+
+                ram[0x02u] = command;
+                if ((ram[0x04u] & 0x80u) != 0u)
+                {
+                    value = contra_flip_graphic_byte(core, value);
+                }
+                do
+                {
+                    contra_ppu_store_data(core, value);
+                } while (--y != 0u);
+                contra_advance_graphic_read_addr(core, 0x02u);
+            }
+            else
+            {
+                /* write_next_n_sequence_bytes (literal run) */
+                uint8_t y = 0x01u;
+
+                ram[0x02u] = (uint8_t)(command & 0x7Fu);
+                for (;;)
+                {
+                    uint8_t value = contra_cpu_read_rom(core, (uint16_t)(ptr + y));
+
+                    if ((ram[0x04u] & 0x80u) != 0u)
+                    {
+                        value = contra_flip_graphic_byte(core, value);
+                    }
+                    contra_ppu_store_data(core, value);
+                    if (y == ram[0x02u])
+                    {
+                        break;
+                    }
+                    ++y;
+                    if (y == 0u)
+                    {
+                        break;
+                    }
+                }
+                contra_advance_graphic_read_addr(core, (uint8_t)(0x01u + ram[0x02u]));
+            }
+        }
+    }
+}
+
+/* bank7 load_level_graphic_data: every graphic_data entry of the list */
+static void contra_load_graphic_data_list(ContraCore *core, uint8_t list_index)
+{
+    uint8_t *const ram = core->ram;
+    const uint16_t list_ptr_addr = (uint16_t)(CONTRA_LEVEL_GRAPHIC_DATA_TBL + (uint16_t)(uint8_t)(list_index * 2u));
+    uint16_t list;
+
+    if (!contra_load_rom_image())
+    {
+        return;
+    }
+
+    ram[0x06u] = contra_rom_read_u8(7u, list_ptr_addr);
+    ram[0x07u] = contra_rom_read_u8(7u, (uint16_t)(list_ptr_addr + 1u));
+    list = (uint16_t)(ram[0x06u] | ((uint16_t)ram[0x07u] << 8));
+    ram[0x05u] = 0x00u;
+    for (;;)
+    {
+        const uint8_t graphic = contra_cpu_read_rom(core, (uint16_t)(list + ram[0x05u]));
+
+        if ((graphic & 0x80u) != 0u)
         {
             return;
         }
-
-        contra_apply_graphic_data_to_ppu(core, graphic_index);
+        contra_write_graphic_data_to_ppu(core, graphic);
+        ram[0x05u] = (uint8_t)(ram[0x05u] + 1u);
+        if (ram[0x05u] == 0u)
+        {
+            return;
+        }
     }
 }
+
+/* ==========================================================================
+   Background pipeline -- faithful ports of bank7 5476-6700: the screen
+   super-tile decoder (LEVEL_SCREEN_SUPERTILES $0600), the column / row
+   streaming of nametable tiles and attribute bytes into CPU_GRAPHICS_BUFFER
+   (block format, GRAPHICS_BUFFER_MODE != 0), the BG_COLLISION_DATA ($0680)
+   writer, the level-start nametable animation, the three scroll handlers,
+   the indoor fence animation and the alternate-tile streaming. Zero-page
+   temporaries are written exactly like the ROM ($00-$03, $08, $10-$17).
+   ========================================================================== */
+
+static void contra_load_alternate_graphics(ContraCore *core);
+static void contra_init_apu_channels(ContraCore *core, uint8_t y);
+static void contra_play_sound(ContraCore *core, uint8_t sound_code);
+static void contra_load_palettes_color_to_cpu(ContraCore *core, uint8_t num_colors);
+
+#define CONTRA_LEVEL_SCREEN_SUPERTILES(core) (&(core)->ram[0x600u])
+
+/* bank7 load_supertiles_screen_indexes (bank 2): decompress screen `screen`
+   of (LEVEL_SCREEN_SUPERTILES_PTR) into LEVEL_SCREEN_SUPERTILES starting at
+   SUPERTILE_NAMETABLE_OFFSET. Stops at $38/$78 (horizontal) or $40/$80
+   (vertical) exactly as the ROM checks it -- an RLE run that jumps past the
+   first bound keeps decoding into the next half. */
+static void contra_rom_load_supertiles_screen_indexes(ContraCore *core, uint8_t screen)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t index = (uint8_t)(screen << 1);
+    uint16_t table;
+    uint16_t data;
+    uint8_t x;
+    uint8_t y;
+
+    if (!contra_load_rom_image())
+    {
+        return;
+    }
+
+    contra_load_bank_number(core, 0x02u);
+    table = (uint16_t)(ram[CONTRA_RAM_LEVEL_SCREEN_SUPERTILES_PTR] |
+                       ((uint16_t)ram[CONTRA_RAM_LEVEL_SCREEN_SUPERTILES_PTR + 1u] << 8));
+    ram[0x00u] = contra_cpu_read_rom(core, (uint16_t)(table + index));
+    ram[0x01u] = contra_cpu_read_rom(core, (uint16_t)(table + (uint8_t)(index + 1u)));
+    data = (uint16_t)(ram[0x00u] | ((uint16_t)ram[0x01u] << 8));
+    y = 0x00u;
+    x = ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET];
+
+    for (;;)
+    {
+        uint8_t value = contra_cpu_read_rom(core, (uint16_t)(data + y));
+
+        ++y;
+        if (value < 0x80u)
+        {
+            ram[0x600u + x] = value;
+            ++x;
+        }
+        else if (value < 0xF0u)
+        {
+            /* load_rle_repeat_command */
+            ram[0x02u] = (uint8_t)(value & 0x7Fu);
+            value = contra_cpu_read_rom(core, (uint16_t)(data + y));
+            ++y;
+            do
+            {
+                ram[0x600u + x] = value;
+                ++x;
+                ram[0x02u] = (uint8_t)(ram[0x02u] - 1u);
+            } while (ram[0x02u] != 0u);
+        }
+        else
+        {
+            /* @set_nametable_supertile_indexes: copy an earlier row of 8 */
+            uint8_t src = (uint8_t)(((value & 0x0Fu) << 3) | ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET]);
+
+            ram[0x03u] = y;
+            ram[0x02u] = 0x08u;
+            do
+            {
+                ram[0x600u + x] = ram[0x600u + src];
+                ++x;
+                ++src;
+                ram[0x02u] = (uint8_t)(ram[0x02u] - 1u);
+            } while (ram[0x02u] != 0u);
+            y = ram[0x03u];
+        }
+
+        /* load_supertile_indexes_starting_at_y */
+        if (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] == 0u)
+        {
+            if ((x == 0x38u) || (x >= 0x78u))
+            {
+                break;
+            }
+        }
+        else if ((x == 0x40u) || (x >= 0x80u))
+        {
+            break;
+        }
+    }
+    contra_load_previous_bank(core);
+}
+
+/* bank7 load_current / load_next / load_next_next_supertiles_screen_indexes
+   (each falls through to the next when its sum is zero) */
+static void contra_rom_load_current_supertiles_screen_indexes(ContraCore *core)
+{
+    contra_rom_load_supertiles_screen_indexes(core, core->ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER]);
+}
+
+static void contra_rom_load_next_supertiles_screen_indexes(ContraCore *core)
+{
+    const uint8_t screen = (uint8_t)(core->ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] + 1u);
+
+    if (screen == 0u)
+    {
+        contra_rom_load_current_supertiles_screen_indexes(core);
+        return;
+    }
+    contra_rom_load_supertiles_screen_indexes(core, screen);
+}
+
+static void contra_rom_load_next_next_supertiles_screen_indexes(ContraCore *core)
+{
+    const uint8_t screen = (uint8_t)(core->ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] + 2u);
+
+    if (screen == 0u)
+    {
+        contra_rom_load_next_supertiles_screen_indexes(core);
+        return;
+    }
+    contra_rom_load_supertiles_screen_indexes(core, screen);
+}
+
+/* bank7 set_tile_collision: classify nametable tile `tile` (0 empty, 1 floor,
+   2 water, 3 solid) into the 2-bit slot $13 of BG_COLLISION_DATA,$12 */
+static void contra_rom_set_tile_collision(ContraCore *core, uint8_t tile, uint8_t y)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t code;
+    uint8_t shifted;
+    uint8_t keep;
+    uint8_t offset;
+
+    ram[0x14u] = y;
+    if (ram[0x11u] != 0u)
+    {
+        return; /* odd nametable column: no collision point */
+    }
+    if (tile == 0u)
+    {
+        code = 0x00u;
+    }
+    else if (tile < ram[CONTRA_RAM_COLLISION_CODE_1_TILE_INDEX])
+    {
+        code = 0x01u;
+    }
+    else if (tile < ram[CONTRA_RAM_COLLISION_CODE_0_TILE_INDEX])
+    {
+        code = 0x00u;
+    }
+    else if (tile < ram[CONTRA_RAM_COLLISION_CODE_2_TILE_INDEX])
+    {
+        code = 0x02u;
+    }
+    else
+    {
+        code = 0x03u;
+    }
+
+    switch (ram[0x13u])
+    {
+        case 0x00u: shifted = (uint8_t)(code << 6); keep = 0x3Fu; break;
+        case 0x01u: shifted = (uint8_t)(code << 4); keep = 0xCFu; break;
+        case 0x02u: shifted = (uint8_t)(code << 2); keep = 0xF3u; break;
+        default: shifted = code; keep = 0xFCu; break;
+    }
+    ram[0x15u] = shifted;
+    offset = ram[0x12u];
+    ram[0x680u + offset] = (uint8_t)((ram[0x680u + offset] & keep) | shifted);
+    if (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] == 0u)
+    {
+        ram[0x12u] = (uint8_t)(offset + 0x04u);
+    }
+    else
+    {
+        ram[0x13u] = (uint8_t)(ram[0x13u] + 1u);
+        if (ram[0x13u] >= 0x04u)
+        {
+            ram[0x13u] = 0x00u;
+            ram[0x12u] = (uint8_t)(ram[0x12u] + 1u);
+        }
+    }
+}
+
+/* the (LEVEL_SUPERTILE_DATA_PTR) address of super-tile `supertile`: the ROM's
+   asl/asl/rol/asl/rol/asl/rol drops bit 7 of the index */
+static uint16_t contra_rom_supertile_data_addr(ContraCore *core, uint8_t supertile)
+{
+    uint8_t *const ram = core->ram;
+    const uint16_t base = (uint16_t)(((uint16_t)(supertile & 0x7Fu) << 4) +
+                                     (uint16_t)(ram[CONTRA_RAM_LEVEL_SUPERTILE_DATA_PTR] |
+                                                ((uint16_t)ram[CONTRA_RAM_LEVEL_SUPERTILE_DATA_PTR + 1u] << 8)));
+
+    ram[0x08u] = (uint8_t)((supertile >> 4) & 0x07u);
+    ram[0x00u] = (uint8_t)(base & 0xFFu);
+    ram[0x01u] = (uint8_t)(base >> 8);
+    return base;
+}
+
+/* bank7 load_column_of_tiles_to_cpu_buffer + load_level_supertile_data: one
+   28-tile nametable column (block: mode 2, $1C bytes, 1 block) plus the
+   column's BG_COLLISION_DATA points on even columns */
+static void contra_rom_load_column_of_tiles_to_cpu_buffer(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t *const buf = &ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER];
+    uint8_t x = ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET];
+    uint8_t low;
+    uint8_t y;
+
+    buf[x] = 0x02u;
+    ++x;
+    buf[x] = 0x1Cu;
+    ++x;
+    buf[x] = 0x01u;
+    ++x;
+    buf[x] = ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE];
+    ram[0x12u] = ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE];
+    ++x;
+    low = ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE];
+    buf[x] = low;
+    ++x;
+    y = 0xFFu;
+    if ((low & 0x01u) == 0u)
+    {
+        /* even column: BG_COLLISION_DATA offset = (PPU addr >> 5) & $3C | col>>3 */
+        uint8_t a = (uint8_t)(low >> 1);
+        const uint8_t carry = (uint8_t)((ram[0x12u] >> 2) & 0x01u);
+
+        ram[0x13u] = a;
+        ram[0x12u] = (uint8_t)(ram[0x12u] >> 3);
+        a = (uint8_t)((a >> 1) | (carry << 7));
+        a = (uint8_t)(a >> 1);
+        ram[0x12u] = a;
+        ram[0x13u] = (uint8_t)(ram[0x13u] & 0x03u);
+        y = 0x00u;
+    }
+    ram[0x11u] = y;
+    ram[0x02u] = (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] & 0x03u);
+    ram[0x10u] = (uint8_t)((ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] >> 2) | ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET]);
+    y = ram[0x10u];
+
+    do
+    {
+        const uint16_t base = contra_rom_supertile_data_addr(core, ram[0x600u + y]);
+        uint8_t tile;
+
+        y = ram[0x02u];
+        tile = contra_cpu_read_rom(core, (uint16_t)(base + y));
+        buf[x] = tile;
+        contra_rom_set_tile_collision(core, tile, y);
+        ++x;
+        y = (uint8_t)(y + 4u);
+        buf[x] = contra_cpu_read_rom(core, (uint16_t)(base + y));
+        ++x;
+        y = (uint8_t)(y + 4u);
+        tile = contra_cpu_read_rom(core, (uint16_t)(base + y));
+        buf[x] = tile;
+        contra_rom_set_tile_collision(core, tile, y);
+        ++x;
+        y = (uint8_t)(y + 4u);
+        buf[x] = contra_cpu_read_rom(core, (uint16_t)(base + y));
+        ++x;
+        ram[0x10u] = (uint8_t)(ram[0x10u] + 0x08u);
+        y = ram[0x10u];
+    } while ((uint8_t)(ram[0x10u] & 0x3Fu) < 0x38u);
+    ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = x;
+}
+
+/* bank7 set_vert_lvl_super_tiles: one 32-tile nametable row (block: mode 1,
+   $20 bytes, 1 block) for the vertical level */
+static void contra_rom_set_vert_lvl_super_tiles(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t *const buf = &ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER];
+    uint8_t x = ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET];
+    const uint8_t tile_offset = ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET];
+    uint8_t y;
+
+    buf[x] = 0x01u;
+    buf[(uint8_t)(x + 2u)] = 0x01u;
+    ++x;
+    buf[x] = 0x20u;
+    ++x;
+    ++x;
+    buf[x] = ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE];
+    ++x;
+    buf[x] = ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE];
+    ++x;
+    ram[0x11u] = 0x00u;
+    ram[0x13u] = 0x00u;
+    ram[0x02u] = (uint8_t)((tile_offset & 0x03u) << 2);
+    ram[0x10u] = (uint8_t)(((tile_offset & 0x1Cu) << 1) | ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET]);
+    ram[0x11u] = (uint8_t)((tile_offset & 0x01u) << 7); /* lsr; ror $11 */
+    ram[0x12u] = (uint8_t)((tile_offset >> 1) << 2);
+    y = ram[0x10u];
+
+    do
+    {
+        const uint16_t base = contra_rom_supertile_data_addr(core, ram[0x600u + y]);
+        uint8_t tile;
+
+        y = ram[0x02u];
+        tile = contra_cpu_read_rom(core, (uint16_t)(base + y));
+        buf[x] = tile;
+        contra_rom_set_tile_collision(core, tile, y);
+        ++x;
+        ++y;
+        buf[x] = contra_cpu_read_rom(core, (uint16_t)(base + y));
+        ++x;
+        ++y;
+        tile = contra_cpu_read_rom(core, (uint16_t)(base + y));
+        buf[x] = tile;
+        contra_rom_set_tile_collision(core, tile, y);
+        ++x;
+        ++y;
+        buf[x] = contra_cpu_read_rom(core, (uint16_t)(base + y));
+        ++x;
+        ram[0x10u] = (uint8_t)(ram[0x10u] + 1u);
+        y = ram[0x10u];
+    } while ((ram[0x10u] & 0x07u) != 0u);
+    ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = x;
+}
+
+static uint8_t contra_rom_supertile_palette(ContraCore *core, uint8_t supertile)
+{
+    const uint16_t palette = (uint16_t)(core->ram[CONTRA_RAM_LEVEL_SUPERTILE_PALETTE_DATA] |
+                                        ((uint16_t)core->ram[CONTRA_RAM_LEVEL_SUPERTILE_PALETTE_DATA + 1u] << 8));
+
+    return contra_cpu_read_rom(core, (uint16_t)(palette + supertile));
+}
+
+/* bank7 write_col_attribute_to_cpu_memory: 7 attribute bytes of the column
+   (block: mode 1, 1 byte, 7 blocks) -- the half row at $F8 is never written */
+static void contra_rom_write_col_attribute_to_cpu_memory(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t *const buf = &ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER];
+    uint8_t x = ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET];
+    uint8_t y;
+
+    buf[x] = 0x01u;
+    ++x;
+    buf[x] = 0x01u;
+    ++x;
+    buf[x] = 0x07u;
+    ++x;
+    ram[0x00u] = (uint8_t)((ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] >> 2) | 0xC0u);
+    ram[0x10u] = (uint8_t)((ram[0x00u] & 0x0Fu) | ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET]);
+    y = ram[0x10u];
+    for (;;)
+    {
+        unsigned sum;
+
+        buf[x] = ram[CONTRA_RAM_ATTRIBUTE_TBL_WRITE_HIGH_BYTE];
+        ++x;
+        buf[x] = ram[0x00u];
+        ++x;
+        buf[x] = contra_rom_supertile_palette(core, ram[0x600u + y]);
+        ++x;
+        ram[0x00u] = (uint8_t)(ram[0x00u] + 0x08u);
+        if (ram[0x00u] >= 0xF8u)
+        {
+            break;
+        }
+        sum = (unsigned)ram[0x10u] + 0x08u;
+        ram[0x10u] = (uint8_t)sum;
+        y = ram[0x10u];
+        if (sum > 0xFFu)
+        {
+            break;
+        }
+    }
+    ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = x;
+}
+
+/* bank7 write_row_attribute_to_cpu_memory (vertical level): 8 attribute bytes
+   of the row (block: mode 1, 8 bytes, 1 block); every 4th tile row merges the
+   bottom half of this screen's super-tile with the top of the other one */
+static void contra_rom_write_row_attribute_to_cpu_memory(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t *const buf = &ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER];
+    uint8_t x = ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET];
+
+    buf[x] = 0x01u;
+    buf[(uint8_t)(x + 2u)] = 0x01u;
+    ++x;
+    buf[x] = 0x08u;
+    ++x;
+    ++x;
+    buf[x] = 0x23u;
+    ram[0x10u] = (uint8_t)(((ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] << 1) & 0x38u) |
+                           ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET]);
+    ++x;
+    buf[x] = (uint8_t)((ram[0x10u] & 0xBFu) + 0xC0u);
+    ++x;
+    do
+    {
+        uint8_t value;
+
+        if ((ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] & 0x03u) == 0x03u)
+        {
+            ram[0x11u] = (uint8_t)(contra_rom_supertile_palette(core, ram[0x600u + ram[0x10u]]) & 0xF0u);
+            value = (uint8_t)((contra_rom_supertile_palette(core, ram[0x600u + (uint8_t)(ram[0x10u] ^ 0x40u)]) & 0x0Fu) |
+                              ram[0x11u]);
+        }
+        else
+        {
+            value = contra_rom_supertile_palette(core, ram[0x600u + ram[0x10u]]);
+        }
+        buf[x] = value;
+        ++x;
+        ram[0x10u] = (uint8_t)(ram[0x10u] + 1u);
+    } while ((ram[0x10u] & 0x07u) != 0u);
+    ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = x;
+}
+
+/* bank7 config_horizontal_scrolling */
+static void contra_rom_config_horizontal_scrolling(ContraCore *core, uint8_t transition_timer)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] = transition_timer;
+    ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] = 0x00u;
+    ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] = 0x00u;
+    ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET] = 0x00u;
+    ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] = 0x00u;
+    ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = 0x00u;
+    ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] = 0x20u;
+    ram[CONTRA_RAM_ATTRIBUTE_TBL_WRITE_LOW_BYTE] = 0xC0u;
+    ram[CONTRA_RAM_ATTRIBUTE_TBL_WRITE_HIGH_BYTE] = 0x23u;
+    contra_rom_load_current_supertiles_screen_indexes(core);
+}
+
+/* bank7 config_vertical_scrolling */
+static void contra_rom_config_vertical_scrolling(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+
+    ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] = 0x00u;
+    ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] = 0x00u;
+    ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET] = 0x00u;
+    ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] = 0x1Du;
+    ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = 0xA0u;
+    ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] = 0x23u;
+    contra_rom_load_current_supertiles_screen_indexes(core);
+}
+
+/* bank7 init_ppu_write_screen_supertiles (+ continue_init_level) */
+static void contra_init_ppu_write_screen_supertiles(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+
+    if (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u)
+    {
+        contra_rom_config_vertical_scrolling(core);
+        return;
+    }
+    if (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u)
+    {
+        ram[CONTRA_RAM_BG_PALETTE_ADJ_TIMER] = 0x10u;
+        contra_load_palettes_color_to_cpu(core, 0x10u);
+        contra_rom_config_horizontal_scrolling(core, 0x20u);
+        return;
+    }
+    contra_rom_config_horizontal_scrolling(core, 0x30u);
+}
+
+/* bank7 load_bank_3_init_lvl_nametable_animation / init_lvl_nametable_animation:
+   stream one column (row for the vertical level) of the opening screen per
+   frame. Returns true when the ROM exits with the zero flag set (done). */
+static bool contra_init_lvl_nametable_animation_elapsed(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+
+    contra_load_bank_number(core, 0x03u);
+
+    if (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u)
+    {
+        unsigned diff;
+
+        contra_rom_set_vert_lvl_super_tiles(core);
+        contra_rom_write_row_attribute_to_cpu_memory(core);
+        diff = (unsigned)ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] - 0x20u;
+        ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = (uint8_t)diff;
+        if (diff > 0xFFu)
+        {
+            ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] = (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] - 1u);
+        }
+        ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] = (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] - 1u);
+        if ((ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] & 0x80u) == 0u)
+        {
+            return false;
+        }
+        contra_rom_config_vertical_scrolling(core);
+        ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET] = 0x40u;
+        contra_rom_load_next_supertiles_screen_indexes(core);
+        return true;
+    }
+
+    contra_rom_load_column_of_tiles_to_cpu_buffer(core);
+    contra_rom_write_col_attribute_to_cpu_memory(core);
+    ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] + 1u);
+    ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] = (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] + 1u);
+    ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] = (uint8_t)(ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] - 1u);
+    if (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u)
+    {
+        return ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] == 0u; /* @indoor_level */
+    }
+    if (ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] == 0u)
+    {
+        return true;
+    }
+    if (ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] >= 0x20u)
+    {
+        ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = 0x00u;
+        ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] = 0x00u;
+        ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] = 0x24u;
+        ram[CONTRA_RAM_ATTRIBUTE_TBL_WRITE_HIGH_BYTE] = 0x27u;
+        ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET] = 0x40u;
+        contra_rom_load_next_supertiles_screen_indexes(core);
+    }
+    return false;
+}
+
+/* bank7 animate_indoor_fence: rebuild the 4 fence pattern tiles at $1FC0 in
+   the graphics buffer (block: mode 1, $40 bytes, 1 block) every 4th frame, or
+   once as the bare floor when the room is cleared */
+static const uint8_t contra_pattern_tile_bg_00[0x40] = {
+    0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
+    0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu,
+    0xFEu, 0xFCu, 0xF8u, 0xF0u, 0xE0u, 0xC0u, 0x80u, 0x00u, 0x00u, 0x01u, 0x03u, 0x07u, 0x0Fu, 0x1Fu, 0x3Fu, 0x7Fu,
+    0x7Fu, 0x3Fu, 0x1Fu, 0x0Fu, 0x07u, 0x03u, 0x01u, 0x00u, 0x00u, 0x80u, 0xC0u, 0xE0u, 0xF0u, 0xF8u, 0xFCu, 0xFEu};
+
+static const uint8_t contra_pattern_tile_fence_tbl[0x28] = {
+    0x00u, 0x00u, 0x04u, 0x44u, 0xEBu, 0x32u, 0x20u, 0x00u,
+    0x00u, 0x00u, 0x10u, 0x30u, 0xEBu, 0x6Au, 0x44u, 0x00u,
+    0x00u, 0x00u, 0x08u, 0x0Cu, 0xD7u, 0x56u, 0x22u, 0x00u,
+    0x00u, 0x00u, 0x20u, 0x22u, 0xD7u, 0x4Cu, 0x04u, 0x00u,
+    0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u};
+
+static void contra_rom_animate_indoor_fence(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t *const buf = &ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER];
+    uint8_t x;
+    uint8_t y;
+    uint8_t fence;
+
+    if ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] & 0x80u) != 0u)
+    {
+        return;
+    }
+    if (ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] != 0u)
+    {
+        ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] = 0x80u;
+        fence = 0x20u;
+    }
+    else
+    {
+        if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x03u) != 0u)
+        {
+            return;
+        }
+        fence = (uint8_t)((ram[CONTRA_RAM_FRAME_COUNTER] & 0x0Cu) << 1);
+    }
+
+    ram[0x14u] = fence;
+    x = ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET];
+    buf[x] = 0x01u;
+    buf[(uint8_t)(x + 2u)] = 0x01u;
+    ++x;
+    buf[x] = 0x40u;
+    ++x;
+    ++x;
+    buf[x] = 0x1Fu;
+    ++x;
+    buf[x] = 0xC0u;
+    ++x;
+    /* pattern_tile_bg_tbl -> $10/$11 = pattern_tile_bg_00 ($CDBF) */
+    ram[0x10u] = 0xBFu;
+    ram[0x11u] = 0xCDu;
+    ram[0x13u] = 0x07u;
+    ram[0x12u] = x;
+    fence = ram[0x14u];
+    for (y = 0x00u; y < 0x40u; ++y)
+    {
+        buf[(uint8_t)(ram[0x12u] + y)] = (uint8_t)(contra_pattern_tile_bg_00[y] | contra_pattern_tile_fence_tbl[fence]);
+        fence = (uint8_t)(((fence + 1u) & 0x07u) | ram[0x14u]);
+    }
+    ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = (uint8_t)(y + ram[0x12u]);
+}
+
+/* bank7 handle_scroll -> handle_indoor_scroll */
+static void contra_rom_handle_indoor_scroll(ContraCore *core)
+{
+    static const uint8_t level_2_4_boss_graphics_data[6] = {0x13u, 0x90u, 0x7Au, 0xB5u, 0x7Au, 0xBDu};
+    uint8_t *const ram = core->ram;
+
+    if ((ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] & 0x80u) == 0u)
+    {
+        contra_rom_animate_indoor_fence(core);
+        return;
+    }
+
+    if ((ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] & 0x80u) != 0u)
+    {
+        /* @indoor_screen_transition */
+        ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] = 0x00u;
+        ram[CONTRA_RAM_INDOOR_SCROLL] = (uint8_t)(ram[CONTRA_RAM_INDOOR_SCROLL] + 1u);
+        ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] = (uint8_t)(ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] + 1u);
+        if (ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] == 0x04u)
+        {
+            ram[CONTRA_RAM_INDOOR_PLAYER_JUMP_FLAG + 0u] = (uint8_t)(ram[CONTRA_RAM_INDOOR_PLAYER_JUMP_FLAG + 0u] + 1u);
+            ram[CONTRA_RAM_INDOOR_PLAYER_JUMP_FLAG + 1u] = (uint8_t)(ram[CONTRA_RAM_INDOOR_PLAYER_JUMP_FLAG + 1u] + 1u);
+            ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] = 0x00u;
+            ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] = 0x00u;
+            ram[CONTRA_RAM_ENEMY_SCREEN_READ_OFFSET] = 0x00u;
+            ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] = (uint8_t)(ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] + 1u);
+            if (ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] == ram[CONTRA_RAM_LEVEL_STOP_SCROLL])
+            {
+                ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] = 0x80u;
+                contra_load_alternate_graphics(core);
+                contra_init_apu_channels(core, 0x03u); /* Y left by load_alternate_graphics' palette loop */
+                contra_note_raster_cut(core, 47u, 176u); /* clear_ppu: ROM frame 11961 */
+                contra_load_graphic_data_list(core, (uint8_t)((ram[CONTRA_RAM_CURRENT_LEVEL] >> 1) | 0x08u));
+                contra_play_sound(core, 0x42u);
+                ram[CONTRA_RAM_PPUCTRL_SETTINGS] = 0xB1u;
+                ram[CONTRA_RAM_VERTICAL_SCROLL] = 0xE0u;
+            }
+            ram[CONTRA_RAM_BG_PALETTE_ADJ_TIMER] = 0x0Cu;
+            contra_load_palettes_color_to_cpu(core, 0x20u);
+        }
+        ram[CONTRA_RAM_PPUCTRL_SETTINGS] ^= 0x01u;
+        return;
+    }
+
+    if (ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] == 0u)
+    {
+        uint8_t screen;
+
+        if (ram[CONTRA_RAM_INDOOR_SCROLL] == 0u)
+        {
+            return;
+        }
+        ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] = 0x00u;
+        ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = 0x00u;
+        ram[CONTRA_RAM_ATTRIBUTE_TBL_WRITE_LOW_BYTE] = 0x00u;
+        ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] = 0x20u;
+        ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] ^= 0x04u;
+        ram[CONTRA_RAM_ATTRIBUTE_TBL_WRITE_HIGH_BYTE] ^= 0x04u;
+        if ((ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] == ram[CONTRA_RAM_LEVEL_ALT_GRAPHICS_POS]) &&
+            (ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] == 0x03u))
+        {
+            /* the boss screen's super-tile pointers (bank7
+               level_2_4_boss_graphics_data) */
+            memcpy(&ram[CONTRA_RAM_LEVEL_SCREEN_SUPERTILES_PTR], level_2_4_boss_graphics_data, 6u);
+            screen = ram[CONTRA_RAM_CURRENT_LEVEL] >> 1; /* the carry from lsr is set: odd level */
+        }
+        else
+        {
+            /* LEVEL_SCREEN_NUMBER * 4 + LEVEL_SCREEN_SCROLL_OFFSET + 1 (sec) */
+            screen = (uint8_t)((uint8_t)(ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] << 2) +
+                               ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] + 1u);
+        }
+        contra_rom_load_supertiles_screen_indexes(core, screen);
+    }
+
+    /* @write_column_tiles_exit */
+    contra_rom_load_column_of_tiles_to_cpu_buffer(core);
+    contra_rom_write_col_attribute_to_cpu_memory(core);
+    ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] = (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] + 1u);
+    ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] + 1u);
+    ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] = (uint8_t)(ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] - 1u);
+    if (ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] == 0u)
+    {
+        ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] = 0x80u;
+    }
+}
+
+/* bank7 handle_vertical_scroll */
+static void contra_rom_handle_vertical_scroll(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+
+    if (ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] != 0u)
+    {
+        ram[CONTRA_RAM_BG_PALETTE_ADJ_TIMER] = 0x10u;
+        ram[CONTRA_RAM_FRAME_SCROLL] = 0x01u;
+        ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] = (uint8_t)(ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] - 1u);
+        if (ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] == 0u)
+        {
+            ram[CONTRA_RAM_BOSS_AUTO_SCROLL_COMPLETE] = (uint8_t)(ram[CONTRA_RAM_BOSS_AUTO_SCROLL_COMPLETE] + 1u);
+        }
+    }
+    if (ram[CONTRA_RAM_FRAME_SCROLL] == 0u)
+    {
+        return;
+    }
+    ram[0x17u] = ram[CONTRA_RAM_FRAME_SCROLL];
+    do
+    {
+        ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] = (uint8_t)(ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] + 1u);
+        if (ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] >= 0xF0u)
+        {
+            ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] = 0x00u;
+            ram[CONTRA_RAM_ENEMY_SCREEN_READ_OFFSET] = 0x00u;
+            ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] = (uint8_t)(ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] + 1u);
+            if (ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] == ram[CONTRA_RAM_LEVEL_ALT_GRAPHICS_POS])
+            {
+                ram[CONTRA_RAM_ALT_GRAPHIC_DATA_LOADING_FLAG] = 0x01u;
+                ram[CONTRA_RAM_BG_PALETTE_ADJ_TIMER] = 0x80u;
+                contra_load_alternate_graphics(core);
+            }
+        }
+        if ((ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] & 0x07u) == 0u)
+        {
+            unsigned diff;
+
+            contra_rom_set_vert_lvl_super_tiles(core);
+            diff = (unsigned)ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] - 0x20u;
+            ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = (uint8_t)diff;
+            if (diff > 0xFFu)
+            {
+                ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] =
+                    (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] - 1u);
+            }
+            ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] = (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] - 1u);
+            if ((ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] & 0x80u) != 0u)
+            {
+                ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET] ^= 0x40u;
+                contra_rom_load_next_supertiles_screen_indexes(core);
+                ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] = 0x1Du;
+                ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = 0xA0u;
+                ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] = 0x23u;
+            }
+        }
+        else if ((ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] & 0x0Fu) == 0x07u)
+        {
+            contra_rom_write_row_attribute_to_cpu_memory(core);
+        }
+        /* @dec_scroll_continue */
+        ram[CONTRA_RAM_VERTICAL_SCROLL] = (uint8_t)(ram[CONTRA_RAM_VERTICAL_SCROLL] - 1u);
+        if (ram[CONTRA_RAM_VERTICAL_SCROLL] == 0xFFu)
+        {
+            ram[CONTRA_RAM_VERTICAL_SCROLL] = 0xEFu;
+        }
+        ram[0x17u] = (uint8_t)(ram[0x17u] - 1u);
+    } while (ram[0x17u] != 0u);
+}
+
+/* bank7 load_bank_3_handle_scroll / handle_scroll */
+static void contra_load_bank_3_handle_scroll(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+    bool set_scroll_frame = false;
+    uint8_t scroll;
+
+    contra_load_bank_number(core, 0x03u);
+    if (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u)
+    {
+        contra_rom_handle_vertical_scroll(core);
+        return;
+    }
+    if (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u)
+    {
+        contra_rom_handle_indoor_scroll(core);
+        return;
+    }
+
+    /* @handle_outdoor_level */
+    if (ram[CONTRA_RAM_AUTO_SCROLL_TIMER_01] != 0u)
+    {
+        ram[CONTRA_RAM_AUTO_SCROLL_TIMER_01] = (uint8_t)(ram[CONTRA_RAM_AUTO_SCROLL_TIMER_01] - 1u);
+        if (ram[CONTRA_RAM_AUTO_SCROLL_TIMER_01] != 0u)
+        {
+            set_scroll_frame = true;
+        }
+    }
+    if (!set_scroll_frame && (ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] != 0u))
+    {
+        ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] = (uint8_t)(ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] - 1u);
+        if (ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] == 0u)
+        {
+            ram[CONTRA_RAM_BOSS_AUTO_SCROLL_COMPLETE] = (uint8_t)(ram[CONTRA_RAM_BOSS_AUTO_SCROLL_COMPLETE] + 1u);
+        }
+        set_scroll_frame = true;
+    }
+    if (set_scroll_frame)
+    {
+        ram[CONTRA_RAM_FRAME_SCROLL] = 0x01u;
+    }
+    scroll = (uint8_t)(ram[CONTRA_RAM_FRAME_SCROLL] + ram[CONTRA_RAM_TANK_AUTO_SCROLL]);
+    if (scroll == 0u)
+    {
+        return;
+    }
+    ram[0x17u] = scroll;
+
+    do
+    {
+        /* @set_scroll_graphics_data */
+        ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] = (uint8_t)(ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] + 1u);
+        if (ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] == 0u)
+        {
+            ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] = (uint8_t)(ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] + 1u);
+            if (ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] == ram[CONTRA_RAM_LEVEL_ALT_GRAPHICS_POS])
+            {
+                ram[CONTRA_RAM_ALT_GRAPHIC_DATA_LOADING_FLAG] = 0x01u;
+                contra_load_alternate_graphics(core);
+            }
+            /* @change_screen */
+            ram[CONTRA_RAM_ENEMY_SCREEN_READ_OFFSET] = 0x00u;
+            ram[CONTRA_RAM_PPUCTRL_SETTINGS] ^= 0x01u;
+        }
+        /* @inc_nametable_data */
+        if ((ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] & 0x07u) == 0u)
+        {
+            contra_rom_load_column_of_tiles_to_cpu_buffer(core);
+            ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] + 1u);
+            ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] = (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] + 1u);
+            if (ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] >= 0x20u)
+            {
+                ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET] ^= 0x40u;
+                contra_rom_load_next_next_supertiles_screen_indexes(core);
+                ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = 0x00u;
+                ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] = 0x00u;
+                ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] ^= 0x04u;
+                ram[CONTRA_RAM_ATTRIBUTE_TBL_WRITE_HIGH_BYTE] ^= 0x04u;
+            }
+        }
+        else if ((ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] & 0x0Fu) == 0x03u)
+        {
+            contra_rom_write_col_attribute_to_cpu_memory(core);
+        }
+        /* @inc_scroll_exit */
+        ram[CONTRA_RAM_HORIZONTAL_SCROLL] = (uint8_t)(ram[CONTRA_RAM_HORIZONTAL_SCROLL] + 1u);
+        ram[0x17u] = (uint8_t)(ram[0x17u] - 1u);
+    } while (ram[0x17u] != 0u);
+}
+
+/* bank7 load_bank_2_alternate_tile_loading / alternate_tile_loading: stream
+   the level's alternate CHR 32 bytes per frame through the graphics buffer
+   (block: mode 1, $20 bytes, 1 block), only while the buffer is < $10 full */
+static void contra_load_bank_2_alternate_tile_loading(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t *const buf = &ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER];
+    uint8_t x;
+    uint8_t y;
+
+    contra_load_bank_number(core, 0x02u);
+    if (ram[CONTRA_RAM_ALT_GRAPHIC_DATA_LOADING_FLAG] == 0u)
+    {
+        return;
+    }
+    if ((ram[CONTRA_RAM_ALT_GRAPHIC_DATA_LOADING_FLAG] & 0x80u) == 0u)
+    {
+        const uint8_t level = ram[CONTRA_RAM_CURRENT_LEVEL];
+        const uint16_t entry = (uint16_t)(0xCD2Cu + /* alt_graphic_data_ptr_tbl */ (uint16_t)(uint8_t)((level << 2) + level));
+
+        ram[CONTRA_RAM_ALT_GFX_PPU_ADDR_LO] = contra_rom_read_u8(7u, entry);
+        ram[CONTRA_RAM_ALT_GFX_PPU_ADDR_HI] = contra_rom_read_u8(7u, (uint16_t)(entry + 1u));
+        ram[CONTRA_RAM_ALT_GFX_READ_ADDR_LO] = contra_rom_read_u8(7u, (uint16_t)(entry + 2u));
+        ram[CONTRA_RAM_ALT_GFX_READ_ADDR_HI] = contra_rom_read_u8(7u, (uint16_t)(entry + 3u));
+        if (contra_rom_read_u8(7u, (uint16_t)(entry + 4u)) == 0u)
+        {
+            ram[CONTRA_RAM_ALT_GRAPHIC_DATA_LOADING_FLAG] = 0x00u;
+            return;
+        }
+        ram[CONTRA_RAM_ALT_GFX_CHUNK_COUNT] = contra_rom_read_u8(7u, (uint16_t)(entry + 4u));
+        ram[CONTRA_RAM_ALT_GRAPHIC_DATA_LOADING_FLAG] = 0x80u;
+    }
+
+    /* set_alt_graphics_cpu_buffer */
+    x = ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET];
+    if (x >= 0x10u)
+    {
+        return;
+    }
+    buf[x] = 0x01u;
+    buf[(uint8_t)(x + 2u)] = 0x01u;
+    ++x;
+    buf[x] = 0x20u;
+    ++x;
+    ++x;
+    buf[x] = ram[CONTRA_RAM_ALT_GFX_PPU_ADDR_HI];
+    ++x;
+    buf[x] = ram[CONTRA_RAM_ALT_GFX_PPU_ADDR_LO];
+    ++x;
+    {
+        const uint16_t read_addr = (uint16_t)(ram[CONTRA_RAM_ALT_GFX_READ_ADDR_LO] |
+                                              ((uint16_t)ram[CONTRA_RAM_ALT_GFX_READ_ADDR_HI] << 8));
+
+        for (y = 0x00u; y < 0x20u; ++y)
+        {
+            buf[x] = contra_cpu_read_rom(core, (uint16_t)(read_addr + y));
+            ++x;
+        }
+    }
+    ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = x;
+    ram[CONTRA_RAM_ALT_GFX_CHUNK_COUNT] = (uint8_t)(ram[CONTRA_RAM_ALT_GFX_CHUNK_COUNT] - 1u);
+    if (ram[CONTRA_RAM_ALT_GFX_CHUNK_COUNT] == 0u)
+    {
+        ram[CONTRA_RAM_ALT_GRAPHIC_DATA_LOADING_FLAG] = 0x00u;
+        return;
+    }
+    {
+        uint16_t addr = (uint16_t)(ram[CONTRA_RAM_ALT_GFX_READ_ADDR_LO] |
+                                   ((uint16_t)ram[CONTRA_RAM_ALT_GFX_READ_ADDR_HI] << 8));
+
+        addr = (uint16_t)(addr + 0x20u);
+        ram[CONTRA_RAM_ALT_GFX_READ_ADDR_LO] = (uint8_t)(addr & 0xFFu);
+        ram[CONTRA_RAM_ALT_GFX_READ_ADDR_HI] = (uint8_t)(addr >> 8);
+        addr = (uint16_t)(ram[CONTRA_RAM_ALT_GFX_PPU_ADDR_LO] | ((uint16_t)ram[CONTRA_RAM_ALT_GFX_PPU_ADDR_HI] << 8));
+        addr = (uint16_t)(addr + 0x20u);
+        ram[CONTRA_RAM_ALT_GFX_PPU_ADDR_LO] = (uint8_t)(addr & 0xFFu);
+        ram[CONTRA_RAM_ALT_GFX_PPU_ADDR_HI] = (uint8_t)(addr >> 8);
+    }
+}
+
+/* ==========================================================================
+   Nametable updates from game objects -- faithful ports of bank7
+   update_nametable_supertile (1351), update_supertile_palette,
+   update_nametable_tiles (1648), set_ppu_addresses_in_mem (1813),
+   set_graphics_buffer_header, the bank-3 wrappers and the enemy-side helpers
+   (draw_enemy_supertile_*, update_enemy_nametable_tiles*, 8590-8720), plus
+   set_supertile_bg_collisions (8197). Everything is queued in
+   CPU_GRAPHICS_BUFFER and reaches the PPU at the next NMI; a full buffer
+   ($40 for super-tiles, $50 for tile animations) returns carry set so the
+   caller retries next frame, exactly like the ROM.
+   ========================================================================== */
+
+enum
+{
+    CONTRA_NAMETABLE_UPDATE_DATA_PTR_TBL = 0xC6D3u, /* bank7 nametable_update_data_ptr_tbl */
+    CONTRA_LEVEL_TILE_ANIMATION_PTR_TBL = 0xC79Fu   /* bank7 level_tile_animation_ptr_tbl */
+};
+
+/* bank7 set_ppu_addresses_in_mem: $10 (bit 7 = no palette) at ($11, y) ->
+   $0C/$0D nametable address (= $12/$13), $14/$15 attribute address,
+   $00 attribute quadrant, $02 LEVEL_SCREEN_SUPERTILES offset, $0F flag */
+static void contra_rom_set_ppu_addresses_in_mem(ContraCore *core, uint8_t y)
+{
+    static const uint8_t attribute_base_high_byte[2] = {0x23u, 0x27u};
+    static const uint8_t nametable_base_high_byte[2] = {0x20u, 0x24u};
+    uint8_t *const ram = core->ram;
+    unsigned sum;
+    uint8_t a;
+    uint8_t t;
+    uint8_t hi;
+    uint8_t nt;
+    uint8_t col;
+
+    ram[0x0Fu] = (uint8_t)(ram[0x10u] & 0x80u);
+    ram[0x10u] = (uint8_t)(ram[0x10u] & 0x7Fu);
+    sum = (unsigned)y + ram[CONTRA_RAM_VERTICAL_SCROLL];
+    a = (uint8_t)sum;
+    if ((sum > 0xFFu) || (a >= 0xF0u))
+    {
+        a = (uint8_t)(a + 0x10u); /* @round_up: adc #$0f with carry set */
+    }
+    a = (uint8_t)(a & 0xF8u);
+    ram[0x12u] = a;
+    t = (uint8_t)(a >> 2);
+    ram[0x00u] = (uint8_t)((t >> 1) & 0x02u);
+    ram[0x14u] = (uint8_t)(t & 0x38u);
+    hi = (uint8_t)(ram[0x12u] >> 7);
+    ram[0x12u] = (uint8_t)(ram[0x12u] << 1);
+    hi = (uint8_t)((hi << 1) | (ram[0x12u] >> 7));
+    ram[0x12u] = (uint8_t)(ram[0x12u] << 1);
+    ram[0x13u] = hi;
+    sum = (unsigned)ram[0x11u] + ram[CONTRA_RAM_HORIZONTAL_SCROLL];
+    ram[0x11u] = (uint8_t)sum;
+    nt = (uint8_t)(ram[CONTRA_RAM_PPUCTRL_SETTINGS] & 0x01u);
+    if (sum > 0xFFu)
+    {
+        nt ^= 0x01u;
+    }
+    ram[0x15u] = (uint8_t)(attribute_base_high_byte[nt] | 0x03u);
+    ram[0x13u] = (uint8_t)(nametable_base_high_byte[nt] | ram[0x13u]);
+    ram[0x0Du] = ram[0x13u];
+    ram[0x02u] = (uint8_t)(nt ? 0x40u : 0x00u);
+    col = (uint8_t)((ram[0x11u] & 0xF8u) >> 3);
+    ram[0x00u] = (uint8_t)(((col >> 1) & 0x01u) | ram[0x00u]);
+    ram[0x03u] = (uint8_t)((col >> 2) | ram[0x14u]);
+    ram[0x14u] = (uint8_t)(ram[0x03u] + 0xC0u);
+    ram[0x12u] = (uint8_t)(col | ram[0x12u]);
+    ram[0x0Cu] = ram[0x12u];
+    ram[0x02u] = (uint8_t)(ram[0x02u] | ram[0x03u]);
+}
+
+/* bank7 set_graphics_buffer_header: one byte at PPU ($15:$14) */
+static uint8_t contra_rom_set_graphics_buffer_header(ContraCore *core, uint8_t x)
+{
+    uint8_t *const buf = &core->ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER];
+
+    buf[x] = 0x01u;
+    ++x;
+    buf[x] = 0x01u;
+    ++x;
+    buf[x] = 0x01u;
+    ++x;
+    buf[x] = core->ram[0x15u];
+    ++x;
+    buf[x] = core->ram[0x14u];
+    ++x;
+    return x;
+}
+
+/* bank7 write_update_supertile_to_cpu: 4 rows x 4 tiles of super-tile $10 */
+static void contra_rom_write_update_supertile_to_cpu(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t *const buf = &ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER];
+    uint16_t data;
+    uint8_t y;
+
+    ram[0x11u] = (uint8_t)((ram[0x10u] >> 4) & 0x07u);
+    data = (uint16_t)((uint16_t)(ram[0x16u] | ((uint16_t)ram[0x17u] << 8)) + (uint16_t)((ram[0x10u] & 0x7Fu) << 4));
+    ram[0x16u] = (uint8_t)(data & 0xFFu);
+    ram[0x17u] = (uint8_t)(data >> 8);
+    buf[x] = 0x01u;
+    ++x;
+    ram[0x14u] = 0x04u;
+    buf[x] = 0x04u;
+    ++x;
+    buf[x] = 0x04u;
+    ++x;
+    y = 0x00u;
+    do
+    {
+        uint16_t addr;
+
+        buf[x] = ram[0x0Du];
+        ++x;
+        buf[x] = ram[0x0Cu];
+        ++x;
+        do
+        {
+            buf[x] = contra_cpu_read_rom(core, (uint16_t)(data + y));
+            ++x;
+            ++y;
+        } while ((y & 0x03u) != 0u);
+        addr = (uint16_t)((ram[0x0Cu] | ((uint16_t)ram[0x0Du] << 8)) + 0x20u);
+        ram[0x0Cu] = (uint8_t)(addr & 0xFFu);
+        ram[0x0Du] = (uint8_t)(addr >> 8);
+        ram[0x14u] = (uint8_t)(ram[0x14u] - 1u);
+    } while (ram[0x14u] != 0u);
+    ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = x;
+}
+
+/* bank7 update_supertile_palette: the stamped super-tile straddles the
+   attribute grid ($00 = 1 two across, 2 two down, 3 a 2x2 block) -- merge its
+   palette bits into the neighbours' attribute bytes */
+static void contra_rom_update_supertile_palette(ContraCore *core, uint8_t mode, uint8_t y)
+{
+    static const uint8_t update_palette_cfg_tbl[6] = {0x02u, 0x01u, 0x01u, 0x02u, 0x02u, 0x02u};
+    uint8_t *const ram = core->ram;
+    uint8_t *const buf = &ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER];
+    const uint8_t palette = contra_cpu_read_rom(core, (uint16_t)((ram[0x0Eu] | ((uint16_t)ram[0x0Fu] << 8)) + y));
+    const uint8_t base = ram[0x02u];
+    uint8_t x;
+    uint8_t i;
+
+    ram[0x01u] = (uint8_t)(mode - 1u);
+    if (mode == 0x01u)
+    {
+        ram[0x08u] = (uint8_t)((palette & 0x33u) << 2);
+        ram[0x09u] = (uint8_t)((palette & 0xCCu) >> 2);
+        ram[0x08u] = (uint8_t)((contra_rom_supertile_palette(core, ram[0x600u + base]) & 0x33u) | ram[0x08u]);
+        ram[0x09u] = (uint8_t)((contra_rom_supertile_palette(core, ram[0x600u + (uint8_t)(base + 1u)]) & 0xCCu) |
+                               ram[0x09u]);
+    }
+    else if (mode == 0x02u)
+    {
+        ram[0x09u] = (uint8_t)(palette >> 4);
+        ram[0x08u] = (uint8_t)(palette << 4);
+        ram[0x08u] = (uint8_t)((contra_rom_supertile_palette(core, ram[0x600u + base]) & 0x0Fu) | ram[0x08u]);
+        ram[0x09u] = (uint8_t)((contra_rom_supertile_palette(core, ram[0x600u + (uint8_t)(base + 8u)]) & 0xF0u) |
+                               ram[0x09u]);
+    }
+    else
+    {
+        ram[0x08u] = (uint8_t)((palette & 0x03u) << 6);
+        ram[0x0Au] = (uint8_t)((palette >> 2) & 0x0Cu);
+        ram[0x0Bu] = (uint8_t)(palette >> 6);
+        ram[0x09u] = (uint8_t)((palette << 2) & 0x30u);
+        ram[0x08u] = (uint8_t)((contra_rom_supertile_palette(core, ram[0x600u + base]) & 0x3Fu) | ram[0x08u]);
+        ram[0x09u] = (uint8_t)((contra_rom_supertile_palette(core, ram[0x600u + (uint8_t)(base + 1u)]) & 0xCFu) |
+                               ram[0x09u]);
+        ram[0x0Au] = (uint8_t)((contra_rom_supertile_palette(core, ram[0x600u + (uint8_t)(base + 8u)]) & 0xF3u) |
+                               ram[0x0Au]);
+        ram[0x0Bu] = (uint8_t)((contra_rom_supertile_palette(core, ram[0x600u + (uint8_t)(base + 9u)]) & 0xFCu) |
+                               ram[0x0Bu]);
+    }
+
+    /* @update_palette_continue */
+    i = (uint8_t)(ram[0x01u] << 1);
+    x = ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET];
+    buf[x] = 0x01u;
+    ++x;
+    buf[x] = update_palette_cfg_tbl[i];
+    ++x;
+    buf[x] = update_palette_cfg_tbl[i + 1u];
+    ++x;
+    i = 0x00u;
+    for (;;)
+    {
+        buf[x] = ram[0x15u];
+        ++x;
+        buf[x] = ram[0x14u];
+        ++x;
+        buf[x] = ram[0x08u + i];
+        ++x;
+        if (ram[0x00u] != 0x02u)
+        {
+            ++i;
+            buf[x] = ram[0x08u + i];
+            ++x;
+        }
+        if (ram[0x01u] == 0u)
+        {
+            break;
+        }
+        ++i;
+        ram[0x14u] = (uint8_t)(ram[0x14u] + 0x08u);
+        ram[0x01u] = 0x00u;
+    }
+    contra_rom_write_update_supertile_to_cpu(core, x);
+}
+
+/* bank7 update_nametable_supertile: stamp super-tile $10 at pixel (a, y).
+   Returns true (carry set) when CPU_GRAPHICS_BUFFER is already at $40. */
+static bool contra_rom_update_nametable_supertile(ContraCore *core, uint8_t a, uint8_t y)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t x;
+    uint16_t entry;
+
+    ram[0x11u] = a;
+    if (ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] >= 0x40u)
+    {
+        return true;
+    }
+    contra_rom_set_ppu_addresses_in_mem(core, y);
+    x = ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET];
+    entry = (uint16_t)(CONTRA_NAMETABLE_UPDATE_DATA_PTR_TBL +
+                       (uint8_t)((((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] & 0x80u) != 0u)
+                                      ? 0x08u
+                                      : ram[CONTRA_RAM_CURRENT_LEVEL]) << 2));
+    ram[0x16u] = contra_rom_read_u8(7u, entry);
+    ram[0x17u] = contra_rom_read_u8(7u, (uint16_t)(entry + 1u));
+    if (ram[0x0Fu] == 0u)
+    {
+        ram[0x0Eu] = contra_rom_read_u8(7u, (uint16_t)(entry + 2u));
+        ram[0x0Fu] = contra_rom_read_u8(7u, (uint16_t)(entry + 3u));
+        if (ram[0x00u] != 0u)
+        {
+            contra_rom_update_supertile_palette(core, ram[0x00u], ram[0x10u]);
+            return false;
+        }
+        x = contra_rom_set_graphics_buffer_header(core, x);
+        ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER + x] =
+            contra_cpu_read_rom(core, (uint16_t)((ram[0x0Eu] | ((uint16_t)ram[0x0Fu] << 8)) + ram[0x10u]));
+        ++x;
+    }
+    contra_rom_write_update_supertile_to_cpu(core, x);
+    return false;
+}
+
+/* bank7 update_nametable_tiles: 2-wide tile animation entry $10 (x5) of the
+   level's tile_animation table at pixel (a, y). Carry set when the buffer is
+   at $50. */
+static bool contra_rom_update_nametable_tiles(ContraCore *core, uint8_t a, uint8_t y)
+{
+    static const uint8_t palette_mask_tbl[4] = {0xFCu, 0xF3u, 0xCFu, 0x3Fu};
+    uint8_t *const ram = core->ram;
+    uint8_t *const buf = &ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER];
+    uint16_t anim;
+    uint8_t x;
+    uint8_t first;
+
+    ram[0x11u] = a;
+    if (ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] >= 0x50u)
+    {
+        return true;
+    }
+    contra_rom_set_ppu_addresses_in_mem(core, y);
+    {
+        /* asl; asl; adc $10 -- the second asl's carry (bit 6) joins the add */
+        const uint8_t v = ram[0x10u];
+        const uint8_t shifted = (uint8_t)(v << 2);
+        const uint8_t carry = (uint8_t)((v >> 6) & 0x01u);
+
+        y = (uint8_t)(shifted + v + carry);
+    }
+    {
+        const uint16_t entry = (uint16_t)(CONTRA_LEVEL_TILE_ANIMATION_PTR_TBL + (uint8_t)(ram[CONTRA_RAM_CURRENT_LEVEL] << 1));
+
+        ram[0x16u] = contra_rom_read_u8(7u, entry);
+        ram[0x17u] = contra_rom_read_u8(7u, (uint16_t)(entry + 1u));
+    }
+    anim = (uint16_t)(ram[0x16u] | ((uint16_t)ram[0x17u] << 8));
+    first = contra_cpu_read_rom(core, (uint16_t)(anim + y));
+    ram[0x14u] = ((first & 0x80u) != 0u) ? (uint8_t)(first & 0x07u) : 0x02u;
+    x = ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET];
+    if (ram[0x0Fu] == 0u)
+    {
+        uint8_t value = first;
+
+        ram[0x0Eu] = y;
+        switch (ram[0x00u])
+        {
+            case 0x00u: break;
+            case 0x01u: value = (uint8_t)(value << 2); break;
+            case 0x02u: value = (uint8_t)(value << 4); break;
+            default: value = (uint8_t)(value << 6); break;
+        }
+        ram[0x08u] = value;
+        ram[0x08u] = (uint8_t)((contra_rom_supertile_palette(core, ram[0x600u + ram[0x02u]]) &
+                                palette_mask_tbl[ram[0x00u] & 0x03u]) |
+                               ram[0x08u]);
+        x = contra_rom_set_graphics_buffer_header(core, ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET]);
+        buf[x] = ram[0x08u];
+        ++x;
+        y = ram[0x0Eu];
+    }
+    /* @update_nametable_tiles */
+    ++y;
+    buf[x] = 0x01u;
+    ++x;
+    buf[x] = 0x02u;
+    ++x;
+    buf[x] = ram[0x14u];
+    ++x;
+    do
+    {
+        uint16_t addr;
+
+        ram[0x15u] = 0x02u;
+        buf[x] = ram[0x0Du];
+        ++x;
+        buf[x] = ram[0x0Cu];
+        ++x;
+        do
+        {
+            buf[x] = contra_cpu_read_rom(core, (uint16_t)(anim + y));
+            ++x;
+            ++y;
+            ram[0x15u] = (uint8_t)(ram[0x15u] - 1u);
+        } while (ram[0x15u] != 0u);
+        addr = (uint16_t)((ram[0x0Cu] | ((uint16_t)ram[0x0Du] << 8)) + 0x20u);
+        ram[0x0Cu] = (uint8_t)(addr & 0xFFu);
+        ram[0x0Du] = (uint8_t)(addr >> 8);
+        ram[0x14u] = (uint8_t)(ram[0x14u] - 1u);
+    } while (ram[0x14u] != 0u);
+    ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = x;
+    return false;
+}
+
+/* bank7 load_bank_3_update_nametable_supertile */
+static bool contra_rom_load_bank_3_update_nametable_supertile(ContraCore *core, uint8_t a, uint8_t y)
+{
+    bool full;
+
+    core->ram[0xF3u] = a;
+    core->ram[0xF7u] = y;
+    contra_load_bank_number(core, 0x03u);
+    full = contra_rom_update_nametable_supertile(core, a, y);
+    contra_load_previous_bank(core);
+    return full;
+}
+
+/* bank7 load_bank_3_update_nametable_tiles */
+static bool contra_rom_load_bank_3_update_nametable_tiles(ContraCore *core, uint8_t a, uint8_t y)
+{
+    bool full;
+
+    core->ram[0xF3u] = a;
+    core->ram[0xF7u] = y;
+    contra_load_bank_number(core, 0x03u);
+    full = contra_rom_update_nametable_tiles(core, a, y);
+    contra_load_previous_bank(core);
+    return full;
+}
+
+/* bank7 draw_enemy_supertile_10: super-tile $10 centered on enemy x (top-left
+   at pos - $0C); off the top/left edge exits with carry clear */
+static bool contra_rom_draw_enemy_supertile_10(ContraCore *core, uint8_t x)
+{
+    const uint8_t ey = core->ram[CONTRA_RAM_ENEMY_Y_POS + x];
+    const uint8_t ex = core->ram[CONTRA_RAM_ENEMY_X_POS + x];
+
+    if ((ey < 0x0Cu) || (ex < 0x0Cu))
+    {
+        return false;
+    }
+    return contra_rom_load_bank_3_update_nametable_supertile(core, (uint8_t)(ex - 0x0Cu), (uint8_t)(ey - 0x0Cu));
+}
+
+/* bank7 draw_enemy_supertile_a */
+static bool contra_rom_draw_enemy_supertile_a(ContraCore *core, uint8_t x, uint8_t supertile)
+{
+    core->ram[0x10u] = supertile;
+    return contra_rom_draw_enemy_supertile_10(core, x);
+}
+
+/* bank7 draw_enemy_supertile_a_set_delay: on a full buffer retry next frame */
+static bool contra_rom_draw_enemy_supertile_a_set_delay(ContraCore *core, uint8_t x, uint8_t supertile)
+{
+    const bool full = contra_rom_draw_enemy_supertile_a(core, x, supertile);
+
+    if (full)
+    {
+        core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u;
+    }
+    return full;
+}
+
+/* bank7 update_enemy_nametable_tiles: tile animation a at enemy pos - 4 */
+static bool contra_rom_update_enemy_nametable_tiles(ContraCore *core, uint8_t x, uint8_t a)
+{
+    const uint8_t ey = core->ram[CONTRA_RAM_ENEMY_Y_POS + x];
+    const uint8_t ex = core->ram[CONTRA_RAM_ENEMY_X_POS + x];
+
+    core->ram[0x10u] = a;
+    if ((ey < 0x04u) || (ex < 0x04u))
+    {
+        return false;
+    }
+    return contra_rom_load_bank_3_update_nametable_tiles(core, (uint8_t)(ex - 0x04u), (uint8_t)(ey - 0x04u));
+}
+
+/* bank7 update_enemy_nametable_tiles_no_palette */
+static bool contra_rom_update_enemy_nametable_tiles_no_palette(ContraCore *core, uint8_t x, uint8_t a)
+{
+    return contra_rom_update_enemy_nametable_tiles(core, x, (uint8_t)(a | 0x80u));
+}
+
+/* bank7 update_nametable_tiles_set_delay */
+static bool contra_rom_update_nametable_tiles_set_delay(ContraCore *core, uint8_t x, uint8_t a)
+{
+    const bool full = contra_rom_update_enemy_nametable_tiles_no_palette(core, x, a);
+
+    if (full)
+    {
+        core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u;
+    }
+    return full;
+}
+
+/* bank7 set_supertile_bg_collisions: rewrite the 4 BG_COLLISION_DATA points
+   of the super-tile at PPU address $12/$13 (a = left column codes, y = right;
+   bits 0-1 top, bits 2-3 bottom) */
+static void contra_rom_set_supertile_bg_collisions(ContraCore *core, uint8_t left, uint8_t right)
+{
+    static const uint8_t bg_collision_bit_mask_tbl[4] = {0x3Fu, 0xCFu, 0xF3u, 0xFCu};
+    uint8_t *const ram = core->ram;
+    uint8_t a;
+    unsigned c;
+
+    ram[0x11u] = left;
+    ram[0x14u] = right;
+    ram[0x00u] = (uint8_t)((ram[0x12u] >> 1) & 0x03u);
+    a = (uint8_t)(ram[0x13u] & 0x07u);
+    /* asl $12; rol a  x2; asl $12 (bit 5 dropped); asl $12; rol a  x2 */
+    c = (ram[0x12u] >> 7) & 1u; ram[0x12u] = (uint8_t)(ram[0x12u] << 1); a = (uint8_t)((a << 1) | c);
+    c = (ram[0x12u] >> 7) & 1u; ram[0x12u] = (uint8_t)(ram[0x12u] << 1); a = (uint8_t)((a << 1) | c);
+    ram[0x12u] = (uint8_t)(ram[0x12u] << 1);
+    c = (ram[0x12u] >> 7) & 1u; ram[0x12u] = (uint8_t)(ram[0x12u] << 1); a = (uint8_t)((a << 1) | c);
+    c = (ram[0x12u] >> 7) & 1u; ram[0x12u] = (uint8_t)(ram[0x12u] << 1); a = (uint8_t)((a << 1) | c);
+    ram[0x04u] = a;
+    ram[0x01u] = 0x02u;
+    do
+    {
+        ram[0x02u] = ram[0x00u];
+        /* @set_half_supertile_bg_collisions */
+        ram[0x07u] = ram[0x04u];
+        ram[0x06u] = 0x01u;
+        for (;;)
+        {
+            uint8_t y = ram[0x02u];
+            uint8_t code;
+
+            ram[0x05u] = bg_collision_bit_mask_tbl[y & 0x03u];
+            code = (uint8_t)(((ram[0x06u] & 0x01u) != 0u) ? ram[0x11u] : ram[0x14u]);
+            code = (uint8_t)(code & 0x03u);
+            for (;;)
+            {
+                ++y;
+                if (y >= 0x04u)
+                {
+                    break;
+                }
+                code = (uint8_t)(code << 2);
+            }
+            ram[0x03u] = code;
+            ram[0x680u + ram[0x07u]] = (uint8_t)((ram[0x680u + ram[0x07u]] & ram[0x05u]) | ram[0x03u]);
+            ram[0x02u] = (uint8_t)((ram[0x02u] + 1u) & 0x03u);
+            if (ram[0x02u] == 0u)
+            {
+                ram[0x07u] = (uint8_t)(ram[0x07u] + 1u);
+            }
+            ram[0x06u] = (uint8_t)(ram[0x06u] - 1u);
+            if ((ram[0x06u] & 0x80u) != 0u)
+            {
+                break;
+            }
+        }
+        ram[0x11u] = (uint8_t)(ram[0x11u] >> 2);
+        ram[0x14u] = (uint8_t)(ram[0x14u] >> 2);
+        ram[0x04u] = (uint8_t)(ram[0x04u] + 0x04u);
+        ram[0x01u] = (uint8_t)(ram[0x01u] - 1u);
+    } while (ram[0x01u] != 0u);
+}
+
 
 static uint8_t contra_level_screen_supertile_count(const ContraCore *core)
 {
@@ -1074,203 +2893,6 @@ static void contra_decode_level_screen_supertiles(
             }
         }
     }
-}
-
-static void contra_load_supertiles_screen_indexes(ContraCore *core, uint8_t screen_number)
-{
-    contra_decode_level_screen_supertiles(
-        core,
-        screen_number,
-        core->level_screen_supertiles,
-        core->ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET]
-    );
-}
-
-static void contra_write_horizontal_level_column_snapshot_to_ppu(
-    ContraCore *core,
-    uint16_t ppu_addr,
-    uint8_t tile_offset,
-    uint8_t supertile_nametable_offset
-)
-{
-    const uint8_t *const ram = core->ram;
-    const uint16_t supertile_ptr = (uint16_t)(
-        (uint16_t)ram[CONTRA_RAM_LEVEL_SUPERTILE_DATA_PTR] |
-        ((uint16_t)ram[CONTRA_RAM_LEVEL_SUPERTILE_DATA_PTR + 1u] << 8u)
-    );
-    const uint8_t tile_x = tile_offset & 0x1Fu;
-    const uint8_t supertile_column = (uint8_t)(tile_x >> 2u);
-    const uint8_t tile_x_in_supertile = (uint8_t)(tile_x & 0x03u);
-    uint8_t tile_y;
-
-    if ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u) ||
-        (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u) ||
-        (!contra_load_rom_image()))
-    {
-        return;
-    }
-
-    for (tile_y = 0u; tile_y < 28u; ++tile_y)
-    {
-        const uint8_t supertile_row = (uint8_t)(tile_y >> 2u);
-        const uint8_t supertile_offset = (uint8_t)(
-            supertile_nametable_offset +
-            (uint8_t)(supertile_row * 8u) +
-            supertile_column
-        );
-        const uint8_t supertile_index = core->level_screen_supertiles[supertile_offset];
-        const uint16_t supertile_data_addr = (uint16_t)(
-            supertile_ptr + ((uint16_t)supertile_index * 16u)
-        );
-        const uint8_t tile_in_supertile = (uint8_t)(((tile_y & 0x03u) << 2u) | tile_x_in_supertile);
-        const uint8_t pattern_index = contra_rom_read_u8(
-            3u,
-            (uint16_t)(supertile_data_addr + tile_in_supertile)
-        );
-
-        contra_write_ppu_byte(core, ppu_addr, pattern_index);
-        ppu_addr = (uint16_t)(ppu_addr + 0x20u);
-    }
-}
-
-static void contra_write_horizontal_level_column_to_ppu(ContraCore *core)
-{
-    const uint8_t *const ram = core->ram;
-    const uint16_t ppu_addr = (uint16_t)(
-        ((uint16_t)ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] << 8u) |
-        (uint16_t)ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE]
-    );
-
-    contra_write_horizontal_level_column_snapshot_to_ppu(
-        core,
-        ppu_addr,
-        ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET],
-        ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET]
-    );
-}
-
-static void contra_write_horizontal_level_column_attributes_snapshot_to_ppu(
-    ContraCore *core,
-    uint8_t tile_offset,
-    uint8_t supertile_nametable_offset,
-    uint8_t attr_high
-)
-{
-    const uint8_t *const ram = core->ram;
-    const uint16_t palette_ptr = (uint16_t)(
-        (uint16_t)ram[CONTRA_RAM_LEVEL_SUPERTILE_PALETTE_DATA] |
-        ((uint16_t)ram[CONTRA_RAM_LEVEL_SUPERTILE_PALETTE_DATA + 1u] << 8u)
-    );
-    const uint8_t attr_col = (uint8_t)((tile_offset >> 2u) & 0x07u);
-    uint8_t attr_low = (uint8_t)(0xC0u | attr_col);
-    uint8_t attr_row;
-
-    if ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u) ||
-        (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u) ||
-        (!contra_load_rom_image()))
-    {
-        return;
-    }
-
-    for (attr_row = 0u; attr_row < 7u; ++attr_row)
-    {
-        const uint8_t supertile_offset = (uint8_t)(
-            supertile_nametable_offset +
-            (uint8_t)(attr_row * 8u) +
-            attr_col
-        );
-        const uint8_t supertile_index = core->level_screen_supertiles[supertile_offset];
-        const uint8_t attr = contra_rom_read_u8(3u, (uint16_t)(palette_ptr + supertile_index));
-        const uint16_t ppu_addr = (uint16_t)(
-            ((uint16_t)attr_high << 8u) |
-            (uint16_t)attr_low
-        );
-
-        contra_write_ppu_byte(core, ppu_addr, attr);
-        attr_low = (uint8_t)(attr_low + 0x08u);
-    }
-}
-
-static void contra_write_horizontal_level_column_attributes_to_ppu(ContraCore *core)
-{
-    const uint8_t *const ram = core->ram;
-
-    contra_write_horizontal_level_column_attributes_snapshot_to_ppu(
-        core,
-        ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET],
-        ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET],
-        ram[CONTRA_RAM_ATTRIBUTE_TBL_WRITE_HIGH_BYTE]
-    );
-}
-
-static void contra_schedule_horizontal_level_column_write(ContraCore *core)
-{
-    const uint8_t *const ram = core->ram;
-
-    core->pending_horizontal_column_write = 0x01u;
-    core->pending_horizontal_column_tile_offset = ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET];
-    core->pending_horizontal_column_supertile_offset = ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET];
-    core->pending_horizontal_column_ppu_addr = (uint16_t)(
-        ((uint16_t)ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] << 8u) |
-        (uint16_t)ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE]
-    );
-}
-
-static void contra_schedule_horizontal_level_column_attributes_write(ContraCore *core)
-{
-    const uint8_t *const ram = core->ram;
-
-    core->pending_horizontal_attr_write = 0x01u;
-    core->pending_horizontal_attr_tile_offset = ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET];
-    core->pending_horizontal_attr_supertile_offset = ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET];
-    core->pending_horizontal_attr_high = ram[CONTRA_RAM_ATTRIBUTE_TBL_WRITE_HIGH_BYTE];
-}
-
-static void contra_flush_pending_horizontal_level_writes(ContraCore *core)
-{
-    if (core->pending_horizontal_column_write != 0u)
-    {
-        contra_write_horizontal_level_column_snapshot_to_ppu(
-            core,
-            core->pending_horizontal_column_ppu_addr,
-            core->pending_horizontal_column_tile_offset,
-            core->pending_horizontal_column_supertile_offset
-        );
-        core->pending_horizontal_column_write = 0x00u;
-    }
-
-    if (core->pending_horizontal_attr_write != 0u)
-    {
-        contra_write_horizontal_level_column_attributes_snapshot_to_ppu(
-            core,
-            core->pending_horizontal_attr_tile_offset,
-            core->pending_horizontal_attr_supertile_offset,
-            core->pending_horizontal_attr_high
-        );
-        core->pending_horizontal_attr_write = 0x00u;
-    }
-}
-
-static void contra_advance_horizontal_level_ppu_column(ContraCore *core)
-{
-    uint8_t *const ram = core->ram;
-
-    ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] =
-        (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] + 1u);
-    ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] =
-        (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] + 1u);
-
-    if (ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] < 0x20u)
-    {
-        return;
-    }
-
-    ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET] ^= 0x40u;
-    contra_load_supertiles_screen_indexes(core, (uint8_t)(ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] + 2u));
-    ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = 0x00u;
-    ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] = 0x00u;
-    ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] ^= 0x04u;
-    ram[CONTRA_RAM_ATTRIBUTE_TBL_WRITE_HIGH_BYTE] ^= 0x04u;
 }
 
 static uint8_t contra_read_nametable_byte(const ContraCore *core, uint8_t nametable_index, uint16_t offset)
@@ -1918,24 +3540,17 @@ static void contra_render_level_background(ContraCore *core)
     }
 }
 
+/* bank7 zero_out_nametables: graphic_data_00 (blank_nametables) through
+   write_graphic_data_to_ppu -- which also zeroes GRAPHICS_BUFFER_OFFSET and
+   both scroll offsets, and ends in configure_PPU */
 static void contra_zero_out_nametables(ContraCore *core)
 {
-    core->ram[CONTRA_RAM_GRAPHICS_BUFFER_MODE] = 0x00u;
-    core->ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = 0x00u;
-    core->ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER] = 0x00u;
-    memset(&core->ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER], 0, CONTRA_CPU_GRAPHICS_BUFFER_SIZE);
-    memset(core->ppu_nametable, 0, sizeof(core->ppu_nametable));
-
-    /* zero_out_nametables falls through to write_graphic_data_to_ppu (bank7),
-       which resets both scroll offsets so the freshly drawn screen (game over /
-       intro / title) sits at scroll origin instead of the gameplay scroll. */
-    core->ram[CONTRA_RAM_VERTICAL_SCROLL] = 0x00u;
-    core->ram[CONTRA_RAM_HORIZONTAL_SCROLL] = 0x00u;
+    contra_write_graphic_data_to_ppu(core, 0x00u);
 }
 
 static void contra_load_intro_graphics(ContraCore *core)
 {
-    contra_init_apu_channels(core);
+    contra_init_apu_channels(core, core->ram[CONTRA_RAM_PREVIOUS_ROM_BANK]); /* Y from load_previous_bank */
     contra_clear_memory_3(core);
     core->ram[CONTRA_RAM_PPUMASK_SETTINGS] = 0x1Eu;
     core->ram[CONTRA_RAM_SPRITE_LOAD_TYPE] = 0x00u;
@@ -1949,316 +3564,290 @@ static void contra_load_level_intro_screen_graphics(ContraCore *core)
     contra_load_graphic_data_list(core, 10u);
 }
 
-static void contra_load_bank_6_write_text_palette_to_mem(ContraCore *core, uint8_t text_code)
+/* bank7 write_a_to_cpu_graphics_buffer / write_to_700_offset: X = offset */
+static uint8_t contra_write_a_to_cpu_graphics_buffer(ContraCore *core, uint8_t value)
 {
-    const bool blank_text = (text_code & 0x80u) != 0u;
-    const uint8_t table_index = (uint8_t)(text_code & 0x3Fu);
-    uint16_t read_addr;
-    uint8_t blank_delay = 0x02u;
+    uint8_t x = core->ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET];
 
+    core->ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER + x] = value;
+    ++x;
+    core->ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = x;
+    return x;
+}
+
+/* bank7 load_bank_6_write_text_palette_to_mem + write_text_palette_to_mem:
+   copy a short_text_pointer_table string (bank 6) into CPU_GRAPHICS_BUFFER in
+   mode-0 format. Bit 7 of the code blanks the characters after the 2-byte PPU
+   address (flashing). Returns X (= GRAPHICS_BUFFER_OFFSET), which the score
+   and lives writers index backwards from. */
+static uint8_t contra_write_text_palette(ContraCore *core, uint8_t text_code)
+{
+    uint8_t *const ram = core->ram;
+    uint16_t string;
+    uint8_t x;
+    uint8_t y;
+
+    ram[0xF3u] = text_code;
+    contra_load_bank_number(core, 0x06u);
     if (!contra_load_rom_image())
     {
-        return;
+        return ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET];
     }
-
-    read_addr = contra_rom_read_u16(
-        6u,
-        (uint16_t)(contra_short_text_pointer_table_addr + ((uint16_t)table_index * 2u))
-    );
-
-    contra_write_cpu_graphics_buffer_byte(core, 0x01u);
-
-    while (core->ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] < CONTRA_CPU_GRAPHICS_BUFFER_SIZE)
+    ram[0x03u] = 0x02u;
+    (void)contra_write_a_to_cpu_graphics_buffer(core, 0x01u);
+    ram[0x02u] = text_code;
     {
-        uint8_t value = contra_rom_read_u8(6u, read_addr++);
+        const uint16_t entry = (uint16_t)(contra_short_text_pointer_table_addr + (uint8_t)(text_code << 1));
 
+        ram[0x00u] = contra_cpu_read_rom(core, entry);
+        ram[0x01u] = contra_cpu_read_rom(core, (uint16_t)(entry + 1u));
+    }
+    string = (uint16_t)(ram[0x00u] | ((uint16_t)ram[0x01u] << 8));
+    x = ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET];
+    y = 0x00u;
+    for (;;)
+    {
+        const uint8_t value = contra_cpu_read_rom(core, (uint16_t)(string + y));
+
+        ++y;
         if (value == 0xFFu)
         {
-            return;
+            ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = x;
+            return x;
         }
-
         if (value == 0xFEu)
         {
-            contra_write_cpu_graphics_buffer_byte(core, 0xFFu);
-            return;
+            ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER + x] = 0xFFu;
+            ++x;
+            ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = x;
+            return x;
         }
-
         if (value == 0xFDu)
         {
-            contra_write_cpu_graphics_buffer_byte(core, 0xFFu);
-            blank_delay = 0x02u;
-            contra_write_cpu_graphics_buffer_byte(core, 0x01u);
+            /* @handle_fd: $FF ends the run, a new mode-1 header follows */
+            ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER + x] = 0xFFu;
+            ++x;
+            ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = x;
+            ram[0x03u] = 0x02u;
+            ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER + x] = 0x01u;
+            ++x;
+            ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = x;
             continue;
         }
-
-        if (blank_text)
+        ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER + x] = value;
+        if ((ram[0x02u] & 0x80u) != 0u)
         {
-            if (blank_delay == 0u)
+            if (ram[0x03u] != 0u)
             {
-                value = 0x00u;
+                ram[0x03u] = (uint8_t)(ram[0x03u] - 1u);
             }
             else
             {
-                blank_delay = (uint8_t)(blank_delay - 1u);
+                ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER + x] = 0x00u;
             }
         }
-
-        contra_write_cpu_graphics_buffer_byte(core, value);
+        ++x;
+        if (x == 0u)
+        {
+            /* @write_ff_to_cpu_memory fall-through */
+            ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER + x] = 0xFFu;
+            ++x;
+            ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = x;
+            return x;
+        }
     }
 }
 
+static void contra_load_bank_6_write_text_palette_to_mem(ContraCore *core, uint8_t text_code)
+{
+    (void)contra_write_text_palette(core, text_code);
+}
+
+/* bank7 play_sound: the bank-1 sound engine itself is not ported (the port
+   produces no audio); its bank bookkeeping is (NMI_CHECK bit 7 only brackets
+   the call) */
 static void contra_play_sound(ContraCore *core, uint8_t sound_code)
 {
-    (void)core;
     (void)sound_code;
+    contra_load_bank_1(core);
+    contra_local_previous_1_bank(core);
 }
 
-static void contra_init_apu_channels(ContraCore *core)
+/* bank7 init_APU_channels: backs the caller's Y register up in $F7 around the
+   bank-1 call -- `y` is that register value at the call site */
+static void contra_init_apu_channels(ContraCore *core, uint8_t y)
 {
-    (void)core;
+    core->ram[0xF7u] = y;
+    contra_load_bank_1(core);
+    contra_local_previous_1_bank(core);
 }
 
-static void contra_patch_cpu_graphics_buffer_byte(ContraCore *core, uint8_t offset, uint8_t value)
+/* bank7 calculate_score_digit: divide the 16-bit $01:$00 by $03 (10) in
+   place, remainder (the next digit, right to left) in $02 */
+static void contra_calculate_score_digit(ContraCore *core)
 {
-    if (offset >= CONTRA_CPU_GRAPHICS_BUFFER_SIZE)
+    uint8_t *const ram = core->ram;
+    unsigned carry;
+    uint8_t y;
+
+    ram[0x02u] = 0x00u;
+    /* rol $00 / rol $01 -- the incoming carry is shifted out again after the
+       16 iterations, so it never reaches the result */
+    carry = (ram[0x00u] >> 7) & 1u;
+    ram[0x00u] = (uint8_t)(ram[0x00u] << 1);
+    {
+        const unsigned c2 = (ram[0x01u] >> 7) & 1u;
+
+        ram[0x01u] = (uint8_t)((ram[0x01u] << 1) | carry);
+        carry = c2;
+    }
+    for (y = 0x10u; y != 0u; --y)
+    {
+        unsigned c2;
+
+        ram[0x02u] = (uint8_t)((ram[0x02u] << 1) | carry);
+        if (ram[0x02u] >= ram[0x03u])
+        {
+            ram[0x02u] = (uint8_t)(ram[0x02u] - ram[0x03u]);
+            carry = 1u;
+        }
+        else
+        {
+            carry = 0u;
+        }
+        c2 = (ram[0x00u] >> 7) & 1u;
+        ram[0x00u] = (uint8_t)((ram[0x00u] << 1) | carry);
+        carry = c2;
+        c2 = (ram[0x01u] >> 7) & 1u;
+        ram[0x01u] = (uint8_t)((ram[0x01u] << 1) | carry);
+        carry = c2;
+    }
+}
+
+/* bank7 draw_the_scores @draw_score: up to 5 digits right to left, then the
+   two trailing zeros -- or a lone '0' (first slot blanked) for a zero score */
+static void contra_draw_score(ContraCore *core, uint8_t x)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t *const buf = &ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER];
+
+    if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x10u) != 0u)
     {
         return;
     }
-
-    core->ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER + offset] = value;
-}
-
-static void contra_patch_cpu_graphics_buffer_from_end(ContraCore *core, uint8_t back_offset, uint8_t value)
-{
-    const uint8_t offset = core->ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET];
-
-    if ((offset < back_offset) || (offset > CONTRA_CPU_GRAPHICS_BUFFER_SIZE))
+    ram[0x04u] = 0x05u;
+    for (;;)
     {
-        return;
-    }
-
-    contra_patch_cpu_graphics_buffer_byte(core, (uint8_t)(offset - back_offset), value);
-}
-
-static uint8_t contra_calculate_score_digit(uint8_t *low, uint8_t *high)
-{
-    uint8_t digit = 0x00u;
-    uint8_t shift_count = 0x10u;
-    bool carry = ((*low & 0x80u) != 0u);
-
-    *low = (uint8_t)(*low << 1u);
-
-    {
-        const bool next_carry = ((*high & 0x80u) != 0u);
-        *high = (uint8_t)((*high << 1u) | (carry ? 0x01u : 0x00u));
-        carry = next_carry;
-    }
-
-    do
-    {
-        const bool digit_carry = ((digit & 0x80u) != 0u);
-
-        digit = (uint8_t)((digit << 1u) | (carry ? 0x01u : 0x00u));
-        carry = digit_carry;
-
-        if (digit >= 0x0Au)
+        ram[0x03u] = 0x0Au;
+        contra_calculate_score_digit(core);
+        buf[(uint8_t)(x - 4u)] = (uint8_t)(ram[0x02u] | 0x30u);
+        --x;
+        if ((uint8_t)(ram[0x00u] | ram[0x01u]) == 0u)
         {
-            digit = (uint8_t)(digit - 0x0Au);
-            carry = true;
+            break;
         }
-
+        ram[0x04u] = (uint8_t)(ram[0x04u] - 1u);
+        if (ram[0x04u] == 0u)
         {
-            const bool low_carry = ((*low & 0x80u) != 0u);
-            *low = (uint8_t)((*low << 1u) | (carry ? 0x01u : 0x00u));
-            carry = low_carry;
-        }
-
-        {
-            const bool high_carry = ((*high & 0x80u) != 0u);
-            *high = (uint8_t)((*high << 1u) | (carry ? 0x01u : 0x00u));
-            carry = high_carry;
-        }
-    } while (--shift_count != 0u);
-
-    return digit;
-}
-
-static void contra_draw_stage_and_level_name(ContraCore *core)
-{
-    const uint8_t current_level = core->ram[CONTRA_RAM_CURRENT_LEVEL];
-
-    contra_load_bank_6_write_text_palette_to_mem(core, 0x0Cu);
-    contra_patch_cpu_graphics_buffer_from_end(core, 0x02u, (uint8_t)(current_level + 0x31u));
-    contra_load_bank_6_write_text_palette_to_mem(core, (uint8_t)(current_level + 0x11u));
-}
-
-static void contra_draw_player_num_lives(ContraCore *core)
-{
-    const uint8_t player_index = (uint8_t)(core->ram[CONTRA_RAM_DRAW_PLAYER_INDEX] & 0x01u);
-    uint8_t remaining_lives;
-    uint8_t tens_digit = 0x00u;
-    uint8_t ones_digit;
-
-    contra_load_bank_6_write_text_palette_to_mem(core, (uint8_t)(0x07u + player_index));
-
-    remaining_lives = (uint8_t)(
-        (core->ram[CONTRA_RAM_P1_GAME_OVER_STATUS + player_index] ^ 0x01u) +
-        core->ram[CONTRA_RAM_P1_NUM_LIVES + player_index]
-    );
-
-    if (remaining_lives == 0u)
-    {
-        contra_load_bank_6_write_text_palette_to_mem(core, (uint8_t)(0x0Fu + player_index));
-        return;
-    }
-
-    if ((remaining_lives & 0x80u) != 0u)
-    {
-        remaining_lives = 0x00u;
-    }
-
-    while (remaining_lives >= 0x0Au)
-    {
-        remaining_lives = (uint8_t)(remaining_lives - 0x0Au);
-        ++tens_digit;
-
-        if (tens_digit >= 0x0Au)
-        {
-            tens_digit = 0x09u;
-            remaining_lives = 0x09u;
             break;
         }
     }
-
-    ones_digit = (uint8_t)(remaining_lives | 0x30u);
-    if ((tens_digit == 0u) && (ones_digit == 0x30u))
+    x = ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET];
+    if ((uint8_t)((uint8_t)(ram[0x04u] - 0x05u) | ram[0x02u]) == 0u)
     {
+        buf[(uint8_t)(x - 4u)] = 0x00u;
+        buf[(uint8_t)(x - 2u)] = 0x30u;
         return;
     }
-
-    contra_patch_cpu_graphics_buffer_from_end(core, 0x02u, ones_digit);
-    if (tens_digit != 0u)
-    {
-        contra_patch_cpu_graphics_buffer_from_end(core, 0x03u, (uint8_t)(tens_digit | 0x30u));
-    }
+    buf[(uint8_t)(x - 3u)] = 0x30u;
+    buf[(uint8_t)(x - 2u)] = 0x30u;
 }
 
+/* bank7 draw_the_scores */
 static void contra_draw_the_scores(ContraCore *core)
 {
-    uint8_t score_low;
-    uint8_t score_high;
-    uint8_t original_offset;
-    uint8_t write_offset;
-    uint8_t digits_remaining;
-    uint8_t digit = 0x00u;
-    bool zero_score;
+    uint8_t *const ram = core->ram;
+    uint8_t x;
 
-    contra_load_bank_6_write_text_palette_to_mem(core, 0x09u);
-    score_low = core->ram[CONTRA_RAM_HIGH_SCORE_LOW];
-    score_high = core->ram[CONTRA_RAM_HIGH_SCORE_HIGH];
-
-    if ((core->ram[CONTRA_RAM_FRAME_COUNTER] & 0x10u) == 0u)
-    {
-        original_offset = core->ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET];
-        write_offset = original_offset;
-        digits_remaining = 0x05u;
-
-        do
-        {
-            digit = contra_calculate_score_digit(&score_low, &score_high);
-            contra_patch_cpu_graphics_buffer_byte(core, (uint8_t)(write_offset - 0x04u), (uint8_t)(digit | 0x30u));
-            --write_offset;
-
-            if ((uint8_t)(score_low | score_high) == 0u)
-            {
-                break;
-            }
-
-            --digits_remaining;
-        } while (digits_remaining != 0u);
-
-        zero_score = (bool)((digits_remaining == 0x05u) && (digit == 0u));
-        if (zero_score)
-        {
-            contra_patch_cpu_graphics_buffer_byte(core, (uint8_t)(original_offset - 0x04u), 0x00u);
-        }
-
-        contra_patch_cpu_graphics_buffer_byte(core, (uint8_t)(original_offset - 0x03u), 0x30u);
-        contra_patch_cpu_graphics_buffer_byte(core, (uint8_t)(original_offset - 0x02u), 0x30u);
-    }
-
-    contra_load_bank_6_write_text_palette_to_mem(core, 0x0Au);
-    score_low = core->ram[CONTRA_RAM_PLAYER_1_SCORE_LOW];
-    score_high = core->ram[CONTRA_RAM_PLAYER_1_SCORE_HIGH];
-
-    if ((core->ram[CONTRA_RAM_FRAME_COUNTER] & 0x10u) == 0u)
-    {
-        original_offset = core->ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET];
-        write_offset = original_offset;
-        digits_remaining = 0x05u;
-
-        do
-        {
-            digit = contra_calculate_score_digit(&score_low, &score_high);
-            contra_patch_cpu_graphics_buffer_byte(core, (uint8_t)(write_offset - 0x04u), (uint8_t)(digit | 0x30u));
-            --write_offset;
-
-            if ((uint8_t)(score_low | score_high) == 0u)
-            {
-                break;
-            }
-
-            --digits_remaining;
-        } while (digits_remaining != 0u);
-
-        zero_score = (bool)((digits_remaining == 0x05u) && (digit == 0u));
-        if (zero_score)
-        {
-            contra_patch_cpu_graphics_buffer_byte(core, (uint8_t)(original_offset - 0x04u), 0x00u);
-        }
-
-        contra_patch_cpu_graphics_buffer_byte(core, (uint8_t)(original_offset - 0x03u), 0x30u);
-        contra_patch_cpu_graphics_buffer_byte(core, (uint8_t)(original_offset - 0x02u), 0x30u);
-    }
-
-    if (core->ram[CONTRA_RAM_PLAYER_MODE] == 0u)
+    x = contra_write_text_palette(core, 0x09u);
+    ram[0x00u] = ram[CONTRA_RAM_HIGH_SCORE_LOW];
+    ram[0x01u] = ram[CONTRA_RAM_HIGH_SCORE_HIGH];
+    contra_draw_score(core, x);
+    x = contra_write_text_palette(core, 0x0Au);
+    ram[0x00u] = ram[CONTRA_RAM_PLAYER_1_SCORE_LOW];
+    ram[0x01u] = ram[CONTRA_RAM_PLAYER_1_SCORE_HIGH];
+    contra_draw_score(core, x);
+    if (ram[CONTRA_RAM_PLAYER_MODE] == 0u)
     {
         return;
     }
+    x = contra_write_text_palette(core, 0x0Bu);
+    ram[0x00u] = ram[CONTRA_RAM_PLAYER_2_SCORE_LOW];
+    ram[0x01u] = ram[CONTRA_RAM_PLAYER_2_SCORE_HIGH];
+    contra_draw_score(core, x);
+}
 
-    contra_load_bank_6_write_text_palette_to_mem(core, 0x0Bu);
-    score_low = core->ram[CONTRA_RAM_PLAYER_2_SCORE_LOW];
-    score_high = core->ram[CONTRA_RAM_PLAYER_2_SCORE_HIGH];
+/* bank7 draw_stage_and_level_name */
+static void contra_draw_stage_and_level_name(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t x = contra_write_text_palette(core, 0x0Cu);
 
-    if ((core->ram[CONTRA_RAM_FRAME_COUNTER] & 0x10u) == 0u)
+    ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER + (uint8_t)(x - 2u)] = (uint8_t)(ram[CONTRA_RAM_CURRENT_LEVEL] + 0x31u);
+    (void)contra_write_text_palette(core, (uint8_t)(ram[CONTRA_RAM_CURRENT_LEVEL] + 0x11u));
+}
+
+/* bank7 draw_player_num_lives ($1E = player index) */
+static void contra_draw_player_num_lives(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t player = ram[CONTRA_RAM_DRAW_PLAYER_INDEX];
+    uint8_t lives;
+    uint8_t tens;
+    uint8_t y;
+
+    ram[0x02u] = 0x1Eu;
+    (void)contra_write_text_palette(core, (uint8_t)(0x07u + player));
+    lives = (uint8_t)((ram[CONTRA_RAM_P1_GAME_OVER_STATUS + player] ^ 0x01u) + ram[CONTRA_RAM_P1_NUM_LIVES + player]);
+    if (lives == 0u)
     {
-        original_offset = core->ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET];
-        write_offset = original_offset;
-        digits_remaining = 0x05u;
-
-        do
-        {
-            digit = contra_calculate_score_digit(&score_low, &score_high);
-            contra_patch_cpu_graphics_buffer_byte(core, (uint8_t)(write_offset - 0x04u), (uint8_t)(digit | 0x30u));
-            --write_offset;
-
-            if ((uint8_t)(score_low | score_high) == 0u)
-            {
-                break;
-            }
-
-            --digits_remaining;
-        } while (digits_remaining != 0u);
-
-        zero_score = (bool)((digits_remaining == 0x05u) && (digit == 0u));
-        if (zero_score)
-        {
-            contra_patch_cpu_graphics_buffer_byte(core, (uint8_t)(original_offset - 0x04u), 0x00u);
-        }
-
-        contra_patch_cpu_graphics_buffer_byte(core, (uint8_t)(original_offset - 0x03u), 0x30u);
-        contra_patch_cpu_graphics_buffer_byte(core, (uint8_t)(original_offset - 0x02u), 0x30u);
+        (void)contra_write_text_palette(core, (uint8_t)(player + 0x0Fu)); /* draw_game_over_tex */
+        return;
     }
+    if ((lives & 0x80u) != 0u)
+    {
+        lives = 0x00u;
+    }
+    tens = 0x00u;
+    for (;;)
+    {
+        ram[0x00u] = lives;
+        if (lives < 0x0Au)
+        {
+            break;
+        }
+        lives = (uint8_t)(lives - 0x0Au);
+        ++tens;
+        if (tens >= 0x0Au)
+        {
+            tens = 0x09u;
+            lives = tens;
+            break;
+        }
+    }
+    /* @convert_digits */
+    y = ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET];
+    lives = (uint8_t)(lives | 0x30u);
+    if ((tens == 0u) && (lives == 0x30u))
+    {
+        return;
+    }
+    ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER + (uint8_t)(y - 2u)] = lives;
+    if (tens == 0u)
+    {
+        return;
+    }
+    ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER + (uint8_t)(y - 3u)] = (uint8_t)(tens | 0x30u);
 }
 
 static void contra_load_level_graphics(ContraCore *core)
@@ -3317,6 +4906,15 @@ static void contra_update_spray_bullet(ContraCore *core, size_t bullet_index)
         return;
     }
 
+    if (ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE + bullet_index] >= 0x02u)
+    {
+        /* player_bullet_routine_04_ptr_tbl: only player_s_bullet_routine_01
+           advances the travel distance; a bullet that hit something runs the
+           plain player_bullet_collision_routine */
+        contra_update_shared_player_bullet(core, bullet_index);
+        return;
+    }
+
     ram[CONTRA_RAM_PLAYER_BULLET_DIST + bullet_index] =
         (uint8_t)(ram[CONTRA_RAM_PLAYER_BULLET_DIST + bullet_index] + 1u);
     if (ram[CONTRA_RAM_PLAYER_BULLET_DIST + bullet_index] < 0x10u)
@@ -3375,6 +4973,7 @@ static void contra_update_player_bullets(ContraCore *core)
 {
     uint8_t *const ram = core->ram;
     size_t bullet_index;
+    contra_load_bank_number(core, 0x06u); /* load_bank_6_run_player_bullet_routines */
 
     for (bullet_index = 0u; bullet_index < CONTRA_PLAYER_BULLET_COUNT; ++bullet_index)
     {
@@ -3869,81 +5468,130 @@ static void contra_set_player_horizontal_flip(ContraCore *core, uint8_t player_i
     core->ram[CONTRA_RAM_PLAYER_SPRITE_FLIP + player_index] = flip;
 }
 
+/* bank2 player sprite tables (read from the ROM so that out-of-range indices
+   pick up the same neighbouring bytes the 6502 does) */
+enum
+{
+    CONTRA_B2_PLAYER_SMALL_SEQ_SPRITE_TBL = 0xB081u,
+    CONTRA_B2_PLAYER_FRAME_SPRITE_TYPE_TBL = 0xB0BDu,
+    CONTRA_B2_PLAYER_FRAME_SPRITE_PTR_TBL = 0xB0C7u,
+    CONTRA_B2_PLAYER_DEATH_SPRITE_TBL = 0xB11Eu,
+    CONTRA_B2_PLAYER_CURLED_SPRITE_CODE_TBL = 0xB176u
+};
+
+/* a CPU read while bank 2 is mapped */
+static uint8_t contra_bank2_read(uint16_t addr)
+{
+    return contra_rom_read_u8((addr >= 0xC000u) ? 7u : 2u, addr);
+}
+
+/* bank2 set_player_jump_sprite: the curled somersault, 4 frames of 5 */
 static void contra_set_player_jump_sprite(ContraCore *core, uint8_t player_index)
 {
-    uint8_t base_flip = 0x00u;
-    uint8_t flip = (uint8_t)(core->ram[CONTRA_RAM_PLAYER_SPRITE_FLIP + player_index] & 0x3Fu);
-    uint8_t anim_index = core->ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] & 0x03u;
+    uint8_t *const ram = core->ram;
+    const uint8_t x = player_index;
+    uint8_t flip;
+    uint8_t index;
 
-    if ((core->ram[CONTRA_RAM_PLAYER_JUMP_STATUS + player_index] & 0x80u) != 0u)
+    ram[0x08u] = ((ram[CONTRA_RAM_PLAYER_JUMP_STATUS + x] & 0x80u) != 0u) ? 0x40u : 0x00u;
+    flip = (uint8_t)(ram[CONTRA_RAM_PLAYER_SPRITE_FLIP + x] & 0x3Fu);
+    if (ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + x] >= 0x02u)
     {
-        base_flip = 0x40u;
+        flip = (uint8_t)(flip | 0xC0u);
     }
-
-    if (anim_index >= 0x02u)
+    ram[CONTRA_RAM_PLAYER_SPRITE_FLIP + x] = (uint8_t)(flip ^ ram[0x08u]);
+    ram[CONTRA_RAM_PLAYER_SPRITE_CODE + x] = contra_bank2_read(
+        (uint16_t)(CONTRA_B2_PLAYER_CURLED_SPRITE_CODE_TBL + ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + x]));
+    ram[CONTRA_RAM_PLAYER_SPECIAL_SPRITE_TIMER + x] = (uint8_t)(ram[CONTRA_RAM_PLAYER_SPECIAL_SPRITE_TIMER + x] + 1u);
+    if (ram[CONTRA_RAM_PLAYER_SPECIAL_SPRITE_TIMER + x] < 0x05u)
     {
-        flip |= 0xC0u;
+        return;
     }
+    ram[CONTRA_RAM_PLAYER_SPECIAL_SPRITE_TIMER + x] = 0x00u;
+    index = (uint8_t)(ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + x] + 1u);
+    ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + x] = (index < 0x04u) ? index : 0x00u;
+}
 
-    flip ^= base_flip;
-    core->ram[CONTRA_RAM_PLAYER_SPRITE_FLIP + player_index] = flip;
-    core->ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] = contra_player_curled_sprite_code_tbl[anim_index];
+/* bank2 set_outdoor_player_death_sprite: hit, flip over, lie down */
+static void contra_set_outdoor_player_death_sprite(ContraCore *core, uint8_t player_index)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t x = player_index;
+    uint8_t y;
 
-    core->ram[CONTRA_RAM_PLAYER_SPECIAL_SPRITE_TIMER + player_index] =
-        (uint8_t)(core->ram[CONTRA_RAM_PLAYER_SPECIAL_SPRITE_TIMER + player_index] + 1u);
-    if (core->ram[CONTRA_RAM_PLAYER_SPECIAL_SPRITE_TIMER + player_index] >= 0x05u)
+    ram[CONTRA_RAM_PLAYER_SPECIAL_SPRITE_TIMER + x] = (uint8_t)(ram[CONTRA_RAM_PLAYER_SPECIAL_SPRITE_TIMER + x] + 1u);
+    if ((ram[CONTRA_RAM_PLAYER_SPECIAL_SPRITE_TIMER + x] & 0x07u) == 0u)
     {
-        core->ram[CONTRA_RAM_PLAYER_SPECIAL_SPRITE_TIMER + player_index] = 0x00u;
-        core->ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] =
-            (uint8_t)((core->ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] + 1u) & 0x03u);
+        ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + x] = (uint8_t)(ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + x] + 1u);
+        if (ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + x] >= 0x05u)
+        {
+            ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + x] = 0x04u; /* sprite_0c, lying on the ground */
+        }
+    }
+    y = (uint8_t)(ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + x] << 1);
+    ram[CONTRA_RAM_PLAYER_SPRITE_CODE + x] = contra_bank2_read((uint16_t)(CONTRA_B2_PLAYER_DEATH_SPRITE_TBL + y));
+    ram[CONTRA_RAM_PLAYER_SPRITE_FLIP + x] = contra_bank2_read((uint16_t)(CONTRA_B2_PLAYER_DEATH_SPRITE_TBL + y + 1u));
+    if ((ram[CONTRA_RAM_PLAYER_DEATH_FLAG + x] & 0x02u) != 0u)
+    {
+        ram[CONTRA_RAM_PLAYER_SPRITE_FLIP + x] = (uint8_t)(ram[CONTRA_RAM_PLAYER_SPRITE_FLIP + x] ^ 0x40u);
     }
 }
 
-static void contra_set_player_death_sprite(ContraCore *core, uint8_t player_index)
+/* bank2 player_sprite_indoor_dead */
+static void contra_player_sprite_indoor_dead(ContraCore *core, uint8_t player_index)
 {
     uint8_t *const ram = core->ram;
+    uint8_t sprite = 0x56u; /* lying dead */
 
-    if (ram[CONTRA_RAM_PLAYER_SPRITE_SEQUENCE + player_index] == 0x06u)
+    if (ram[CONTRA_RAM_PLAYER_SPECIAL_SPRITE_TIMER + player_index] < 0x1Bu)
     {
-        if (ram[CONTRA_RAM_PLAYER_SPECIAL_SPRITE_TIMER + player_index] < 0x1Bu)
-        {
-            ram[CONTRA_RAM_PLAYER_SPECIAL_SPRITE_TIMER + player_index] =
-                (uint8_t)(ram[CONTRA_RAM_PLAYER_SPECIAL_SPRITE_TIMER + player_index] + 1u);
-            ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] = 0x55u;
-        }
-        else
-        {
-            ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] = 0x56u;
-        }
-
-        ram[CONTRA_RAM_PLAYER_SPRITE_FLIP + player_index] = 0x00u;
-        return;
+        ram[CONTRA_RAM_PLAYER_SPECIAL_SPRITE_TIMER + player_index] =
+            (uint8_t)(ram[CONTRA_RAM_PLAYER_SPECIAL_SPRITE_TIMER + player_index] + 1u);
+        sprite = 0x55u; /* hit */
     }
+    ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] = sprite;
+    ram[CONTRA_RAM_PLAYER_SPRITE_FLIP + player_index] = 0x00u;
+}
 
-    ram[CONTRA_RAM_PLAYER_SPECIAL_SPRITE_TIMER + player_index] =
-        (uint8_t)(ram[CONTRA_RAM_PLAYER_SPECIAL_SPRITE_TIMER + player_index] + 1u);
-    if ((ram[CONTRA_RAM_PLAYER_SPECIAL_SPRITE_TIMER + player_index] & 0x07u) == 0u)
+/* bank2 set_player_frame_sprite_from_a: 6-frame walk cycle from
+   player_frame_sprite_ptr_tbl[a], one frame per 8 game frames */
+static void contra_set_player_frame_sprite_from_a(ContraCore *core, uint8_t player_index, uint8_t a)
+{
+    uint8_t *const ram = core->ram;
+    const uint8_t x = player_index;
+    const uint8_t y = (uint8_t)(a << 1);
+    uint16_t table;
+
+    ram[0x01u] = contra_bank2_read((uint16_t)(CONTRA_B2_PLAYER_FRAME_SPRITE_PTR_TBL + y));
+    ram[0x02u] = contra_bank2_read((uint16_t)(CONTRA_B2_PLAYER_FRAME_SPRITE_PTR_TBL + y + 1u));
+    table = (uint16_t)(ram[0x01u] | ((uint16_t)ram[0x02u] << 8));
+    ram[CONTRA_RAM_PLAYER_SPRITE_CODE + x] =
+        contra_bank2_read((uint16_t)(table + ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + x]));
+    ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + x] = (uint8_t)(ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + x] + 1u);
+    if ((ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + x] & 0x07u) == 0u)
     {
-        ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] =
-            (uint8_t)(ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] + 1u);
-        if (ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] >= 0x05u)
+        ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + x] = (uint8_t)(ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + x] + 1u);
+        if (ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + x] >= 0x06u)
         {
-            ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] = 0x04u;
+            ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + x] = 0x00u;
         }
     }
+    contra_set_player_horizontal_flip(core, x);
+}
 
+/* bank2 set_player_frame_sprite: the walk table by aim direction (with gun
+   recoil, the straight-ahead walk becomes the firing walk) */
+static void contra_set_player_frame_sprite(ContraCore *core, uint8_t player_index)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t a = contra_bank2_read(
+        (uint16_t)(CONTRA_B2_PLAYER_FRAME_SPRITE_TYPE_TBL + ram[CONTRA_RAM_PLAYER_AIM_DIR + player_index]));
+
+    if ((a == 0x00u) && (ram[CONTRA_RAM_PLAYER_RECOIL_TIMER + player_index] != 0u))
     {
-        uint8_t frame_index = ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index];
-        uint8_t flip = contra_player_death_sprite_tbl[frame_index][1];
-
-        if ((ram[CONTRA_RAM_PLAYER_DEATH_FLAG + player_index] & 0x02u) != 0u)
-        {
-            flip ^= 0x40u;
-        }
-
-        ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] = contra_player_death_sprite_tbl[frame_index][0];
-        ram[CONTRA_RAM_PLAYER_SPRITE_FLIP + player_index] = flip;
+        a = 0x01u;
     }
+    contra_set_player_frame_sprite_from_a(core, player_index, a);
 }
 
 static void contra_set_player_water_transition_flip(ContraCore *core, uint8_t player_index)
@@ -4075,149 +5723,99 @@ static void contra_set_player_water_sprite(ContraCore *core, uint8_t player_inde
     }
 }
 
+/* bank2 set_player_sprite */
 static void contra_set_player_sprite(ContraCore *core, uint8_t player_index)
 {
-    uint8_t sequence = core->ram[CONTRA_RAM_PLAYER_SPRITE_SEQUENCE + player_index];
+    uint8_t *const ram = core->ram;
+    const uint8_t x = player_index;
+    const uint8_t sequence = ram[CONTRA_RAM_PLAYER_SPRITE_SEQUENCE + x];
+    const uint8_t location = ram[CONTRA_RAM_LEVEL_LOCATION_TYPE];
 
-    if (core->ram[CONTRA_RAM_PLAYER_WATER_STATE + player_index] != 0u)
+    if (ram[CONTRA_RAM_PLAYER_WATER_STATE + x] != 0u)
     {
-        contra_set_player_water_sprite(core, player_index);
+        contra_set_player_water_sprite(core, x);
+        return;
+    }
+    if (ram[CONTRA_RAM_EDGE_FALL_CODE + x] != 0u)
+    {
+        ram[CONTRA_RAM_PLAYER_SPRITE_CODE + x] = 0x05u; /* set_player_sprite_05 */
+        contra_set_player_horizontal_flip(core, x);
+        return;
+    }
+    if (ram[CONTRA_RAM_PLAYER_JUMP_STATUS + x] != 0u)
+    {
+        contra_set_player_jump_sprite(core, x);
         return;
     }
 
-    if (core->ram[CONTRA_RAM_EDGE_FALL_CODE + player_index] != 0u)
+    if (location == 0u)
     {
-        core->ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] = 0x05u;
-        contra_set_player_horizontal_flip(core, player_index);
-        return;
-    }
-
-    if (core->ram[CONTRA_RAM_PLAYER_JUMP_STATUS + player_index] != 0u)
-    {
-        contra_set_player_jump_sprite(core, player_index);
-        return;
-    }
-
-    if ((sequence == 0x04u) || (sequence == 0x06u))
-    {
-        contra_set_player_death_sprite(core, player_index);
-        return;
-    }
-
-    if (core->ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u)
-    {
-        if (sequence == 0x00u)
+        /* @set_outdoor_player_sprite_for_sequence */
+        if (sequence < 0x03u)
         {
-            /* facing up / standing (player_sprite_indoor_facing_up, bank2:1321) */
-            core->ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] = 0x50u;
+            ram[CONTRA_RAM_PLAYER_SPRITE_CODE + x] =
+                contra_bank2_read((uint16_t)(CONTRA_B2_PLAYER_SMALL_SEQ_SPRITE_TBL + sequence));
+            contra_set_player_horizontal_flip(core, x);
         }
-        else if (sequence == 0x01u)
+        else if (sequence == 0x03u)
         {
-            /* electrocuted by the fence (player_sprite_indoor_electrocuted,
-               bank2:1325) -- was wrongly drawn as facing-up (0x50), so the shock
-               pose never showed when you pressed Up into the live fence. */
-            core->ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] = 0x55u;
-        }
-        else if (sequence == 0x02u)
-        {
-            core->ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] = 0x54u;
-        }
-        else if (sequence == 0x05u)
-        {
-            core->ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + player_index] =
-                (uint8_t)(core->ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + player_index] - 1u);
-            if ((core->ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + player_index] & 0x80u) != 0u)
-            {
-                contra_play_sound(core, 0x03u);
-                core->ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + player_index] = 0x0Au;
-                core->ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] =
-                    (uint8_t)(core->ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] + 1u);
-            }
-            core->ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] =
-                (uint8_t)(0x57u + (core->ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] & 0x01u));
-        }
-        else if (sequence == 0x06u)
-        {
-            contra_set_player_death_sprite(core, player_index);
-            return;
-        }
-        else if ((sequence == 0x03u) || (sequence == 0x04u))
-        {
-            /* indoor walking animation (player_sprite_indoor_walking_animation,
-               bank2:1305 -> set_player_frame_sprite_from_a): cycle the 6-frame walk
-               table (player_frame_sprite_tbl_00 normally, _04 while firing),
-               advancing one frame every 8 game frames. This is the sideways-walk
-               leg animation the indoor branch previously left static. */
-            const uint8_t *const frame_table =
-                (core->ram[CONTRA_RAM_PLAYER_RECOIL_TIMER + player_index] != 0u)
-                    ? contra_player_frame_sprite_tbl_04
-                    : contra_player_frame_sprite_tbl_00;
-
-            core->ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] =
-                frame_table[core->ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] % 6u];
-            core->ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + player_index] =
-                (uint8_t)(core->ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + player_index] + 1u);
-            if ((core->ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + player_index] & 0x07u) == 0u)
-            {
-                core->ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] =
-                    (uint8_t)((core->ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] + 1u) % 6u);
-            }
+            contra_set_player_frame_sprite(core, x);
         }
         else
         {
-            /* default to facing-up; sequences 4/6 are handled as death above this
-               indoor block, so this effectively only catches the standing pose. */
-            core->ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] = 0x50u;
+            contra_set_outdoor_player_death_sprite(core, x);
         }
-        contra_set_player_horizontal_flip(core, player_index);
         return;
     }
 
-    if (sequence < 0x03u)
+    if ((location & 0x80u) != 0u)
     {
-        core->ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] = contra_player_small_seq_sprite_tbl[sequence];
-        contra_set_player_horizontal_flip(core, player_index);
+        /* indoor_boss_set_player_sprite (indoor_boss_player_sprite_tbl) */
+        switch (sequence)
+        {
+            case 0x00u:
+            case 0x01u:
+            case 0x02u:
+                /* indoor_boss_player_aiming_up_sprite */
+                ram[CONTRA_RAM_PLAYER_SPRITE_FLIP + x] = (uint8_t)(ram[CONTRA_RAM_PLAYER_SPRITE_FLIP + x] & 0x3Fu);
+                ram[CONTRA_RAM_PLAYER_SPRITE_CODE + x] = 0x50u;
+                break;
+            case 0x03u: contra_set_player_frame_sprite(core, x); break;
+            case 0x04u: contra_player_sprite_indoor_dead(core, x); break;
+            default: break;
+        }
         return;
     }
 
-    if (sequence == 0x03u)
+    /* set_indoor_player_sprite_for_sequence (indoor_player_sprite_tbl) */
+    switch (sequence)
     {
-        uint8_t frame_type = contra_player_frame_sprite_type_tbl[core->ram[CONTRA_RAM_PLAYER_AIM_DIR + player_index] % 10u];
-        const uint8_t *frame_table = contra_player_frame_sprite_tbl_00;
-
-        if ((frame_type == 0x00u) && (core->ram[CONTRA_RAM_PLAYER_RECOIL_TIMER + player_index] != 0u))
-        {
-            frame_type = 0x01u;
-        }
-
-        if (frame_type == 0x01u)
-        {
-            frame_table = contra_player_frame_sprite_tbl_01;
-        }
-        else if (frame_type == 0x02u)
-        {
-            frame_table = contra_player_frame_sprite_tbl_02;
-        }
-        else if (frame_type == 0x03u)
-        {
-            frame_table = contra_player_frame_sprite_tbl_03;
-        }
-
-        core->ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] =
-            frame_table[core->ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] % 6u];
-        core->ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + player_index] =
-            (uint8_t)(core->ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + player_index] + 1u);
-        if ((core->ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + player_index] & 0x07u) == 0u)
-        {
-            core->ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] =
-                (uint8_t)((core->ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + player_index] + 1u) % 6u);
-        }
-
-        contra_set_player_horizontal_flip(core, player_index);
-        return;
+        case 0x00u: ram[CONTRA_RAM_PLAYER_SPRITE_CODE + x] = 0x50u; break; /* facing up */
+        case 0x01u: ram[CONTRA_RAM_PLAYER_SPRITE_CODE + x] = 0x55u; break; /* electrocuted */
+        case 0x02u: ram[CONTRA_RAM_PLAYER_SPRITE_CODE + x] = 0x54u; break; /* crouch */
+        case 0x03u:
+        case 0x04u:
+            /* player_sprite_indoor_walking_animation */
+            contra_set_player_frame_sprite_from_a(
+                core, x, (ram[CONTRA_RAM_PLAYER_RECOIL_TIMER + x] != 0u) ? 0x04u : 0x00u);
+            break;
+        case 0x05u:
+            /* player_sprite_indoor_walking_to_back */
+            ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + x] = (uint8_t)(ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + x] - 1u);
+            if ((ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + x] & 0x80u) != 0u)
+            {
+                contra_play_sound(core, 0x03u);
+                ram[CONTRA_RAM_PLAYER_ANIM_FRAME_TIMER + x] = 0x0Au;
+                ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + x] =
+                    (uint8_t)(ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + x] + 1u);
+            }
+            ram[CONTRA_RAM_PLAYER_SPRITE_CODE + x] =
+                (uint8_t)(0x57u + (ram[CONTRA_RAM_PLAYER_ANIMATION_FRAME_INDEX + x] & 0x01u));
+            break;
+        case 0x06u: contra_player_sprite_indoor_dead(core, x); break;
+        case 0x07u: ram[CONTRA_RAM_PLAYER_SPRITE_CODE + x] = 0x91u; break; /* elevator (unused) */
+        default: break;
     }
-
-    core->ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] = 0x0Au;
 }
 
 static void contra_set_player_sprite_and_attrs(ContraCore *core, uint8_t player_index)
@@ -5271,6 +6869,7 @@ static void contra_run_player_state_routine(ContraCore *core, uint8_t player_ind
         {
             contra_set_player_aim_for_input(core, player_index);
             contra_check_player_ledge(core, player_index);
+            contra_load_bank_number(core, 0x06u); /* load_bank_6_check_player_fire */
             contra_check_player_fire(core, player_index);
 
             /* handle_player_state_calc_x_vel (bank7:4359): the per-frame X
@@ -5338,6 +6937,7 @@ static void contra_run_player_state_routine(ContraCore *core, uint8_t player_ind
             contra_move_player_horizontally(core, player_index);
             contra_auto_scroll_player(core, player_index);
 
+            contra_load_bank_number(core, 0x02u); /* load_bank_2_set_player_sprite */
             contra_set_player_sprite_and_attrs(core, player_index);
             ram[CONTRA_RAM_PLAYER_AIM_PREV_FRAME + player_index] = ram[CONTRA_RAM_PLAYER_AIM_DIR + player_index];
 
@@ -5400,12 +7000,16 @@ static void contra_run_player_state_routine(ContraCore *core, uint8_t player_ind
                 contra_move_player_horizontally(core, player_index);
             }
 
+            contra_load_bank_number(core, 0x02u); /* load_bank_2_set_player_sprite */
             contra_set_player_sprite_and_attrs(core, player_index);
             break;
         }
 
         default:
-            contra_set_player_sprite_and_attrs(core, player_index);
+            /* player_state_routine_03 ("can't move", e.g. riding the level-end
+               elevator): the player's sprite is left to whoever set it. Its
+               body is the 2-player life transfer, which only runs at level
+               routine 4 with PLAYER_MODE != 0 -- not ported yet. */
             break;
     }
 }
@@ -5520,6 +7124,7 @@ static bool contra_is_native_combat_active(const ContraCore *core)
    ground enemies aligned with the player instead of sitting below the floor. */
 static void contra_load_bank_2_set_players_paused_sprite_attr(ContraCore *core)
 {
+    contra_load_bank_number(core, 0x02u);
     contra_set_player_sprite_and_attrs(core, 0u);
     contra_set_player_sprite_and_attrs(core, 1u);
 }
@@ -5568,516 +7173,142 @@ static void contra_scroll_vertical_non_scrolling_player(ContraCore *core, uint8_
     }
 }
 
-/* animate_indoor_fence (bank7:2917): the electric fence isn't in the nametable --
-   the ROM rebuilds the 4 CHR pattern tiles at PPU $1FC0 (pattern-table-1 tiles
-   0xFC-0xFF, which the indoor room super-tiles reference) every animation frame by
-   OR-ing a fixed tile "background" shape with a frame-cycled "electricity" overlay.
-   The native renderer composes the background straight from ppu_pattern, so writing
-   the animated CHR there is what makes the fence appear and flicker. Once the screen
-   is cleared the blank overlay is written and the fence vanishes. */
-static const uint8_t contra_pattern_tile_bg_00[0x40] = {
-    0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
-    0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu,
-    0xFEu, 0xFCu, 0xF8u, 0xF0u, 0xE0u, 0xC0u, 0x80u, 0x00u, 0x00u, 0x01u, 0x03u, 0x07u, 0x0Fu, 0x1Fu, 0x3Fu, 0x7Fu,
-    0x7Fu, 0x3Fu, 0x1Fu, 0x0Fu, 0x07u, 0x03u, 0x01u, 0x00u, 0x00u, 0x80u, 0xC0u, 0xE0u, 0xF0u, 0xF8u, 0xFCu, 0xFEu};
-static const uint8_t contra_pattern_tile_fence_tbl[0x28] = {
-    0x00u, 0x00u, 0x04u, 0x44u, 0xEBu, 0x32u, 0x20u, 0x00u,
-    0x00u, 0x00u, 0x10u, 0x30u, 0xEBu, 0x6Au, 0x44u, 0x00u,
-    0x00u, 0x00u, 0x08u, 0x0Cu, 0xD7u, 0x56u, 0x22u, 0x00u,
-    0x00u, 0x00u, 0x20u, 0x22u, 0xD7u, 0x4Cu, 0x04u, 0x00u,
-    0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u}; /* blank: no fence */
-
-static void contra_animate_indoor_fence(ContraCore *core)
-{
-    uint8_t *const ram = core->ram;
-    uint8_t base;
-    unsigned y;
-
-    if (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0x01u)
-    {
-        return; /* indoor boss screen (0x80) / non-indoor: no fence */
-    }
-
-    if (ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] == 0u)
-    {
-        if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x03u) != 0u)
-        {
-            return; /* electricity is redrawn only every 4th frame */
-        }
-        base = (uint8_t)((ram[CONTRA_RAM_FRAME_COUNTER] & 0x0Cu) << 1u); /* 0x00/0x08/0x10/0x18 */
-    }
-    else if ((ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] & 0x80u) == 0u)
-    {
-        base = 0x20u; /* screen cleared: blank overlay removes the fence (once) */
-        ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] = 0x80u;
-    }
-    else
-    {
-        return; /* fence already removed */
-    }
-
-    /* the fence CHR rewrite occupies 0x45 bytes of CPU_GRAPHICS_BUFFER
-       (header 5 + 0x40 pattern bytes) -- on these frames a full enemy
-       super-tile stamp finds the buffer past its 0x40 entry check and must
-       retry next frame (bank7:1353). */
-    ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] =
-        (uint8_t)(ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] + 0x45u);
-
-    for (y = 0u; y < 0x40u; ++y)
-    {
-        core->ppu_pattern[0x1FC0u + y] =
-            (uint8_t)(contra_pattern_tile_bg_00[y] |
-                      contra_pattern_tile_fence_tbl[base + (y & 0x07u)]);
-    }
-}
-
-static void contra_load_bank_3_handle_scroll(ContraCore *core)
-{
-    uint8_t *const ram = core->ram;
-    uint8_t scroll_pixels = (uint8_t)(ram[CONTRA_RAM_FRAME_SCROLL] + ram[CONTRA_RAM_TANK_AUTO_SCROLL]);
-
-    if ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0x01u) &&
-        (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] == 0u))
-    {
-        contra_animate_indoor_fence(core); /* runs every frame, regardless of scroll */
-
-        if ((ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] & 0x80u) != 0u)
-        {
-            /* @indoor_screen_transition (bank7:5845): the 0x20-frame background
-               segment finished last frame -- swap to the next of the 4 corridor
-               screens. The walking player sees INDOOR_SCROLL=2 this frame and
-               ends the segment (restoring position); the still-held Up press
-               re-arms the next segment. */
-        }
-        else if (ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] != 0u)
-        {
-            /* @write_column_tiles_exit: stream one nametable column per frame */
-            ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] =
-                (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] + 1u);
-            ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] =
-                (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] + 1u);
-            ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] =
-                (uint8_t)(ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] - 1u);
-            if (ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] == 0u)
-            {
-                ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] = 0x80u; /* swap next frame */
-            }
-            return;
-        }
-        else
-        {
-            if (ram[CONTRA_RAM_INDOOR_SCROLL] == 0u)
-            {
-                return;
-            }
-            /* segment init (bank7:5786): reset the streaming counters, flip the
-               write nametable, load the NEXT corridor screen's super-tiles
-               (screen*4 + offset + 1, note the SEC), then stream the FIRST
-               column the same frame. */
-            ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] = 0x00u;
-            ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = 0x00u;
-            ram[CONTRA_RAM_ATTRIBUTE_TBL_WRITE_LOW_BYTE] = 0x00u;
-            ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] = 0x20u;
-            ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] ^= 0x04u;
-            ram[CONTRA_RAM_ATTRIBUTE_TBL_WRITE_HIGH_BYTE] ^= 0x04u;
-            contra_load_supertiles_screen_indexes(
-                core,
-                (uint8_t)((ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] * 4u) +
-                          ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] + 1u)
-            );
-            ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] = 0x01u;
-            ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = 0x01u;
-            ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] = 0x1Fu;
-            return;
-        }
-
-        ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] = 0x00u;
-        ram[CONTRA_RAM_INDOOR_SCROLL] =
-            (uint8_t)(ram[CONTRA_RAM_INDOOR_SCROLL] + 1u); /* -> 2: ends the walk segment */
-        ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] =
-            (uint8_t)(ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] + 1u);
-        if (ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] >= 0x04u)
-        {
-            /* all 4 corridor screens shown: jump both players into the room */
-            ram[CONTRA_RAM_INDOOR_PLAYER_JUMP_FLAG + 0u] =
-                (uint8_t)(ram[CONTRA_RAM_INDOOR_PLAYER_JUMP_FLAG + 0u] + 1u);
-            ram[CONTRA_RAM_INDOOR_PLAYER_JUMP_FLAG + 1u] =
-                (uint8_t)(ram[CONTRA_RAM_INDOOR_PLAYER_JUMP_FLAG + 1u] + 1u);
-            ram[CONTRA_RAM_INDOOR_SCREEN_CLEARED] = 0x00u;
-            ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] = 0x00u;
-            ram[CONTRA_RAM_ENEMY_SCREEN_READ_OFFSET] = 0x00u;
-            ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] =
-                (uint8_t)(ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] + 1u);
-
-            if (ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] == ram[CONTRA_RAM_LEVEL_STOP_SCROLL])
-            {
-                ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] = 0x80u;
-                ram[CONTRA_RAM_VERTICAL_SCROLL] = 0xE0u;
-                contra_load_alternate_graphics(core);
-                contra_init_apu_channels(core);
-                /* load the boss-room CHR set: lda CURRENT_LEVEL; lsr; ora #$08;
-                   jsr load_A_offset_graphic_data (bank7:5845-5848) -- list 8 for L2
-                   (level_2_boss_graphic_data $03,$04,$13,$08), list 9 for L4. Without
-                   this the cannon/plating/wall tiles render from the wrong CHR. */
-                contra_load_graphic_data_list(
-                    core, (uint8_t)(0x08u | (ram[CONTRA_RAM_CURRENT_LEVEL] >> 1u)));
-                /* Compose the flat mechanical boss wall: repoint the super-tile /
-                   tile-data / palette pointers to the boss tables (handle_indoor_scroll
-                   pointer swap, bank7:5772-5787, source level_2_4_boss_graphics_data
-                   bank7:5870) and reload the boss-wall layout. Screen index 0 = L2 wall,
-                   1 = L4 wall (CURRENT_LEVEL>>1). Without this the boss room composes the
-                   generic corridor layout (now drawn with boss CHR -> garbled). */
-                ram[CONTRA_RAM_LEVEL_SCREEN_SUPERTILES_PTR] = 0x13u; /* $9013 boss screen ptr tbl */
-                ram[CONTRA_RAM_LEVEL_SCREEN_SUPERTILES_PTR + 1u] = 0x90u;
-                ram[CONTRA_RAM_LEVEL_SUPERTILE_DATA_PTR] = 0x7Au; /* $b57a boss super-tile data */
-                ram[CONTRA_RAM_LEVEL_SUPERTILE_DATA_PTR + 1u] = 0xB5u;
-                ram[CONTRA_RAM_LEVEL_SUPERTILE_PALETTE_DATA] = 0x7Au; /* $bd7a boss palette data */
-                ram[CONTRA_RAM_LEVEL_SUPERTILE_PALETTE_DATA + 1u] = 0xBDu;
-                contra_decode_level_screen_supertiles(
-                    core, (uint8_t)(ram[CONTRA_RAM_CURRENT_LEVEL] >> 1u),
-                    core->level_screen_supertiles, 0u);
-                contra_play_sound(core, 0x42u);
-            }
-        }
-
-        contra_load_supertiles_screen_indexes(
-            core,
-            (uint8_t)((ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] * 4u) + ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET])
-        );
-        ram[CONTRA_RAM_BG_PALETTE_ADJ_TIMER] = 0x0Cu;
-        contra_load_palettes_color_to_cpu(core, 0x20u);
-        ram[CONTRA_RAM_PPUCTRL_SETTINGS] ^= 0x01u;
-        return;
-    }
-
-    /* handle_vertical_scroll (bank7:5667-5747): advance the vertical-level camera.
-       The original streams nametable rows into the PPU as it scrolls; the port's
-       framebuffer renderer redraws from LEVEL_SCREEN_NUMBER / SCROLL_OFFSET each
-       frame, so only the scroll bookkeeping is ported here (the PPU write-address
-       and supertile-streaming steps are unnecessary). */
-    if (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u)
-    {
-        uint8_t vertical_scroll_pixels;
-
-        /* boss-reveal auto-scroll (bank7:5668-5676) */
-        if (ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] != 0u)
-        {
-            ram[CONTRA_RAM_BG_PALETTE_ADJ_TIMER] = 0x10u;
-            ram[CONTRA_RAM_FRAME_SCROLL] = 0x01u;
-            ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] =
-                (uint8_t)(ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] - 1u);
-            if (ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] == 0u)
-            {
-                ram[CONTRA_RAM_BOSS_AUTO_SCROLL_COMPLETE] =
-                    (uint8_t)(ram[CONTRA_RAM_BOSS_AUTO_SCROLL_COMPLETE] + 1u);
-            }
-        }
-
-        vertical_scroll_pixels = ram[CONTRA_RAM_FRAME_SCROLL]; /* @init_loop, bank7:5678-5681 */
-        while (vertical_scroll_pixels-- != 0u)                 /* @frame_scroll_loop */
-        {
-            ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] =
-                (uint8_t)(ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] + 1u);
-            if (ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] >= 0xF0u) /* bank7:5685-5699 */
-            {
-                ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] = 0x00u;
-                ram[CONTRA_RAM_ENEMY_SCREEN_READ_OFFSET] = 0x00u;
-                ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] =
-                    (uint8_t)(ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] + 1u);
-                if (ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] == ram[CONTRA_RAM_LEVEL_ALT_GRAPHICS_POS])
-                {
-                    ram[CONTRA_RAM_ALT_GRAPHIC_DATA_LOADING_FLAG] = 0x01u;
-                    ram[CONTRA_RAM_BG_PALETTE_ADJ_TIMER] = 0x80u;
-                    contra_load_alternate_graphics(core);
-                }
-            }
-
-            if ((ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] & 0x07u) == 0u)
-            {
-                const uint8_t old_low = ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE];
-
-                ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] =
-                    (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] - 0x20u);
-                if (old_low < 0x20u)
-                {
-                    ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] =
-                        (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] - 1u);
-                }
-
-                ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] =
-                    (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] - 1u);
-                if ((ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] & 0x80u) != 0u)
-                {
-                    ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET] ^= 0x40u;
-                    ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] = 0x1Du;
-                    ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = 0xA0u;
-                    ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] = 0x23u;
-                    contra_load_next_supertiles_screen_indexes(core);
-                }
-            }
-
-            /* @dec_scroll_continue (bank7:5726-5732): VERTICAL_SCROLL counts down
-               one PPU line per scrolled pixel, wrapping #$ff back to #$ef. */
-            ram[CONTRA_RAM_VERTICAL_SCROLL] =
-                (uint8_t)(ram[CONTRA_RAM_VERTICAL_SCROLL] - 1u);
-            if (ram[CONTRA_RAM_VERTICAL_SCROLL] == 0xFFu)
-            {
-                ram[CONTRA_RAM_VERTICAL_SCROLL] = 0xEFu;
-            }
-        }
-        return;
-    }
-
-    if (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u)
-    {
-        return;
-    }
-
-    /* @handle_outdoor_level (bank7:5575-5598): advance the boss-reveal auto-scroll.
-       Tick AUTO_SCROLL_TIMER_01 then _00; while either is running force a 1px frame
-       scroll, and when _00 elapses set BOSS_AUTO_SCROLL_COMPLETE so the boss
-       routines (which gate on it) can start. Then recompute the scroll amount. */
-    {
-        bool force_frame_scroll = false;
-
-        if (ram[CONTRA_RAM_AUTO_SCROLL_TIMER_01] != 0u)
-        {
-            ram[CONTRA_RAM_AUTO_SCROLL_TIMER_01] =
-                (uint8_t)(ram[CONTRA_RAM_AUTO_SCROLL_TIMER_01] - 1u);
-            if (ram[CONTRA_RAM_AUTO_SCROLL_TIMER_01] != 0u)
-            {
-                force_frame_scroll = true;
-            }
-        }
-        if (!force_frame_scroll && (ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] != 0u))
-        {
-            ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] =
-                (uint8_t)(ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] - 1u);
-            if (ram[CONTRA_RAM_AUTO_SCROLL_TIMER_00] == 0u)
-            {
-                ram[CONTRA_RAM_BOSS_AUTO_SCROLL_COMPLETE] =
-                    (uint8_t)(ram[CONTRA_RAM_BOSS_AUTO_SCROLL_COMPLETE] + 1u);
-            }
-            force_frame_scroll = true;
-        }
-        if (force_frame_scroll)
-        {
-            ram[CONTRA_RAM_FRAME_SCROLL] = 0x01u;
-        }
-        scroll_pixels = (uint8_t)(ram[CONTRA_RAM_FRAME_SCROLL] + ram[CONTRA_RAM_TANK_AUTO_SCROLL]);
-    }
-
-    if (scroll_pixels == 0u)
-    {
-        return;
-    }
-
-    while (scroll_pixels-- != 0u)
-    {
-        ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] =
-            (uint8_t)(ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] + 1u);
-
-        if (ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] == 0u)
-        {
-            ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] =
-                (uint8_t)(ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] + 1u);
-            ram[CONTRA_RAM_ENEMY_SCREEN_READ_OFFSET] = 0x00u;
-            ram[CONTRA_RAM_PPUCTRL_SETTINGS] ^= 0x01u;
-
-            if (ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] == ram[CONTRA_RAM_LEVEL_ALT_GRAPHICS_POS])
-            {
-                ram[CONTRA_RAM_ALT_GRAPHIC_DATA_LOADING_FLAG] = 0x01u;
-                contra_load_alternate_graphics(core);
-            }
-        }
-
-        if ((ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] & 0x07u) == 0u)
-        {
-            contra_schedule_horizontal_level_column_write(core);
-            contra_advance_horizontal_level_ppu_column(core);
-        }
-        else if ((ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] & 0x0Fu) == 0x03u)
-        {
-            contra_schedule_horizontal_level_column_attributes_write(core);
-        }
-
-        ram[CONTRA_RAM_HORIZONTAL_SCROLL] =
-            (uint8_t)(ram[CONTRA_RAM_HORIZONTAL_SCROLL] + 1u);
-    }
-}
-
+/* bank7 load_palette_indexes (+ falcon_weapon_flash) */
 static void contra_load_palette_indexes(ContraCore *core)
 {
+    static const uint8_t indoor_boss_palette_2_index[8] = {0x13u, 0x14u, 0x15u, 0x14u, 0x1Bu, 0x1Cu, 0x1Du, 0x1Cu};
+    static const uint8_t falcon_weapon_flash_tbl[4] = {0x0Fu, 0x30u, 0x16u, 0x11u};
+    static const uint8_t ending_palette_2_index[4] = {0x66u, 0x6Au, 0x6Bu, 0x6Au};
     uint8_t *const ram = core->ram;
-    uint8_t cycle_index;
 
     if (ram[CONTRA_RAM_NUM_PALETTES_TO_LOAD] >= ram[CONTRA_RAM_GAME_ROUTINE_INDEX])
     {
-        return;
+        return; /* palette_mod_exit */
     }
 
-    if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x07u) != 0x05u)
+    if (((ram[CONTRA_RAM_FRAME_COUNTER] & 0x07u) == 0x05u) && (ram[CONTRA_RAM_PAUSE_PALETTE_CYCLE] == 0u))
     {
-        return;
-    }
+        uint8_t y;
+        bool load = true;
 
-    if (ram[CONTRA_RAM_PAUSE_PALETTE_CYCLE] != 0u)
-    {
-        return;
-    }
-
-    ram[CONTRA_RAM_LEVEL_PALETTE_CYCLE] = (uint8_t)(ram[CONTRA_RAM_LEVEL_PALETTE_CYCLE] + 1u);
-    cycle_index = ram[CONTRA_RAM_LEVEL_PALETTE_CYCLE];
-    if (cycle_index >= contra_level_palette_animation_count[ram[CONTRA_RAM_CURRENT_LEVEL]])
-    {
-        cycle_index = 0x00u;
-        ram[CONTRA_RAM_LEVEL_PALETTE_CYCLE] = cycle_index;
-    }
-
-    ram[CONTRA_RAM_LEVEL_PALETTE_INDEX + 3u] = ram[CONTRA_RAM_LEVEL_PALETTE_CYCLE_INDEXES + cycle_index];
-
-    if ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0u) ||
-        (((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] & 0x80u) == 0u) &&
-         (ram[CONTRA_RAM_CURRENT_LEVEL] != 0x07u) &&
-         ((ram[CONTRA_RAM_LEVEL_ALT_GRAPHICS_POS] & 0x80u) == 0u)))
-    {
-        ram[CONTRA_RAM_LEVEL_PALETTE_INDEX + 2u] = contra_level_palette_2_index_tbl[cycle_index];
-    }
-
-    contra_load_palettes_color_to_cpu(core, 0x10u);
-}
-
-static void contra_load_bank_2_alternate_tile_loading(ContraCore *core)
-{
-    uint8_t *const ram = core->ram;
-    const uint8_t loading_flag = ram[CONTRA_RAM_ALT_GRAPHIC_DATA_LOADING_FLAG];
-
-    if (loading_flag == 0u)
-    {
-        return;
-    }
-
-    if ((loading_flag & 0x80u) == 0u)
-    {
-        const uint8_t level = ram[CONTRA_RAM_CURRENT_LEVEL];
-        const ContraAltGraphicDataRef *ref;
-
-        if (level >= 8u)
+        ram[CONTRA_RAM_LEVEL_PALETTE_CYCLE] = (uint8_t)(ram[CONTRA_RAM_LEVEL_PALETTE_CYCLE] + 1u);
+        if (ram[CONTRA_RAM_LEVEL_PALETTE_CYCLE] >= contra_level_palette_animation_count[ram[CONTRA_RAM_CURRENT_LEVEL]])
         {
-            ram[CONTRA_RAM_ALT_GRAPHIC_DATA_LOADING_FLAG] = 0x00u;
-            return;
+            ram[CONTRA_RAM_LEVEL_PALETTE_CYCLE] = 0x00u;
         }
-
-        ref = &contra_alt_graphic_data_refs[level];
-        if (ref->chunk_count == 0u)
+        y = ram[CONTRA_RAM_LEVEL_PALETTE_CYCLE];
+        ram[CONTRA_RAM_LEVEL_PALETTE_INDEX + 3u] = ram[CONTRA_RAM_LEVEL_PALETTE_CYCLE_INDEXES + y];
+        if ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] & 0x80u) != 0u)
         {
-            ram[CONTRA_RAM_ALT_GRAPHIC_DATA_LOADING_FLAG] = 0x00u;
-            return;
+            /* set_indoor_boss_palette_2_animation: (level & 2) * 2 + cycle */
+            const uint8_t index = (uint8_t)(((ram[CONTRA_RAM_CURRENT_LEVEL] & 0x02u) << 1) +
+                                            ram[CONTRA_RAM_LEVEL_PALETTE_CYCLE]);
+
+            ram[CONTRA_RAM_LEVEL_PALETTE_INDEX + 2u] = indoor_boss_palette_2_index[index & 0x07u];
         }
-
-        ram[CONTRA_RAM_ALT_GFX_PPU_ADDR_LO] = (uint8_t)(ref->ppu_addr & 0xFFu);
-        ram[CONTRA_RAM_ALT_GFX_PPU_ADDR_HI] = (uint8_t)(ref->ppu_addr >> 8u);
-        ram[CONTRA_RAM_ALT_GFX_READ_ADDR_LO] = (uint8_t)(ref->cpu_addr & 0xFFu);
-        ram[CONTRA_RAM_ALT_GFX_READ_ADDR_HI] = (uint8_t)(ref->cpu_addr >> 8u);
-        ram[CONTRA_RAM_ALT_GFX_CHUNK_COUNT] = ref->chunk_count;
-        ram[CONTRA_RAM_ALT_GRAPHIC_DATA_LOADING_FLAG] = 0x80u;
-    }
-
-    if (ram[CONTRA_RAM_ALT_GFX_CHUNK_COUNT] == 0u)
-    {
-        ram[CONTRA_RAM_ALT_GRAPHIC_DATA_LOADING_FLAG] = 0x00u;
-        return;
-    }
-
-    if (contra_load_rom_image())
-    {
-        const uint16_t ppu_addr = (uint16_t)(
-            (uint16_t)ram[CONTRA_RAM_ALT_GFX_PPU_ADDR_LO] |
-            ((uint16_t)ram[CONTRA_RAM_ALT_GFX_PPU_ADDR_HI] << 8u)
-        );
-        const uint16_t read_addr = (uint16_t)(
-            (uint16_t)ram[CONTRA_RAM_ALT_GFX_READ_ADDR_LO] |
-            ((uint16_t)ram[CONTRA_RAM_ALT_GFX_READ_ADDR_HI] << 8u)
-        );
-        unsigned chunk_offset;
-
-        for (chunk_offset = 0u; chunk_offset < 0x20u; ++chunk_offset)
+        else if (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x00u)
         {
-            contra_write_ppu_byte(
-                core,
-                (uint16_t)(ppu_addr + chunk_offset),
-                contra_rom_read_u8(2u, (uint16_t)(read_addr + chunk_offset))
-            );
+            ram[CONTRA_RAM_LEVEL_PALETTE_INDEX + 2u] = contra_level_palette_2_index_tbl[y];
         }
-
-        ram[CONTRA_RAM_ALT_GFX_PPU_ADDR_LO] = (uint8_t)((ppu_addr + 0x20u) & 0xFFu);
-        ram[CONTRA_RAM_ALT_GFX_PPU_ADDR_HI] = (uint8_t)((ppu_addr + 0x20u) >> 8u);
-        ram[CONTRA_RAM_ALT_GFX_READ_ADDR_LO] = (uint8_t)((read_addr + 0x20u) & 0xFFu);
-        ram[CONTRA_RAM_ALT_GFX_READ_ADDR_HI] = (uint8_t)((read_addr + 0x20u) >> 8u);
+        else if (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x07u)
+        {
+            /* load_10_sprite_palettes */
+        }
+        else if (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x08u)
+        {
+            ram[CONTRA_RAM_LEVEL_PALETTE_INDEX + 2u] = ending_palette_2_index[y & 0x03u];
+        }
+        else if ((ram[CONTRA_RAM_LEVEL_ALT_GRAPHICS_POS] & 0x80u) == 0u)
+        {
+            ram[CONTRA_RAM_LEVEL_PALETTE_INDEX + 2u] = contra_level_palette_2_index_tbl[y];
+        }
+        if (load)
+        {
+            contra_load_palettes_color_to_cpu(core, 0x10u);
+        }
     }
 
-    ram[CONTRA_RAM_ALT_GFX_CHUNK_COUNT] = (uint8_t)(ram[CONTRA_RAM_ALT_GFX_CHUNK_COUNT] - 1u);
-    if (ram[CONTRA_RAM_ALT_GFX_CHUNK_COUNT] == 0u)
+    /* falcon_weapon_flash */
+    if (ram[CONTRA_RAM_FALCON_FLASH_TIMER] != 0u)
     {
-        ram[CONTRA_RAM_ALT_GRAPHIC_DATA_LOADING_FLAG] = 0x00u;
+        ram[CONTRA_RAM_FALCON_FLASH_TIMER] = (uint8_t)(ram[CONTRA_RAM_FALCON_FLASH_TIMER] - 1u);
+        if ((ram[CONTRA_RAM_FALCON_FLASH_TIMER] & 0x01u) == 0u)
+        {
+            const uint8_t color = falcon_weapon_flash_tbl[(ram[CONTRA_RAM_FALCON_FLASH_TIMER] >> 1) & 0x03u];
+
+            ram[CONTRA_RAM_PALETTE_CPU_BUFFER + 16u] = color;
+            ram[CONTRA_RAM_PALETTE_CPU_BUFFER + 20u] = color;
+            ram[CONTRA_RAM_PALETTE_CPU_BUFFER + 24u] = color;
+            ram[CONTRA_RAM_PALETTE_CPU_BUFFER + 28u] = color;
+            ram[CONTRA_RAM_NUM_PALETTES_TO_LOAD] = 0x20u;
+        }
     }
 }
 
+
+/* bank7 load_palettes_color_to_cpu / load_palette_colors_to_cpu /
+   shift_bg_palette_color: expand LEVEL_PALETTE_INDEX into PALETTE_CPU_BUFFER
+   (the NMI's write_palette_colors_to_ppu uploads NUM_PALETTES_TO_LOAD bytes).
+   Zero-page temps are written like the ROM: $00 palette index, $02 count,
+   $03 FC&$30 (or the read offset in the fade path), $04 fade amount, $06/$07
+   the game_palettes pointer of the last palette ($06 is consumed as junk by
+   create_default_soldiers' ledge bit). */
 static void contra_load_palettes_color_to_cpu(ContraCore *core, uint8_t num_colors)
 {
-    uint8_t palette_index_offset = 0x00u;
-    uint8_t write_offset = 0x00u;
-    uint8_t palette_buffer[CONTRA_PPU_PALETTE_SIZE];
+    static const uint8_t palette_shift_amount_tbl[8] = {0x00u, 0x00u, 0x10u, 0x10u, 0x20u, 0x20u, 0x30u, 0x30u};
+    uint8_t *const ram = core->ram;
+    uint8_t x = 0x00u;
 
-    core->ram[CONTRA_RAM_NUM_PALETTES_TO_LOAD] = num_colors;
-    memcpy(palette_buffer, core->ppu_palette, sizeof(palette_buffer));
+    ram[0x02u] = num_colors;
+    ram[CONTRA_RAM_NUM_PALETTES_TO_LOAD] = num_colors;
+    ram[0x03u] = (uint8_t)(ram[CONTRA_RAM_FRAME_COUNTER] & 0x30u);
+    ram[0x00u] = 0x00u;
 
-    while (write_offset < num_colors)
+    do
     {
-        const uint8_t palette_index = core->ram[CONTRA_RAM_LEVEL_PALETTE_INDEX + palette_index_offset];
-        const uint16_t game_palette_addr = (uint16_t)(0xD227u + ((uint16_t)palette_index * 3u));
-        uint8_t color_index;
+        const uint8_t index = ram[CONTRA_RAM_LEVEL_PALETTE_INDEX + ram[0x00u]];
+        const uint16_t palette_addr = (uint16_t)(0xD227u + (uint16_t)index * 3u);
+        uint8_t y = 0x00u;
 
-        palette_buffer[write_offset++] = 0x0Fu;
+        ram[0x06u] = (uint8_t)(palette_addr & 0xFFu);
+        ram[0x07u] = (uint8_t)(palette_addr >> 8);
+        ram[CONTRA_RAM_PALETTE_CPU_BUFFER + x] = 0x0Fu;
+        ++x;
 
-        for (color_index = 0u; (color_index < 3u) && (write_offset < num_colors); ++color_index)
+        do
         {
-            uint8_t color = contra_rom_read_u8(7u, (uint16_t)(game_palette_addr + color_index));
+            uint8_t color = contra_rom_read_u8(7u, (uint16_t)(palette_addr + y));
+            const uint8_t timer = ram[CONTRA_RAM_BG_PALETTE_ADJ_TIMER];
 
-            if ((core->ram[CONTRA_RAM_BG_PALETTE_ADJ_TIMER] != 0u) &&
-                (core->ram[CONTRA_RAM_BG_PALETTE_ADJ_TIMER] < 0x09u) &&
-                (write_offset >= 4u) &&
-                (write_offset < 16u))
+            if (timer != 0u)
             {
-                static const uint8_t palette_shift_amounts[8] = {0x00u, 0x00u, 0x10u, 0x10u, 0x20u, 0x20u, 0x30u, 0x30u};
-                const uint8_t shift_index = (uint8_t)(core->ram[CONTRA_RAM_BG_PALETTE_ADJ_TIMER] - 1u);
-                const uint8_t shift = palette_shift_amounts[shift_index];
-
-                color = (color >= shift) ? (uint8_t)(color - shift) : 0x0Fu;
+                /* shift_bg_palette_color: only BG palettes, and not the first
+                   one outside the indoor boss screen */
+                ram[0x03u] = y;
+                if ((((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] & 0x80u) != 0u) || (x >= 0x04u)) && (x < 0x10u))
+                {
+                    if (((timer & 0x80u) != 0u) || (timer >= 0x09u))
+                    {
+                        color = 0x0Fu;
+                    }
+                    else
+                    {
+                        ram[0x04u] = palette_shift_amount_tbl[timer - 1u];
+                        color = (color >= ram[0x04u]) ? (uint8_t)(color - ram[0x04u]) : 0x0Fu;
+                    }
+                }
             }
+            ram[CONTRA_RAM_PALETTE_CPU_BUFFER + x] = color;
+            ++y;
+            ++x;
+        } while (y != 0x03u);
+        ram[0x00u] = (uint8_t)(ram[0x00u] + 1u);
+    } while (x != ram[0x02u]);
 
-            palette_buffer[write_offset++] = color;
-        }
-
-        /* load_palette_colors_to_cpu (bank7:3520) leaves the game_palettes
-           pointer low byte in the $06 zero-page temp each slot. The leftover
-           from the LAST slot is consumed as junk by create_default_soldiers'
-           ledge-handling bit on the next frame, so the temp must be mirrored. */
-        core->ram[0x06u] = (uint8_t)((uint8_t)(palette_index * 3u) + 0x27u);
-
-        ++palette_index_offset;
-    }
-
-    if ((core->ram[CONTRA_RAM_BG_PALETTE_ADJ_TIMER] != 0u) &&
-        ((core->ram[CONTRA_RAM_BG_PALETTE_ADJ_TIMER] & 0x80u) == 0u))
+    if ((ram[CONTRA_RAM_BG_PALETTE_ADJ_TIMER] != 0u) && ((ram[CONTRA_RAM_BG_PALETTE_ADJ_TIMER] & 0x80u) == 0u))
     {
-        core->ram[CONTRA_RAM_BG_PALETTE_ADJ_TIMER] = (uint8_t)(core->ram[CONTRA_RAM_BG_PALETTE_ADJ_TIMER] - 1u);
+        ram[CONTRA_RAM_BG_PALETTE_ADJ_TIMER] = (uint8_t)(ram[CONTRA_RAM_BG_PALETTE_ADJ_TIMER] - 1u);
     }
-
-    core->ram[CONTRA_RAM_NUM_PALETTES_TO_LOAD] = 0x00u;
-    memcpy(core->pending_palette, palette_buffer, sizeof(core->pending_palette));
-    core->pending_palette_count = num_colors;
-    core->pending_palette_write = 0x01u;
 }
 
 static void contra_load_alternate_graphics(ContraCore *core)
@@ -6099,15 +7330,17 @@ static void contra_load_alternate_graphics(ContraCore *core)
     contra_load_palettes_color_to_cpu(core, 0x20u);
 }
 
+/* bank7 load_bank_0_load_level_enemies_to_mem / load_level_enemies_to_mem:
+   ENEMY_LEVEL_ROUTINES = level_enemy_routine_ptr_tbl[CURRENT_LEVEL] ($E698) */
 static void contra_load_bank_0_load_level_enemies_to_mem(ContraCore *core)
 {
-    core->ram[CONTRA_RAM_ENEMY_LEVEL_ROUTINES] = core->ram[CONTRA_RAM_CURRENT_LEVEL];
+    const uint16_t entry = (uint16_t)(0xE698u + (uint8_t)(core->ram[CONTRA_RAM_CURRENT_LEVEL] << 1));
+
+    contra_load_bank_number(core, 0x00u);
+    core->ram[CONTRA_RAM_ENEMY_LEVEL_ROUTINES] = contra_rom_read_u8(7u, entry);
+    core->ram[CONTRA_RAM_ENEMY_LEVEL_ROUTINES + 1u] = contra_rom_read_u8(7u, (uint16_t)(entry + 1u));
 }
 
-static void contra_load_next_supertiles_screen_indexes(ContraCore *core)
-{
-    contra_load_supertiles_screen_indexes(core, (uint8_t)(core->ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] + 1u));
-}
 
 static void contra_load_level_header(ContraCore *core)
 {
@@ -6126,43 +7359,6 @@ static void contra_load_level_header(ContraCore *core)
     );
 }
 
-static void contra_init_ppu_write_screen_supertiles(ContraCore *core)
-{
-    uint8_t *const ram = core->ram;
-
-    if (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u)
-    {
-        ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] = 0x00u;
-        ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] = 0x00u;
-        ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET] = 0x00u;
-        ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] = 0x1Du;
-        ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = 0xA0u;
-        ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] = 0x23u;
-        contra_load_supertiles_screen_indexes(core, ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER]);
-        return;
-    }
-
-    if (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u)
-    {
-        ram[CONTRA_RAM_BG_PALETTE_ADJ_TIMER] = 0x10u;
-        contra_load_palettes_color_to_cpu(core, 0x10u);
-        ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] = 0x20u;
-    }
-    else
-    {
-        ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] = 0x30u;
-    }
-
-    ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] = 0x00u;
-    ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] = 0x00u;
-    ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET] = 0x00u;
-    ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] = 0x00u;
-    ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = 0x00u;
-    ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] = 0x20u;
-    ram[CONTRA_RAM_ATTRIBUTE_TBL_WRITE_LOW_BYTE] = 0xC0u;
-    ram[CONTRA_RAM_ATTRIBUTE_TBL_WRITE_HIGH_BYTE] = 0x23u;
-    contra_load_supertiles_screen_indexes(core, ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER]);
-}
 
 static void contra_set_a_as_current_level_routine(ContraCore *core, uint8_t level_routine)
 {
@@ -6170,12 +7366,12 @@ static void contra_set_a_as_current_level_routine(ContraCore *core, uint8_t leve
     core->ram[CONTRA_RAM_END_LEVEL_ROUTINE_INDEX] = 0x00u;
 }
 
+/* bank7 set_graphics_zero_mode: only the mode and the buffer's first byte */
 static void contra_set_graphics_zero_mode(ContraCore *core)
 {
     core->ram[CONTRA_RAM_GRAPHICS_BUFFER_MODE] = 0x00u;
-    core->ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = 0x00u;
-    memset(&core->ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER], 0, CONTRA_CPU_GRAPHICS_BUFFER_SIZE);
-    contra_init_apu_channels(core);
+    core->ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER] = 0x00u;
+    contra_init_apu_channels(core, 0x03u); /* Y = 3 from load_bank_3_run_end_lvl_sequence_routine */
 }
 
 static void contra_clear_level_runtime_memory(ContraCore *core)
@@ -6208,62 +7404,6 @@ static void contra_clear_level_runtime_memory(ContraCore *core)
     }
 }
 
-static bool contra_init_lvl_nametable_animation_elapsed(ContraCore *core)
-{
-    uint8_t *const ram = core->ram;
-
-    if (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u)
-    {
-        ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] - 0x20u);
-        if (ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] > 0xDFu)
-        {
-            ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] = (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] - 1u);
-        }
-
-        ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] = (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] - 1u);
-        if ((ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] & 0x80u) == 0u)
-        {
-            return false;
-        }
-
-        ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET] = 0x00u;
-        ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] = 0x00u;
-        ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET] = 0x40u;
-        ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] = 0x1Du;
-        ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = 0xA0u;
-        ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] = 0x23u;
-        contra_load_next_supertiles_screen_indexes(core);
-        return true;
-    }
-
-    if (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] == 0u)
-    {
-        contra_write_horizontal_level_column_to_ppu(core);
-        contra_write_horizontal_level_column_attributes_to_ppu(core);
-    }
-
-    ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] + 1u);
-    ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] = (uint8_t)(ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] + 1u);
-    ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] = (uint8_t)(ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] - 1u);
-
-    if (ram[CONTRA_RAM_LEVEL_TRANSITION_TIMER] == 0u)
-    {
-        return true;
-    }
-
-    if ((ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u) || (ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] < 0x20u))
-    {
-        return false;
-    }
-
-    ram[CONTRA_RAM_PPU_WRITE_ADDRESS_LOW_BYTE] = 0x00u;
-    ram[CONTRA_RAM_PPU_WRITE_TILE_OFFSET] = 0x00u;
-    ram[CONTRA_RAM_PPU_WRITE_ADDRESS_HIGH_BYTE] = 0x24u;
-    ram[CONTRA_RAM_ATTRIBUTE_TBL_WRITE_HIGH_BYTE] = 0x27u;
-    ram[CONTRA_RAM_SUPERTILE_NAMETABLE_OFFSET] = 0x40u;
-    contra_load_next_supertiles_screen_indexes(core);
-    return false;
-}
 
 static void contra_apply_controller_state(ContraCore *core)
 {
@@ -6430,6 +7570,7 @@ static void contra_simulate_demo_input(ContraCore *core)
 {
     uint8_t *const ram = core->ram;
     int player_index;
+    contra_load_bank_number(core, 0x05u); /* simulate_input_for_demo */
 
     if ((ram[CONTRA_RAM_CONTROLLER_STATE_DIFF] & (CONTRA_BUTTON_START | CONTRA_BUTTON_SELECT)) != 0u)
     {
@@ -6758,7 +7899,8 @@ static void contra_game_routine_04(ContraCore *core)
 
 static void contra_level_routine_00(ContraCore *core)
 {
-    contra_init_apu_channels(core);
+    contra_init_apu_channels(core, core->ram[CONTRA_RAM_CONTROLLER_STATE]); /* Y = P1 input from load_controller_state */
+    contra_note_raster_cut(core, 1u, 199u); /* clear_ppu: ROM frames 595/7448/15514 */
     contra_zero_out_nametables(core);
     core->level1_weapon_box_restore_timer = 0x00u;
     core->level1_weapon_box_restore_x = 0;
@@ -6766,6 +7908,7 @@ static void contra_level_routine_00(ContraCore *core)
     core->pending_horizontal_column_write = 0x00u;
     core->pending_horizontal_attr_write = 0x00u;
     contra_load_bank_6_write_text_palette_to_mem(core, 0x06u);
+    contra_load_bank_number(core, 0x02u); /* the level headers live in bank 2 */
     core->ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] = 0x00u;
     core->ram[CONTRA_RAM_LEVEL_END_PLAYERS_ALIVE] = 0x00u;
     contra_load_level_header(core);
@@ -6813,6 +7956,7 @@ static void contra_level_routine_02(ContraCore *core)
         return;
     }
 
+    contra_note_raster_cut(core, 2u, 3u); /* clear_ppu: ROM frames 789/7643 */
     contra_zero_out_nametables(core);
     /* the ROM's level graphics load spans more video frames for the indoor
        base levels (reference recording: level 1 = 8 frozen frames at boot,
@@ -6960,98 +8104,24 @@ static const uint8_t *const contra_l1_enemy_screen_tbl[] = {
 
 /* enemy_prop_00 (bank7.asm): 4 bytes/type — STATE_WIDTH, SCORE_COLLISION, HP,
    VAR_A — indexed by ENEMY_TYPE. Level 1 (and shared types < 0x10) use this. */
-static const uint8_t contra_enemy_prop_00[][4] = {
-    {0x82u, 0x22u, 0x01u, 0x00u}, {0x80u, 0x00u, 0x01u, 0x00u},
-    {0x0Fu, 0x32u, 0xF0u, 0x00u}, {0x0Bu, 0x32u, 0x01u, 0x00u},
-    {0x8Fu, 0x22u, 0x08u, 0x00u}, {0x83u, 0x10u, 0x01u, 0x00u},
-    {0x83u, 0x30u, 0x01u, 0x00u}, {0x8Fu, 0x30u, 0x08u, 0x00u},
-    {0x0Fu, 0x52u, 0xF1u, 0x00u}, {0x00u, 0x00u, 0x01u, 0x00u},
-    {0x0Fu, 0x42u, 0xF0u, 0x00u}, {0x8Au, 0x05u, 0x01u, 0x00u},
-    {0x83u, 0x42u, 0x01u, 0x00u}, {0x00u, 0x00u, 0x01u, 0x00u},
-    {0x0Eu, 0x33u, 0x0Au, 0x00u}, {0x80u, 0x01u, 0x01u, 0x00u},
-    {0x0Fu, 0x42u, 0x10u, 0x00u}, {0x0Cu, 0x82u, 0x20u, 0x00u},
-    {0x89u, 0x00u, 0x01u, 0x00u}};
 
 /* enemy_prop_01/02 level-2/4 entries (bank7:9196), indexed by type-0x10:
    {ENEMY_STATE_WIDTH, ENEMY_SCORE_COLLISION, ENEMY_HP, ENEMY_VAR_A}. The ROM
    selects this via enemy_prop_ptr_tbl[CURRENT_LEVEL] for types >= 0x10, so the
    indoor types get their own init (e.g. the wall turret's HP, the soldiers'
    collision box) instead of the level-1 table. */
-static const uint8_t contra_enemy_prop_level2[][4] = {
-    {0x8Du, 0x02u, 0x01u, 0x00u}, /* 0x10 boss eye */
-    {0x2Fu, 0x22u, 0x05u, 0x00u}, /* 0x11 rollers */
-    {0x81u, 0x03u, 0x01u, 0x00u}, /* 0x12 grenades */
-    {0x9Fu, 0x35u, 0x04u, 0x00u}, /* 0x13 wall turret (wall cannon) */
-    {0x9Fu, 0x05u, 0x01u, 0x00u}, /* 0x14 wall core */
-    {0x13u, 0x16u, 0x01u, 0x00u}, /* 0x15 running indoor soldier */
-    {0x13u, 0x16u, 0x01u, 0x00u}, /* 0x16 jumping indoor soldier */
-    {0x13u, 0x36u, 0x01u, 0x00u}, /* 0x17 seeking guy (grenade launcher) */
-    {0x13u, 0x16u, 0x01u, 0x00u}, /* 0x18 group of 4 */
-    {0x89u, 0x00u, 0xF1u, 0x00u}, /* 0x19 indoor soldier generator */
-    {0x81u, 0x00u, 0xF1u, 0x00u}, /* 0x1A roller generator */
-    {0x8Fu, 0x13u, 0x02u, 0x01u}, /* 0x1B boss eye sphere projectile */
-    {0x8Fu, 0x02u, 0x01u, 0x00u}, /* 0x1C boss gemini */
-    {0x0Au, 0x15u, 0x01u, 0x00u}, /* 0x1D boss gemini spinning bubbles */
-    {0x03u, 0x30u, 0x01u, 0x00u}, /* 0x1E blue jumping guy */
-    {0x03u, 0x30u, 0x01u, 0x00u}, /* 0x1F red shooting guy */
-    {0x81u, 0x00u, 0xF1u, 0x00u}, /* 0x20 red/blue guys generator */
-};
 
 /* enemy_prop level-3 entries (bank7:9221), indexed by type-0x10. Note the floating
    rock platform's STATE_WIDTH #$c0 -- bit 6 set marks it "landable", which is what
    lets the player ride it instead of dying. */
-static const uint8_t contra_enemy_prop_level3[6][4] = {
-    {0xC0u, 0x04u, 0xF0u, 0x00u}, /* 0x10 floating rock platform */
-    {0x80u, 0x02u, 0xF0u, 0x00u}, /* 0x11 moving flame */
-    {0x81u, 0x00u, 0xF0u, 0x00u}, /* 0x12 rock cave (falling-rock generator) */
-    {0x8Fu, 0x31u, 0x05u, 0x00u}, /* 0x13 falling rock */
-    {0x8Du, 0x83u, 0xF1u, 0x02u}, /* 0x14 boss mouth */
-    {0x0Eu, 0x52u, 0xF1u, 0x00u}, /* 0x15 dragon arm orb */
-};
 
 /* enemy_prop level-5 entries (bank7:9230), indexed by type-0x10. */
-static const uint8_t contra_enemy_prop_level5[7][4] = {
-    {0x81u, 0x00u, 0xF0u, 0x00u}, /* 0x10 ice grenade generator */
-    {0x81u, 0x02u, 0xF1u, 0x00u}, /* 0x11 ice grenade */
-    {0x85u, 0x79u, 0xF0u, 0x00u}, /* 0x12 tank */
-    {0x81u, 0x00u, 0xF0u, 0x00u}, /* 0x13 pipe joint */
-    {0x8Du, 0x93u, 0x20u, 0x00u}, /* 0x14 alien carrier */
-    {0x02u, 0x20u, 0x01u, 0x00u}, /* 0x15 flying saucer */
-    {0x0Au, 0x12u, 0x01u, 0x00u}, /* 0x16 drop bomb */
-};
 
 /* enemy_prop level-6 entries (bank7:9241), indexed by type-0x10. */
-static const uint8_t contra_enemy_prop_level6[5][4] = {
-    {0x81u, 0x0Fu, 0xF0u, 0x00u}, /* 0x10 fire beam down */
-    {0x81u, 0x0Fu, 0xF0u, 0x00u}, /* 0x11 fire beam left */
-    {0x81u, 0x0Fu, 0xF0u, 0x00u}, /* 0x12 fire beam right */
-    {0x04u, 0x9Du, 0x01u, 0x02u}, /* 0x13 boss robot */
-    {0x80u, 0x05u, 0x01u, 0x00u}, /* 0x14 spiked disk projectile */
-};
 
 /* enemy_prop level-7 entries (bank7:9250), indexed by type-0x10. */
-static const uint8_t contra_enemy_prop_level7[9][4] = {
-    {0x80u, 0x0Au, 0xF0u, 0x00u}, /* 0x10 mechanical claw */
-    {0x8Du, 0x0Fu, 0x10u, 0x00u}, /* 0x11 rising spiked wall */
-    {0x0Cu, 0x0Fu, 0x10u, 0x00u}, /* 0x12 spiked wall */
-    {0x81u, 0x00u, 0xF0u, 0x00u}, /* 0x13 cart generator */
-    {0x6Eu, 0x0Cu, 0x03u, 0x00u}, /* 0x14 moving cart */
-    {0x6Eu, 0x0Cu, 0x03u, 0x00u}, /* 0x15 immobile cart */
-    {0x0Cu, 0x93u, 0x20u, 0x00u}, /* 0x16 armored door */
-    {0x8Fu, 0x72u, 0x08u, 0x00u}, /* 0x17 mortar launcher */
-    {0x89u, 0x00u, 0x01u, 0x00u}, /* 0x18 boss soldier generator */
-};
 
 /* enemy_prop level-8 entries (bank7:9271), indexed by type-0x10. */
-static const uint8_t contra_enemy_prop_level8[7][4] = {
-    {0x04u, 0x78u, 0x01u, 0x02u}, /* 0x10 alien guardian */
-    {0x06u, 0x22u, 0x01u, 0x01u}, /* 0x11 alien fetus */
-    {0x06u, 0x42u, 0x01u, 0x01u}, /* 0x12 alien mouth */
-    {0x02u, 0x22u, 0x01u, 0x00u}, /* 0x13 white blob */
-    {0x06u, 0x33u, 0x01u, 0x01u}, /* 0x14 alien spider */
-    {0x06u, 0x62u, 0x10u, 0x01u}, /* 0x15 spider spawn */
-    {0x04u, 0xA7u, 0x01u, 0x03u}, /* 0x16 heart */
-};
 
 /* find_next_enemy_slot (bank7.asm:9024): first free slot scanning 15->0, or -1. */
 static int contra_rom_find_next_enemy_slot(const ContraCore *core)
@@ -7131,87 +8201,26 @@ static void contra_rom_initialize_enemy(ContraCore *core, uint8_t x)
         core->l1_bridge_gap_count = 0u; /* a fresh bridge -> drop stale collision gaps */
     }
 
-    /* enemy_prop_ptr_tbl (bank7:9152): shared types (< 0x10) use the common
-       table; level-specific types (>= 0x10) use the per-level table. */
-    if ((type >= 0x10u) &&
-        ((ram[CONTRA_RAM_CURRENT_LEVEL] == 0x01u) || (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x03u)))
+    /* enemy_prop_ptr_tbl (bank7 $EE8D): shared types (< 0x10) use entry 8
+       (enemy_prop_00), the rest the current level's table; the ROM keeps the
+       pointer in $8C/$8D and reads 4 bytes at type * 4 from it -- the level
+       tables deliberately overlap so the >= 0x10 types land in the right rows */
     {
-        const size_t i = (size_t)(type - 0x10u);
+        const uint16_t entry = (uint16_t)(0xEE8Du + ((type < 0x10u) ? 0x10u : (uint8_t)(ram[CONTRA_RAM_CURRENT_LEVEL] << 1)));
+        uint16_t props;
+        uint8_t y;
 
-        if (i < (sizeof(contra_enemy_prop_level2) / sizeof(contra_enemy_prop_level2[0])))
-        {
-            ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = contra_enemy_prop_level2[i][0];
-            ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = contra_enemy_prop_level2[i][1];
-            ram[CONTRA_RAM_ENEMY_HP + x] = contra_enemy_prop_level2[i][2];
-            ram[CONTRA_RAM_ENEMY_VAR_A + x] = contra_enemy_prop_level2[i][3];
-        }
-    }
-    else if ((type >= 0x10u) && (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x02u))
-    {
-        const size_t i = (size_t)(type - 0x10u);
-
-        if (i < (sizeof(contra_enemy_prop_level3) / sizeof(contra_enemy_prop_level3[0])))
-        {
-            ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = contra_enemy_prop_level3[i][0];
-            ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = contra_enemy_prop_level3[i][1];
-            ram[CONTRA_RAM_ENEMY_HP + x] = contra_enemy_prop_level3[i][2];
-            ram[CONTRA_RAM_ENEMY_VAR_A + x] = contra_enemy_prop_level3[i][3];
-        }
-    }
-    else if ((type >= 0x10u) && (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u))
-    {
-        const size_t i = (size_t)(type - 0x10u);
-
-        if (i < (sizeof(contra_enemy_prop_level5) / sizeof(contra_enemy_prop_level5[0])))
-        {
-            ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = contra_enemy_prop_level5[i][0];
-            ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = contra_enemy_prop_level5[i][1];
-            ram[CONTRA_RAM_ENEMY_HP + x] = contra_enemy_prop_level5[i][2];
-            ram[CONTRA_RAM_ENEMY_VAR_A + x] = contra_enemy_prop_level5[i][3];
-        }
-    }
-    else if ((type >= 0x10u) && (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x05u))
-    {
-        const size_t i = (size_t)(type - 0x10u);
-
-        if (i < (sizeof(contra_enemy_prop_level6) / sizeof(contra_enemy_prop_level6[0])))
-        {
-            ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = contra_enemy_prop_level6[i][0];
-            ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = contra_enemy_prop_level6[i][1];
-            ram[CONTRA_RAM_ENEMY_HP + x] = contra_enemy_prop_level6[i][2];
-            ram[CONTRA_RAM_ENEMY_VAR_A + x] = contra_enemy_prop_level6[i][3];
-        }
-    }
-    else if ((type >= 0x10u) && (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x06u))
-    {
-        const size_t i = (size_t)(type - 0x10u);
-
-        if (i < (sizeof(contra_enemy_prop_level7) / sizeof(contra_enemy_prop_level7[0])))
-        {
-            ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = contra_enemy_prop_level7[i][0];
-            ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = contra_enemy_prop_level7[i][1];
-            ram[CONTRA_RAM_ENEMY_HP + x] = contra_enemy_prop_level7[i][2];
-            ram[CONTRA_RAM_ENEMY_VAR_A + x] = contra_enemy_prop_level7[i][3];
-        }
-    }
-    else if ((type >= 0x10u) && (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x07u))
-    {
-        const size_t i = (size_t)(type - 0x10u);
-
-        if (i < (sizeof(contra_enemy_prop_level8) / sizeof(contra_enemy_prop_level8[0])))
-        {
-            ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = contra_enemy_prop_level8[i][0];
-            ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = contra_enemy_prop_level8[i][1];
-            ram[CONTRA_RAM_ENEMY_HP + x] = contra_enemy_prop_level8[i][2];
-            ram[CONTRA_RAM_ENEMY_VAR_A + x] = contra_enemy_prop_level8[i][3];
-        }
-    }
-    else if (type < (sizeof(contra_enemy_prop_00) / sizeof(contra_enemy_prop_00[0])))
-    {
-        ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = contra_enemy_prop_00[type][0];
-        ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = contra_enemy_prop_00[type][1];
-        ram[CONTRA_RAM_ENEMY_HP + x] = contra_enemy_prop_00[type][2];
-        ram[CONTRA_RAM_ENEMY_VAR_A + x] = contra_enemy_prop_00[type][3];
+        ram[0x8Cu] = contra_rom_read_u8(7u, entry);
+        ram[0x8Du] = contra_rom_read_u8(7u, (uint16_t)(entry + 1u));
+        props = (uint16_t)(ram[0x8Cu] | ((uint16_t)ram[0x8Du] << 8));
+        y = (uint8_t)(type << 2);
+        ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = contra_rom_read_u8(7u, (uint16_t)(props + y));
+        y = (uint8_t)(y + 1u);
+        ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + x] = contra_rom_read_u8(7u, (uint16_t)(props + y));
+        y = (uint8_t)(y + 1u);
+        ram[CONTRA_RAM_ENEMY_HP + x] = contra_rom_read_u8(7u, (uint16_t)(props + y));
+        y = (uint8_t)(y + 1u);
+        ram[CONTRA_RAM_ENEMY_VAR_A + x] = contra_rom_read_u8(7u, (uint16_t)(props + y));
     }
 }
 
@@ -7255,6 +8264,7 @@ static void contra_rom_load_screen_enemy_data(ContraCore *core)
     uint8_t distance;
     uint8_t type;
     uint8_t repeat;
+    contra_load_bank_number(core, 0x02u); /* load_bank_2_load_screen_enemy_data */
 
     if (ram[CONTRA_RAM_LEVEL_LOCATION_TYPE] != 0u)
     {
@@ -7432,14 +8442,16 @@ static void contra_rom_add_scroll_to_enemy_pos(ContraCore *core, uint8_t x)
     }
 }
 
-/* advance_enemy_routine (bank7.asm:7591): ++ENEMY_ROUTINE if non-zero. */
+/* advance_enemy_routine (bank7.asm:7591): ++ENEMY_ROUTINE if non-zero; a
+   removed enemy (routine 0) only gets its sprite cleared (set_sprite_0) */
 static void contra_rom_advance_enemy_routine(ContraCore *core, uint8_t x)
 {
-    if (core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] != 0u)
+    if (core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
     {
-        core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] =
-            (uint8_t)(core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] + 1u);
+        core->ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x00u;
+        return;
     }
+    core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] = (uint8_t)(core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] + 1u);
 }
 
 /* enable_enemy_collision (bank7.asm:8376): ENEMY_STATE_WIDTH &= 0x7E (clear the
@@ -7899,8 +8911,15 @@ static void contra_rom_sniper_routine_01(ContraCore *core, uint8_t x)
 }
 
 /* set_enemy_routine_to_a (bank7.asm:7698): ENEMY_ROUTINE = a. */
+/* set_enemy_routine_to_a (bank7:7733): a removed enemy (routine 0) is not
+   revived -- it only gets its sprite cleared (set_sprite_0) */
 static void contra_rom_set_enemy_routine_to_a(ContraCore *core, uint8_t x, uint8_t a)
 {
+    if (core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
+    {
+        core->ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0u;
+        return;
+    }
     core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] = a;
 }
 
@@ -7926,30 +8945,6 @@ static bool contra_rom_past_trigger_x(const ContraCore *core, uint8_t x,
     return core->ram[CONTRA_RAM_ENEMY_X_POS + x] < trigger_x;
 }
 
-static void contra_cache_level_1_supertile(
-    ContraCore *core,
-    uint8_t slot,
-    int enemy_x,
-    int enemy_y,
-    uint8_t supertile
-)
-{
-    const int scroll_offset = (int)core->ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET];
-    const uint16_t world_base =
-        (uint16_t)(((uint16_t)core->ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] << 8u) +
-                   core->ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET]);
-    const int aligned_x = (((enemy_x - 12) + scroll_offset) & ~7) - scroll_offset;
-    const int aligned_y = (enemy_y - 12) & ~7;
-
-    if (slot >= CONTRA_ROM_ENEMY_SLOTS)
-    {
-        return;
-    }
-
-    core->l1_supertile[slot] = supertile;
-    core->l1_supertile_world_x[slot] = (uint16_t)(world_base + aligned_x);
-    core->l1_supertile_screen_y[slot] = (uint8_t)aligned_y;
-}
 
 /* set_weapon_box_supertile (bank0.asm:603): draw the pill-box background
    super-tile for ENEMY_FRAME, at the enemy position. Called from the routine on
@@ -7959,26 +8954,10 @@ static const uint8_t contra_weapon_box_supertile_tbl[3] = {0x00u, 0x01u, 0x02u};
 static bool contra_rom_set_weapon_box_supertile(ContraCore *core, uint8_t x)
 {
     const uint8_t frame = core->ram[CONTRA_RAM_ENEMY_FRAME + x];
-    const uint8_t supertile = contra_weapon_box_supertile_tbl[(frame < 3u) ? frame : 0u];
 
-    contra_render_level_1_nametable_update_supertile(
-        core,
-        (int)core->ram[CONTRA_RAM_ENEMY_X_POS + x],
-        (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + x],
-        supertile);
-    /* The ROM routes this through draw_enemy_supertile_a_set_delay, whose
-       nametable write persists. Our background is re-composed from the original
-       level layout every frame, so the open/partial super-tile only survives if
-       it is registered in the per-frame L1 redraw cache (see
-       contra_render_native_enemies). Without this the pill-box door never
-       visually opens -- only the closed box baked into the level data shows. */
-    contra_cache_level_1_supertile(
-        core,
-        x,
-        (int)core->ram[CONTRA_RAM_ENEMY_X_POS + x],
-        (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + x],
-        supertile);
-    return false; /* carry clear == drew successfully */
+    /* jmp draw_enemy_supertile_a_set_delay: carry set = buffer full */
+    return contra_rom_draw_enemy_supertile_a_set_delay(
+        core, x, contra_weapon_box_supertile_tbl[(frame < 3u) ? frame : 0u]);
 }
 
 /* weapon_box_routine_00 (bank0.asm:518): init frame, delay, advance. */
@@ -8085,11 +9064,12 @@ static void contra_rom_weapon_box_routine_03(ContraCore *core, uint8_t x)
     {
         return;
     }
-    if (contra_rom_set_weapon_box_supertile(core, x))
+    /* lda #$00 (weapon box closed); jsr draw_enemy_supertile_a */
+    if (contra_rom_draw_enemy_supertile_a(core, x, 0x00u))
     {
         return; /* buffer full: drawn next frame */
     }
-    contra_rom_remove_enemy(core, x); /* keep the cached close tile: the ROM nametable write persists */
+    contra_rom_remove_enemy(core, x);
 }
 
 /* Defined later (used by the weapon-item landing code); forward-declared so
@@ -8879,18 +9859,25 @@ static void contra_rom_mortar_shot_routine_03(ContraCore *core, uint8_t x)
         core, x, (uint8_t)((ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0xBEu) | 0x80u));
 }
 
-/* enemy_routine_explosion (bank7:7616) on the enemy's own slot: 3 sprites
-   (explosion_type_00; 4 from explosion_type_01 when ENEMY_STATE_WIDTH bit 3 is
-   set), 10 frames apart, then advance to the remove routine. */
-static void contra_rom_enemy_routine_explosion_inplace(ContraCore *core, uint8_t x)
+/* show_explosion_a (bank7:7625): one explosion sprite every 10 frames from
+   explosion_type_ptr_tbl[type] ($09), `count` sprites ($08) in all, collision
+   off on the last one, then advance to the slot's next routine. Type 0 is the
+   "default" -- ENEMY_STATE_WIDTH bit 3 turns it into type 1. */
+static void contra_rom_show_explosion_a(ContraCore *core, uint8_t x, uint8_t type, uint8_t count)
 {
-    static const uint8_t explosion_type_00[3] = {0x38u, 0x39u, 0x3Au};
-    static const uint8_t explosion_type_01[4] = {0x37u, 0x35u, 0x36u, 0x37u};
+    static const uint8_t explosion_sprites[4][4] = {
+        {0x38u, 0x39u, 0x3Au, 0x00u}, /* explosion_type_00 $e82b: larger ring */
+        {0x37u, 0x35u, 0x36u, 0x37u}, /* explosion_type_01 $e82e: cloudy */
+        {0x9Du, 0x9Eu, 0x9Fu, 0x00u}, /* explosion_type_02 $e832: small ring */
+        {0x36u, 0x37u, 0x00u, 0x00u}, /* explosion_type_03 $e835: short cloudy */
+    };
+    static const uint16_t explosion_type_ptr_tbl[4] = {0xE82Bu, 0xE82Eu, 0xE832u, 0xE835u};
     uint8_t *const ram = core->ram;
-    const bool large = (ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x08u) != 0u;
-    const uint8_t max_frames = large ? 4u : 3u;
     uint8_t frame;
+    uint8_t y;
 
+    ram[0x08u] = count;
+    ram[0x09u] = type;
     contra_rom_add_scroll_to_enemy_pos(core, x);
     if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
     {
@@ -8904,18 +9891,39 @@ static void contra_rom_enemy_routine_explosion_inplace(ContraCore *core, uint8_t
     }
     frame = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
     ram[CONTRA_RAM_ENEMY_FRAME + x] = frame;
-    if (frame >= max_frames)
+    if (frame >= count)
     {
         contra_rom_advance_enemy_routine(core, x);
         return;
     }
-    if ((uint8_t)(frame + 1u) >= max_frames)
+    if ((uint8_t)(frame + 1u) >= count)
     {
         contra_rom_disable_enemy_collision(core, x); /* last sprite */
     }
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x0Au;
-    ram[CONTRA_RAM_ENEMY_SPRITES + x] =
-        large ? explosion_type_01[frame] : explosion_type_00[frame];
+    y = type;
+    if ((y == 0u) && ((ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x08u) != 0u))
+    {
+        y = 1u;
+    }
+    ram[0x0Au] = (uint8_t)(explosion_type_ptr_tbl[y] & 0xFFu);
+    ram[0x0Bu] = (uint8_t)(explosion_type_ptr_tbl[y] >> 8);
+    ram[CONTRA_RAM_ENEMY_SPRITES + x] = explosion_sprites[y][frame & 0x03u];
+}
+
+/* enemy_routine_explosion (bank7:7616): 3 sprites of explosion_type_00, or
+   4 of explosion_type_01 when ENEMY_STATE_WIDTH bit 3 is set */
+static void contra_rom_enemy_routine_explosion_inplace(ContraCore *core, uint8_t x)
+{
+    contra_rom_show_explosion_a(
+        core, x, 0x00u, ((core->ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x08u) != 0u) ? 0x04u : 0x03u);
+}
+
+/* shared_enemy_routine_03 (bank7:7644): the generated indoor soldiers'
+   (running, jumping, grenade launcher, group of 4) small-ring explosion */
+static void contra_rom_shared_enemy_routine_03(ContraCore *core, uint8_t x)
+{
+    contra_rom_show_explosion_a(core, x, 0x02u, 0x03u);
 }
 
 /* enemy_routine_remove_enemy (bank7:7706): scroll-track one last frame, then
@@ -9067,10 +10075,9 @@ static void contra_rom_wall_turret_routine_01(ContraCore *core, uint8_t x)
     uint8_t *const ram = core->ram;
 
     if ((ram[CONTRA_RAM_ENEMY_VAR_1 + x] == 0u) &&
-        contra_rom_tile_animation_draw_budget(core))
+        !contra_rom_update_enemy_nametable_tiles(core, x, 0x84u)) /* 'wall turret - closed' */
     {
-        core->l2_structure_tile[x] = 0x84u; /* draw 'wall turret - closed' */
-        ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 1u;
+        ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] + 1u);
     }
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
         (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
@@ -9094,15 +10101,12 @@ static void contra_rom_wall_turret_routine_02(ContraCore *core, uint8_t x)
         return;
     }
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x08u;
-    if (!contra_rom_tile_animation_draw_budget(core))
-    {
-        /* update_nametable_tiles_set_delay: failed draw -> retry next frame */
-        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u;
-        return;
-    }
     frame = ram[CONTRA_RAM_ENEMY_FRAME + x];
-    /* draw the opening frame for the pre-increment FRAME (bank0:3081-3086) */
-    core->l2_structure_tile[x] = contra_wall_turret_opening_tile_tbl[(frame < 3u) ? frame : 2u];
+    if (contra_rom_update_nametable_tiles_set_delay(
+            core, x, contra_wall_turret_opening_tile_tbl[(frame < 3u) ? frame : 2u]))
+    {
+        return; /* graphics buffer full: retry next frame */
+    }
     ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(frame + 1u);
     if (ram[CONTRA_RAM_ENEMY_FRAME + x] < 0x03u)
     {
@@ -9139,11 +10143,10 @@ static void contra_rom_wall_turret_routine_03(ContraCore *core, uint8_t x)
    routine re-runs next frame. */
 static void contra_rom_wall_turret_routine_04(ContraCore *core, uint8_t x)
 {
-    if (!contra_rom_tile_animation_draw_budget(core))
+    if (contra_rom_update_enemy_nametable_tiles(core, x, 0x83u)) /* 'core - destroyed' */
     {
         return;
     }
-    core->l2_structure_tile[x] = 0x83u; /* 'core - destroyed' */
     contra_rom_advance_enemy_routine(core, x);
 }
 
@@ -9193,11 +10196,10 @@ static void contra_rom_wall_core_routine_01(ContraCore *core, uint8_t x)
     const uint8_t attr = ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x];
 
     if (((attr & 0x08u) == 0u) && (ram[CONTRA_RAM_ENEMY_VAR_1 + x] == 0u) &&
-        contra_rom_tile_animation_draw_budget(core))
+        !contra_rom_update_enemy_nametable_tiles(core, x, ((attr & 0x04u) != 0u) ? 0x80u : 0x84u))
     {
-        /* normal core: draw plating (0x80) or closed (0x84); big cores skip this */
-        core->l2_structure_tile[x] = ((attr & 0x04u) != 0u) ? 0x80u : 0x84u;
-        ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 1u;
+        /* normal core: plating (0x80) or closed (0x84); big cores skip this */
+        ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] + 1u);
     }
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
         (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
@@ -9238,14 +10240,12 @@ static void contra_rom_wall_core_routine_02(ContraCore *core, uint8_t x)
         return;
     }
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x08u;
-    if (!contra_rom_tile_animation_draw_budget(core))
-    {
-        /* update_nametable_tiles_set_delay: failed draw -> retry next frame */
-        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u;
-        return;
-    }
     frame = ram[CONTRA_RAM_ENEMY_FRAME + x];
-    core->l2_structure_tile[x] = contra_wall_core_opening_tile_tbl[(frame < 3u) ? frame : 2u];
+    if (contra_rom_update_nametable_tiles_set_delay(
+            core, x, contra_wall_core_opening_tile_tbl[(frame < 3u) ? frame : 2u]))
+    {
+        return; /* graphics buffer full: retry next frame */
+    }
     ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(frame + 1u);
     if (ram[CONTRA_RAM_ENEMY_FRAME + x] < 0x03u)
     {
@@ -9302,15 +10302,14 @@ static void contra_rom_wall_core_routine_04(ContraCore *core, uint8_t x)
     uint8_t *const ram = core->ram;
     uint8_t idx = ram[CONTRA_RAM_ENEMY_VAR_2 + x];
 
-    if (!contra_rom_tile_animation_draw_budget(core))
-    {
-        return; /* draw failed -- the routine re-runs next frame (bank0:3304) */
-    }
     if ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x08u) != 0u)
     {
         idx = (uint8_t)(idx + 4u); /* big-core tile variant */
     }
-    core->l2_structure_tile[x] = contra_wall_core_tile_anim_tbl[idx & 0x07u];
+    if (contra_rom_update_enemy_nametable_tiles(core, x, contra_wall_core_tile_anim_tbl[idx & 0x07u]))
+    {
+        return; /* draw failed -- the routine re-runs next frame (bank0:3304) */
+    }
 
     ram[CONTRA_RAM_ENEMY_VAR_2 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_2 + x] - 1u);
     if ((ram[CONTRA_RAM_ENEMY_VAR_2 + x] & 0x80u) != 0u)
@@ -9399,17 +10398,16 @@ static void contra_rom_wall_core_routine_08(ContraCore *core, uint8_t x)
     q = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_3 + x] & 0x03u);
     ram[CONTRA_RAM_ENEMY_Y_POS + x] = contra_level_2_wall_core_update_y_tbl[q];
     ram[CONTRA_RAM_ENEMY_X_POS + x] = contra_level_2_wall_core_update_x_tbl[q];
-    if (ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] >= 0x40u)
     {
-        /* draw_enemy_supertile_a failed -- CPU_GRAPHICS_BUFFER already holds
-           this frame's fence CHR rewrite (bank7:1353 entry check). The ROM's
-           @set_delay_exit retries next frame, with the position already moved. */
-        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u;
-        return;
+        static const uint8_t wall_core_update_supertile_tbl[4] = {0x02u, 0x03u, 0x01u, 0x00u};
+
+        if (contra_rom_draw_enemy_supertile_a(core, x, wall_core_update_supertile_tbl[q]))
+        {
+            /* buffer full: @set_delay_exit retries next frame, position moved */
+            ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u;
+            return;
+        }
     }
-    ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] =
-        (uint8_t)(ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] + 0x21u); /* the super-tile stamp */
-    core->l2_blowopen_quadrants = (uint8_t)(core->l2_blowopen_quadrants | (uint8_t)(1u << q));
     contra_rom_create_explosion_sequence(
         core,
         contra_level_2_wall_core_update_x_tbl[q],
@@ -9582,11 +10580,11 @@ static void contra_rom_init_sprite_from_frame(ContraCore *core, uint8_t x)
     ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = attr;
 }
 
-/* apply_enemy_velocity_set_bg_priority (bank7): integrate X velocity, remove the
-   enemy once it walks off the indoor screen (X>=0xB0 moving right, X<0x50 moving
-   left), and set the sprite bg-priority bit by X. Returns true if removed. */
-/* apply_indoor_velocity (bank0:4104-4143): integrate X velocity, off-screen removal, bg priority. */
-static bool contra_rom_apply_indoor_velocity(ContraCore *core, uint8_t x)
+/* apply_enemy_velocity_set_bg_priority (bank0:4104): integrate X velocity,
+   remove the enemy once it walks off the indoor screen (X>=0xB0 moving right,
+   X<0x50 moving left), else set the sprite bg-priority bit by X. The removal
+   is a `jmp remove_enemy`, so the caller carries on with the husk. */
+static void contra_rom_apply_indoor_velocity(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
     const unsigned accum = (unsigned)ram[CONTRA_RAM_ENEMY_X_VEL_ACCUM + x] +
@@ -9604,13 +10602,13 @@ static bool contra_rom_apply_indoor_velocity(ContraCore *core, uint8_t x)
         if (newx < 0x50u)
         {
             contra_rom_remove_enemy_offscreen(core, x); /* remove_enemy keeps the husk */
-            return true;
+            return;
         }
     }
     else if (newx >= 0xB0u)
     {
         contra_rom_remove_enemy_offscreen(core, x); /* remove_enemy keeps the husk */
-        return true;
+        return;
     }
 
     attr = ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x];
@@ -9623,20 +10621,6 @@ static bool contra_rom_apply_indoor_velocity(ContraCore *core, uint8_t x)
         attr = (uint8_t)(attr | 0x20u); /* draw behind background */
     }
     ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = attr;
-    return false;
-}
-
-static void contra_rom_apply_indoor_hit_y_velocity(ContraCore *core, uint8_t x)
-{
-    uint8_t *const ram = core->ram;
-    const unsigned accum = (unsigned)ram[CONTRA_RAM_ENEMY_Y_VEL_ACCUM + x] +
-                           ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x];
-
-    ram[CONTRA_RAM_ENEMY_Y_VEL_ACCUM + x] = (uint8_t)accum;
-    ram[CONTRA_RAM_ENEMY_Y_POS + x] = (uint8_t)(
-        (unsigned)ram[CONTRA_RAM_ENEMY_Y_POS + x] +
-        ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] +
-        (accum >> 8u));
 }
 
 static void contra_rom_shared_indoor_soldier_hit_routine_00(ContraCore *core, uint8_t x)
@@ -9653,19 +10637,13 @@ static void contra_rom_shared_indoor_soldier_hit_routine_00(ContraCore *core, ui
     contra_rom_advance_enemy_routine(core, x);
 }
 
+/* shared_enemy_routine_01 (bank0:3528): the hit soldier's knock-back arc */
 static void contra_rom_shared_indoor_soldier_hit_routine_01(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
-    const unsigned yv = (unsigned)ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] + 0x38u;
 
-    if (contra_rom_apply_indoor_velocity(core, x))
-    {
-        return;
-    }
-    contra_rom_apply_indoor_hit_y_velocity(core, x);
-    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FRACT + x] = (uint8_t)yv;
-    ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] =
-        (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x] + (yv >> 8u));
+    contra_rom_update_enemy_pos(core, x);
+    contra_rom_add_a_to_enemy_y_fract_vel(core, x, 0x38u); /* gravity */
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
         (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
     if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] == 0u)
@@ -9754,38 +10732,11 @@ static void contra_rom_create_roller(ContraCore *core, uint8_t px, uint8_t py, u
     contra_rom_create_roller_with_segment(core, px, py, contra_rom_find_far_segment(px), attrs);
 }
 
-/* roller_routine_04 (bank7:7611): show_explosion_a with explosion_type_03
-   ({0x36,0x37}) and only 2 sprites; collision disabled on the last one. */
+/* roller_routine_04 (bank7:7639): show_explosion_a with explosion_type_03,
+   only 2 sprites */
 static void contra_rom_roller_routine_explosion(ContraCore *core, uint8_t x)
 {
-    static const uint8_t explosion_type_03[2] = {0x36u, 0x37u};
-    uint8_t *const ram = core->ram;
-    uint8_t frame;
-
-    contra_rom_add_scroll_to_enemy_pos(core, x);
-    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
-    {
-        return;
-    }
-    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
-        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
-    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
-    {
-        return;
-    }
-    frame = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
-    ram[CONTRA_RAM_ENEMY_FRAME + x] = frame;
-    if (frame >= 2u)
-    {
-        contra_rom_advance_enemy_routine(core, x);
-        return;
-    }
-    if ((uint8_t)(frame + 1u) >= 2u)
-    {
-        contra_rom_disable_enemy_collision(core, x);
-    }
-    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x0Au;
-    ram[CONTRA_RAM_ENEMY_SPRITES + x] = explosion_type_03[frame];
+    contra_rom_show_explosion_a(core, x, 0x03u, 0x02u);
 }
 
 /* roller_routine_00/01 (bank0:2860): start at Y=0x72, then roll down the
@@ -10043,10 +10994,7 @@ static void contra_rom_grenade_launcher_apply_vel_aim(ContraCore *core, uint8_t 
     }
     if (!realign)
     {
-        if (contra_rom_apply_indoor_velocity(core, x))
-        {
-            return; /* removed off-screen */
-        }
+        contra_rom_apply_indoor_velocity(core, x);
         ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
             (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
         if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
@@ -10142,10 +11090,7 @@ static void contra_rom_indoor_soldier_routine_01(ContraCore *core, uint8_t x)
     uint8_t *const ram = core->ram;
 
     contra_rom_init_sprite_from_frame(core, x);
-    if (contra_rom_apply_indoor_velocity(core, x))
-    {
-        return; /* walked off-screen and was removed */
-    }
+    contra_rom_apply_indoor_velocity(core, x); /* may remove it -- the husk carries on */
     ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] =
         (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] - 1u);
     if (ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] != 0u)
@@ -10272,7 +11217,7 @@ static void contra_rom_jumping_soldier_routine_01(ContraCore *core, uint8_t x)
     /* mid-jump: walk, then follow the jump arc. The ROM's @apply_y_vel
        (bank0:3618) steps the Y arc even when the walk just removed the
        soldier -- the husk's frozen Y carries one extra arc step. */
-    (void)contra_rom_apply_indoor_velocity(core, x);
+    contra_rom_apply_indoor_velocity(core, x);
     ram[CONTRA_RAM_ENEMY_Y_POS + x] = (uint8_t)(
         (int)ram[CONTRA_RAM_ENEMY_Y_POS + x] +
         contra_jumping_soldier_y_vel_tbl[ram[CONTRA_RAM_ENEMY_VAR_1 + x] % 20u]);
@@ -10346,10 +11291,7 @@ static void contra_rom_four_soldiers_routine_02(ContraCore *core, uint8_t x)
     uint8_t *const ram = core->ram;
 
     contra_rom_init_sprite_from_frame(core, x);
-    if (contra_rom_apply_indoor_velocity(core, x))
-    {
-        return; /* ran off-screen and was removed */
-    }
+    contra_rom_apply_indoor_velocity(core, x); /* may remove it -- the husk carries on */
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
         (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
     if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
@@ -10638,14 +11580,8 @@ static bool contra_rom_enemy_supertile_draw_budget(ContraCore *core)
    failed draw forces ANIMATION_DELAY=1 (retry next frame) and reports it. */
 static bool contra_rom_animate_wall_cannon(ContraCore *core, uint8_t x)
 {
-    if (!contra_rom_enemy_supertile_draw_budget(core))
-    {
-        core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u;
-        return false;
-    }
     core->ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x06u;
-    core->l2_supertile[x] = core->ram[CONTRA_RAM_ENEMY_FRAME + x];
-    return true;
+    return !contra_rom_draw_enemy_supertile_a_set_delay(core, x, core->ram[CONTRA_RAM_ENEMY_FRAME + x]);
 }
 
 static void contra_rom_wall_cannon_routine_00(ContraCore *core, uint8_t x)
@@ -10746,18 +11682,15 @@ static void contra_rom_wall_cannon_routine_03(ContraCore *core, uint8_t x)
     contra_rom_set_enemy_routine_to_a(core, x, 0x02u); /* -> wall_cannon_routine_01 */
 }
 
-static void contra_rom_record_destroyed_structure(ContraCore *core, uint8_t x);
 
 /* wall_cannon_routine_04 (bank7:9387-9391): draw destroyed super-tile 0x05,
    then advance into the appended in-place explosion trio (bank7:9351-9353). */
 static void contra_rom_wall_cannon_routine_04(ContraCore *core, uint8_t x)
 {
-    if (!contra_rom_enemy_supertile_draw_budget(core))
+    if (contra_rom_draw_enemy_supertile_a(core, x, 0x05u)) /* destroyed super-tile */
     {
         return; /* draw failed: the routine re-runs next frame */
     }
-    core->l2_supertile[x] = 0x05u; /* destroyed super-tile */
-    contra_rom_record_destroyed_structure(core, x);
     contra_rom_advance_enemy_routine(core, x);
 }
 
@@ -10779,15 +11712,13 @@ static void contra_rom_wall_plating_routine_01(ContraCore *core, uint8_t x)
         return;
     }
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x04u;
-    if (!contra_rom_enemy_supertile_draw_budget(core))
+    /* a full buffer retries next frame -- this is what splits the four
+       platings' shared deploy beat into two staggered pairs (only two 0x21-byte
+       stamps fit under the 0x40 check) */
+    if (contra_rom_draw_enemy_supertile_a_set_delay(core, x, (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 0x03u)))
     {
-        /* draw_enemy_supertile_a_set_delay failure: retry next frame -- this is
-           what splits the four platings' shared deploy beat into two staggered
-           pairs (only two 0x21-byte stamps fit under the 0x40 check). */
-        ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u;
         return;
     }
-    core->l2_supertile[x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 0x03u); /* deploy frame */
     ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
     if (ram[CONTRA_RAM_ENEMY_FRAME + x] < 0x02u)
     {
@@ -10802,26 +11733,13 @@ static void contra_rom_wall_plating_routine_01(ContraCore *core, uint8_t x)
    (index 5) keeps being drawn after the enemy explodes and its slot is freed -- the ROM
    leaves the destroyed tile on the nametable, but the port re-composes the wall each
    frame, so it must redraw it from this record. */
-static void contra_rom_record_destroyed_structure(ContraCore *core, uint8_t x)
-{
-    if (core->l2_destroyed_struct_count < 8u)
-    {
-        core->l2_destroyed_struct_x[core->l2_destroyed_struct_count] =
-            core->ram[CONTRA_RAM_ENEMY_X_POS + x];
-        core->l2_destroyed_struct_y[core->l2_destroyed_struct_count] =
-            core->ram[CONTRA_RAM_ENEMY_Y_POS + x];
-        core->l2_destroyed_struct_count = (uint8_t)(core->l2_destroyed_struct_count + 1u);
-    }
-}
 
 static void contra_rom_wall_plating_routine_03(ContraCore *core, uint8_t x)
 {
-    if (!contra_rom_enemy_supertile_draw_budget(core))
+    if (contra_rom_draw_enemy_supertile_a(core, x, 0x05u)) /* destroyed super-tile */
     {
         return; /* draw failed: the routine re-runs next frame */
     }
-    core->l2_supertile[x] = 0x05u; /* destroyed super-tile */
-    contra_rom_record_destroyed_structure(core, x);
     core->ram[CONTRA_RAM_WALL_PLATING_DESTROYED_COUNT] =
         (uint8_t)(core->ram[CONTRA_RAM_WALL_PLATING_DESTROYED_COUNT] + 1u);
     /* bank7:9523: advance into the appended in-place explosion trio */
@@ -10906,9 +11824,11 @@ static void contra_rom_generate_enemy_at_pos(ContraCore *core, uint8_t gen_slot,
     ram[CONTRA_RAM_ENEMY_X_POS + slot] = ram[CONTRA_RAM_ENEMY_X_POS + gen_slot];
 }
 
-static const uint8_t contra_boss_eye_sprite_code_tbl[8] = {
+/* boss_eye_attack_delay_tbl (by PLAYER_WEAPON_STRENGTH) and, right after it
+   in the ROM, boss_eye_sprite_code_tbl */
+static const uint8_t contra_boss_eye_tables[12] = {
+    0x70u, 0x50u, 0x40u, 0x28u,
     0x5Du, 0x5Eu, 0x5Fu, 0x5Eu, 0x60u, 0x61u, 0x62u, 0x61u};
-static const uint8_t contra_boss_eye_attack_delay_tbl[4] = {0x70u, 0x50u, 0x40u, 0x28u};
 
 /* boss_eye_routine_00 (bank0:2678-2690): set animation delay 0x40, advance routine. */
 static void contra_rom_boss_eye_routine_00(ContraCore *core, uint8_t x)
@@ -10950,20 +11870,17 @@ static void contra_rom_boss_eye_routine_02(ContraCore *core, uint8_t x)
     {
         ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
             (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
-        if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x08u) != 0u)
+        if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x04u) != 0u) /* lsr x3 -> carry = bit 2 */
         {
             base = 4u; /* flash the hit frames */
         }
     }
+    ram[0x08u] = base;
     ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
     ram[CONTRA_RAM_ENEMY_SPRITES + x] =
-        contra_boss_eye_sprite_code_tbl[(base + ((ram[CONTRA_RAM_ENEMY_FRAME + x] >> 3u) & 0x03u)) & 0x07u];
+        contra_boss_eye_tables[4u + base + ((ram[CONTRA_RAM_ENEMY_FRAME + x] >> 3u) & 0x03u)];
 
-    contra_rom_update_enemy_pos(core, x);
-    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
-    {
-        return;
-    }
+    contra_rom_update_enemy_pos(core, x); /* a removal here does not stop the routine */
     {
         const uint8_t ex = ram[CONTRA_RAM_ENEMY_X_POS + x];
         const bool moving_left = (ram[CONTRA_RAM_ENEMY_X_VELOCITY_FAST + x] & 0x80u) != 0u;
@@ -10986,7 +11903,7 @@ static void contra_rom_boss_eye_routine_02(ContraCore *core, uint8_t x)
     {
         const uint8_t ws = ram[CONTRA_RAM_PLAYER_WEAPON_STRENGTH];
 
-        ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = contra_boss_eye_attack_delay_tbl[(ws < 4u) ? ws : 3u];
+        ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = contra_boss_eye_tables[(ws < 12u) ? ws : 11u];
     }
     contra_rom_generate_enemy_at_pos(core, x, 0x1Bu); /* fire an eye projectile */
 }
@@ -11025,7 +11942,7 @@ static void contra_rom_boss_eye_defeated_routine(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
 
-    contra_init_apu_channels(core);
+    contra_init_apu_channels(core, (uint8_t)((core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] << 1) + 1u)); /* Y from exe_enemy_routine */
     contra_play_sound(core, 0x57u); /* sound_57: boss destroyed */
     ram[CONTRA_RAM_DELAY_TIME_LOW_BYTE] = 0xFFu;
     ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] = 0x01u;
@@ -11681,29 +12598,31 @@ static const uint8_t contra_boss_bomb_turret_supertile_tbl[6] = {
     0x29u, 0x26u, 0x2Au, 0x27u, 0x2Bu, 0x28u};
 static const uint8_t contra_boss_bomb_turret_bomb_velocity_tbl[4] = {0x01u, 0x03u, 0x05u, 0x07u};
 
-/* draw_boss_bomb_turret_y (bank0:2134-2169): draw bomb-turret super-tile at
-   index y, jungle bg variant. */
-static void contra_rom_draw_boss_bomb_turret_y(ContraCore *core, uint8_t x, uint8_t idx)
+/* draw_boss_bomb_turret_y (bank0:2137): draw bomb-turret super-tile y. The
+   jungle variant (attributes bit 0) is drawn 8px left: the ROM moves the
+   enemy -8, draws, then adds 8 back whenever the attribute BYTE is non-zero.
+   Returns carry (graphics buffer full). */
+static bool contra_rom_draw_boss_bomb_turret_y(ContraCore *core, uint8_t x, uint8_t idx)
 {
     uint8_t *const ram = core->ram;
-    int draw_x = (int)ram[CONTRA_RAM_ENEMY_X_POS + x];
-    uint8_t supertile;
+    bool full;
 
     if ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x01u) != 0u)
     {
-        idx = (uint8_t)(idx + 1u); /* jungle background variant */
-        draw_x -= 8;               /* jungle super-tile sits 8px left of the enemy */
+        idx = (uint8_t)(idx + 1u);
+        ram[CONTRA_RAM_ENEMY_X_POS + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] + 0xF8u);
     }
-    supertile = contra_boss_bomb_turret_supertile_tbl[(idx < 6u) ? idx : 0u];
-    contra_render_level_1_nametable_update_supertile(
-        core, draw_x, (int)ram[CONTRA_RAM_ENEMY_Y_POS + x], supertile);
-    contra_cache_level_1_supertile(
-        core, x, draw_x, (int)ram[CONTRA_RAM_ENEMY_Y_POS + x], supertile);
+    full = contra_rom_draw_enemy_supertile_a_set_delay(core, x, contra_boss_bomb_turret_supertile_tbl[idx % 6u]);
+    if (ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] != 0u)
+    {
+        ram[CONTRA_RAM_ENEMY_X_POS + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] + 0x08u);
+    }
+    return full;
 }
 
-static void contra_rom_draw_boss_bomb_turret(ContraCore *core, uint8_t x)
+static bool contra_rom_draw_boss_bomb_turret(ContraCore *core, uint8_t x)
 {
-    contra_rom_draw_boss_bomb_turret_y(core, x, core->ram[CONTRA_RAM_ENEMY_VAR_1 + x]);
+    return contra_rom_draw_boss_bomb_turret_y(core, x, core->ram[CONTRA_RAM_ENEMY_VAR_1 + x]);
 }
 
 /* boss_bomb_turret_routine_00/01 (bank0): after a startup delay, alternate
@@ -11733,7 +12652,10 @@ static void contra_rom_boss_bomb_turret_routine_01(ContraCore *core, uint8_t x)
     {
         return;
     }
-    contra_rom_draw_boss_bomb_turret(core, x);
+    if (contra_rom_draw_boss_bomb_turret(core, x))
+    {
+        return; /* graphics buffer full */
+    }
     was_firing = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
     ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = (was_firing == 0u) ? 0x28u : 0x08u;
     ram[CONTRA_RAM_ENEMY_VAR_1 + x] = (uint8_t)(was_firing ^ 0x02u);
@@ -11756,7 +12678,10 @@ static void contra_rom_boss_bomb_turret_routine_01(ContraCore *core, uint8_t x)
    (index 4) and advance into the appended explosion trio. */
 static void contra_rom_boss_bomb_turret_routine_02(ContraCore *core, uint8_t x)
 {
-    contra_rom_draw_boss_bomb_turret_y(core, x, 0x04u);
+    if (contra_rom_draw_boss_bomb_turret_y(core, x, 0x04u))
+    {
+        return; /* graphics buffer full: retry next frame */
+    }
     contra_rom_advance_enemy_routine(core, x);
 }
 
@@ -11786,22 +12711,10 @@ static bool contra_rom_red_turret_load_supertile(ContraCore *core, uint8_t x)
            therefore starts four table entries later, not three. */
         idx = (uint8_t)(idx + 4u);
     }
-    {
-        const uint8_t supertile = contra_red_turret_supertile_tbl[(idx < 11u) ? idx : 0u];
-
-        contra_render_level_1_nametable_update_supertile(
-            core,
-            (int)core->ram[CONTRA_RAM_ENEMY_X_POS + x],
-            (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + x],
-            supertile);
-        contra_cache_level_1_supertile(
-            core,
-            x,
-            (int)core->ram[CONTRA_RAM_ENEMY_X_POS + x],
-            (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + x],
-            supertile);
-    }
-    return true;
+    /* jmp draw_enemy_supertile_a_set_delay: carry set (buffer full) reads
+       like "nothing drawn" to the caller */
+    return !contra_rom_draw_enemy_supertile_a_set_delay(
+        core, x, contra_red_turret_supertile_tbl[(idx < 11u) ? idx : 0u]);
 }
 
 /* red_turret_routine_00..02 (bank0): aim left, wait for the player to approach,
@@ -12147,27 +13060,6 @@ static void contra_rom_bullet_generation(
     contra_rom_create_enemy_bullet_angle_a(core, type_angle, speed, px, py);
 }
 
-/* draw_enemy_supertile_a_set_delay (bank7:8527): draw the level-1 background
-   super-tile at the enemy and set ANIMATION_DELAY=1 (the native draw never
-   fails, so the buffer-full retry path is unreachable). */
-static void contra_rom_draw_enemy_supertile_a_set_delay(ContraCore *core, uint8_t x, uint8_t supertile)
-{
-    /* draw_enemy_supertile_a_set_delay (bank7:8599) sets ANIMATION_DELAY = 1
-       only when the draw FAILS (CPU graphics buffer full -> retry next frame).
-       The native renderer cannot fail, so the caller's delay always stands --
-       the port used to write 1 unconditionally here, which made the rotating
-       gun open and rotate every frame instead of on its 8/0x30-frame beats. */
-    contra_render_level_1_nametable_update_supertile(
-        core, (int)core->ram[CONTRA_RAM_ENEMY_X_POS + x],
-        (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + x], supertile);
-    contra_cache_level_1_supertile(
-        core,
-        x,
-        (int)core->ram[CONTRA_RAM_ENEMY_X_POS + x],
-        (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + x],
-        supertile);
-}
-
 static const uint8_t contra_rotating_gun_bullets_per_attack_tbl[4] = {0x01u, 0x02u, 0x03u, 0x03u};
 static const uint8_t contra_rotating_gun_rotation_delay_tbl[4] = {0x30u, 0x28u, 0x20u, 0x18u};
 static const uint8_t contra_rotating_gun_animation_delay_tbl[4] = {0x80u, 0x60u, 0x40u, 0x30u};
@@ -12238,8 +13130,11 @@ static void contra_rom_rotating_gun_routine_02(ContraCore *core, uint8_t x)
         return;
     }
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x08u; /* next opening step in 8 frames */
-    contra_rom_draw_enemy_supertile_a_set_delay(
-        core, x, (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 0x03u));
+    if (contra_rom_draw_enemy_supertile_a_set_delay(
+            core, x, (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 0x03u)))
+    {
+        return; /* graphics buffer full: retry next frame */
+    }
     ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
     if (ram[CONTRA_RAM_ENEMY_FRAME + x] < 0x03u)
     {
@@ -12275,7 +13170,10 @@ static void contra_rom_rotating_gun_routine_03(ContraCore *core, uint8_t x)
     aimed = contra_rom_aim_var_1(core, x, 0u, contra_rom_player_enemy_x_dist_idx(core, x));
     /* draw the gun super-tile for the new aim direction: ((VAR_1 + 6) % 12) + 5 */
     supertile = (uint8_t)(((ram[CONTRA_RAM_ENEMY_VAR_1 + x] + 0x06u) % 12u) + 0x05u);
-    contra_rom_draw_enemy_supertile_a_set_delay(core, x, supertile);
+    if (contra_rom_draw_enemy_supertile_a_set_delay(core, x, supertile))
+    {
+        return; /* graphics buffer full: retry next frame */
+    }
     if (!aimed)
     {
         return; /* still rotating toward the player */
@@ -12329,21 +13227,16 @@ static void contra_rom_rotating_gun_routine_05(ContraCore *core, uint8_t x)
     {
         return;
     }
-    contra_render_level_1_nametable_update_supertile(
-        core, (int)core->ram[CONTRA_RAM_ENEMY_X_POS + x],
-        (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + x], 0x03u);
-    contra_cache_level_1_supertile(
-        core,
-        x,
-        (int)core->ram[CONTRA_RAM_ENEMY_X_POS + x],
-        (int)core->ram[CONTRA_RAM_ENEMY_Y_POS + x],
-        0x03u);
-    contra_rom_remove_enemy(core, x); /* keep the cached close tile: the ROM nametable write persists */
+    if (contra_rom_draw_enemy_supertile_a(core, x, 0x03u))
+    {
+        return; /* graphics buffer full: retry next frame */
+    }
+    contra_rom_remove_enemy(core, x);
 }
 
 /* rotating_gun_routine_06 (bank0:933): destroyed -- restore the rock background
-   super-tile (0x16) then start the explosion actor (the ROM advances to
-   enemy_routine_init_explosion). */
+   super-tile (0x16), then advance into enemy_routine_init_explosion (the ROM
+   keeps ENEMY_TYPE 0x04, not the shared 0xFE actor). */
 static void contra_rom_rotating_gun_routine_06(ContraCore *core, uint8_t x)
 {
     contra_rom_add_scroll_to_enemy_pos(core, x);
@@ -12351,10 +13244,10 @@ static void contra_rom_rotating_gun_routine_06(ContraCore *core, uint8_t x)
     {
         return;
     }
-    /* draw_enemy_supertile_a + cache the rock so the per-frame L1 redraw shows
-       it; the ROM then advances into its own appended explosion routines,
-       keeping ENEMY_TYPE 0x04 (not the shared 0xFE actor). */
-    contra_rom_draw_enemy_supertile_a_set_delay(core, x, 0x16u);
+    if (contra_rom_draw_enemy_supertile_a(core, x, 0x16u))
+    {
+        return; /* graphics buffer full: retry next frame */
+    }
     contra_rom_advance_enemy_routine(core, x); /* -> enemy_routine_init_explosion */
 }
 
@@ -12562,8 +13455,11 @@ static void contra_rom_red_turret_routine_05(ContraCore *core, uint8_t x)
     {
         return;
     }
-    contra_rom_draw_enemy_supertile_a_set_delay(
-        core, x, ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x01u) != 0u) ? 0x17u : 0x16u);
+    if (contra_rom_draw_enemy_supertile_a(
+            core, x, ((ram[CONTRA_RAM_ENEMY_ATTRIBUTES + x] & 0x01u) != 0u) ? 0x17u : 0x16u))
+    {
+        return; /* graphics buffer full: retry next frame */
+    }
     /* the ROM advances into its own appended explosion routines, type kept */
     contra_rom_advance_enemy_routine(core, x);
 }
@@ -12610,13 +13506,13 @@ static void contra_rom_set_outdoor_weapon_item_vel(ContraCore *core, uint8_t x)
 
         if (contra_rom_set_weapon_item_y_vel_enemy_frame(core, x, yv, 0x00u))
         {
-            contra_rom_clear_enemy(core, x);
+            contra_rom_remove_enemy(core, x); /* remove_enemy keeps the husk */
             return;
         }
         contra_rom_update_enemy_x_pos(core, x);
         if (ram[CONTRA_RAM_ENEMY_X_POS + x] < 0x08u)
         {
-            contra_rom_clear_enemy(core, x);
+            contra_rom_remove_enemy(core, x); /* remove_enemy keeps the husk */
         }
         return;
     }
@@ -12626,13 +13522,13 @@ static void contra_rom_set_outdoor_weapon_item_vel(ContraCore *core, uint8_t x)
         (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] - ram[CONTRA_RAM_FRAME_SCROLL]);
     if (ram[CONTRA_RAM_ENEMY_X_POS + x] < 0x08u)
     {
-        contra_rom_clear_enemy(core, x);
+        contra_rom_remove_enemy(core, x); /* remove_enemy keeps the husk */
         return;
     }
     if (contra_rom_set_weapon_item_y_vel_enemy_frame(
             core, x, ram[CONTRA_RAM_ENEMY_Y_VELOCITY_FAST + x], 0x00u))
     {
-        contra_rom_clear_enemy(core, x);
+        contra_rom_remove_enemy(core, x); /* remove_enemy keeps the husk */
     }
 }
 
@@ -12822,12 +13718,10 @@ static void contra_rom_weapon_item_routine_01(ContraCore *core, uint8_t x)
         contra_rom_advance_enemy_routine(core, x);
         return;
     }
-    /* outdoor */
+    /* outdoor -- the ROM keeps running this routine after the velocity update
+       removed the item off-screen (zombie tail: gravity still applies; the
+       advance/routine setters leave a removed slot alone) */
     contra_rom_set_outdoor_weapon_item_vel(core, x);
-    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
-    {
-        return; /* removed off-screen */
-    }
     if ((ram[CONTRA_RAM_ENEMY_Y_POS + x] >= 0x20u) && contra_rom_check_weapon_item_collision(core, x))
     {
         contra_rom_add_a_with_vert_scroll_to_enemy_y_pos(core, x, 0x0Au); /* land */
@@ -13001,15 +13895,9 @@ static void contra_rom_weapon_box_routine_04(ContraCore *core, uint8_t x)
     {
         y = (uint8_t)(y + 1u);
     }
+    if (contra_rom_draw_enemy_supertile_a(core, x, contra_weapon_box_destroyed_supertile[y & 0x0Fu]))
     {
-        const uint8_t supertile = contra_weapon_box_destroyed_supertile[y & 0x0Fu];
-
-        contra_render_level_1_nametable_update_supertile(
-            core, (int)ram[CONTRA_RAM_ENEMY_X_POS + x], (int)ram[CONTRA_RAM_ENEMY_Y_POS + x],
-            supertile);
-        contra_cache_level_1_supertile(
-            core, x, (int)ram[CONTRA_RAM_ENEMY_X_POS + x], (int)ram[CONTRA_RAM_ENEMY_Y_POS + x],
-            supertile);
+        return; /* buffer full: retry next frame */
     }
     contra_rom_play_explosion_sound(core, x);
 }
@@ -13104,23 +13992,24 @@ static void contra_rom_pick_up_weapon_item(ContraCore *core, uint8_t slot, uint8
 {
     uint8_t *const ram = core->ram;
     const uint8_t attrs = (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTRIBUTES + slot] & 0x07u);
-    uint8_t item_type;
     uint8_t keep_mask;
 
+    ram[0x10u] = player;
+    ram[0x00u] = 0x0Au; /* 1,000 points */
     if (ram[CONTRA_RAM_DEMO_MODE] == 0u)
     {
-        contra_rom_add_player_score(core, player, 0x0Au, 0x00u); /* 1,000 points */
+        contra_rom_add_player_score(core, player, 0x0Au, 0x00u);
     }
     contra_play_sound(core, 0x1Fu); /* sound_1f: weapon item taken */
 
     if (attrs == 0u)
     {
-        item_type = 0x10u; /* R: set rapid fire, keep the current weapon */
+        ram[0x08u] = 0x10u; /* R: set rapid fire, keep the current weapon */
         keep_mask = 0xFFu;
     }
     else if (attrs < 0x05u)
     {
-        item_type = attrs; /* M/F/S/L */
+        ram[0x08u] = attrs; /* M/F/S/L */
         keep_mask = (((attrs ^ ram[CONTRA_RAM_P1_CURRENT_WEAPON + player]) & 0x0Fu) == 0u)
             ? 0xF0u  /* same weapon: keep rapid fire */
             : 0xE0u; /* different weapon: drop rapid fire */
@@ -13129,19 +14018,19 @@ static void contra_rom_pick_up_weapon_item(ContraCore *core, uint8_t slot, uint8
     {
         ram[CONTRA_RAM_INVINCIBILITY_TIMER + player] =
             (ram[CONTRA_RAM_CURRENT_LEVEL] == 0x06u) ? 0x90u : 0x80u; /* barrier */
-        contra_rom_clear_enemy(core, slot);
+        contra_rom_remove_enemy(core, slot); /* remove_current_enemy keeps the husk */
         return;
     }
     else
     {
-        contra_rom_destroy_all_enemies(core, (int)slot); /* falcon (item slot cleared below) */
+        contra_rom_destroy_all_enemies(core, (int)slot); /* falcon */
         ram[CONTRA_RAM_FALCON_FLASH_TIMER] = 0x20u;
-        contra_rom_clear_enemy(core, slot);
+        contra_rom_remove_enemy(core, slot);
         return;
     }
     ram[CONTRA_RAM_P1_CURRENT_WEAPON + player] =
-        (uint8_t)((ram[CONTRA_RAM_P1_CURRENT_WEAPON + player] & keep_mask) | item_type);
-    contra_rom_clear_enemy(core, slot);
+        (uint8_t)((ram[CONTRA_RAM_P1_CURRENT_WEAPON + player] & keep_mask) | ram[0x08u]);
+    contra_rom_remove_enemy(core, slot); /* remove_current_enemy keeps the husk */
 }
 
 /* --- exploding bridge (enemy type 0x12, level 1), bank0.asm:2265-2403 --- */
@@ -13210,7 +14099,7 @@ static void contra_rom_record_supertile_collision_override(
    cell, so the destroy animation's clear replaces the risen wall's solid code
    instead of being shadowed by it. tile 0 = collision-only entry (the L7 walls
    draw through the L7 overlay cache, not the bridge redraw). */
-static void contra_rom_set_supertile_bg_collisions(
+static void contra_rom_set_supertile_bg_collisions_override(
     ContraCore *core, uint8_t draw_x, uint8_t draw_y, uint8_t coll_left, uint8_t coll_right)
 {
     uint8_t *const ram = core->ram;
@@ -13226,13 +14115,14 @@ static void contra_rom_set_supertile_bg_collisions(
         (uint8_t)((coll_left & 0x0Fu) | (uint8_t)(coll_right << 4u)));
 }
 
-static void contra_rom_bridge_destroy_supertile(
+/* the port's collision readers still consult the world-anchored override
+   list (they compute collision from the level map); the ROM's
+   BG_COLLISION_DATA is rewritten faithfully by the caller as well */
+static void contra_rom_bridge_record_collision_override(
     ContraCore *core, uint8_t x, uint8_t draw_x_base, uint8_t tile)
 {
     uint8_t *const ram = core->ram;
 
-    contra_render_level_1_nametable_update_supertile(
-        core, (int)draw_x_base, (int)ram[CONTRA_RAM_ENEMY_Y_POS + x], tile);
     contra_rom_record_supertile_collision_override(
         core, (uint8_t)(draw_x_base - 12u),
         (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] - 12u), tile, 0x00u);
@@ -13297,21 +14187,30 @@ static void contra_rom_exploding_bridge_routine_01(ContraCore *core, uint8_t x)
     {
         return;
     }
+    ram[0x08u] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_1 + x] << 1);
     var2 = ram[CONTRA_RAM_ENEMY_VAR_2 + x];
     if (var2 < 0x02u)
     {
-        const uint8_t section = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
         const uint8_t tile =
-            contra_exploding_bridge_destroyed_supertile_tbl[(uint8_t)((section * 2u) + var2) & 0x07u];
+            contra_exploding_bridge_destroyed_supertile_tbl[(uint8_t)(ram[0x08u] + var2) & 0x07u];
 
         if (tile != 0u)
         {
-            /* VAR_2 even -> the trailing (previous) super-tile at X-0x20 */
+            /* VAR_2 odd -> the current section; even -> the previous one at X-$20 */
             const uint8_t draw_x = ((var2 & 0x01u) == 0u)
-                ? (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] - 0x20u)
+                ? (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] + 0xE0u)
                 : ram[CONTRA_RAM_ENEMY_X_POS + x];
 
-            contra_rom_bridge_destroy_supertile(core, x, draw_x, tile);
+            ram[0x10u] = tile;
+            if (contra_rom_load_bank_3_update_nametable_supertile(
+                    core, (uint8_t)(draw_x + 0xF4u), (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + 0xF4u)))
+            {
+                ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x01u; /* buffer full: retry */
+                return;
+            }
+            /* clear_supertile_bg_collision_draw_clouds */
+            contra_rom_set_supertile_bg_collisions(core, 0x00u, 0x00u);
+            contra_rom_bridge_record_collision_override(core, x, draw_x, tile);
         }
     }
     var2 = (uint8_t)(var2 + 1u);
@@ -13388,38 +14287,7 @@ static void contra_rom_enemy_routine_init_explosion_step(ContraCore *core, uint8
    frames for type 0, 4 for type 1), then advance to the slot's next routine. */
 static void contra_rom_enemy_routine_explosion_step(ContraCore *core, uint8_t x)
 {
-    static const uint8_t explosion_type_00[3] = {0x38u, 0x39u, 0x3Au};
-    static const uint8_t explosion_type_01[4] = {0x37u, 0x35u, 0x36u, 0x37u};
-    uint8_t *const ram = core->ram;
-    const bool large = (ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x08u) != 0u;
-    const uint8_t max_frames = large ? 4u : 3u;
-    uint8_t frame;
-
-    contra_rom_add_scroll_to_enemy_pos(core, x);
-    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
-    {
-        return;
-    }
-    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
-        (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
-    if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
-    {
-        return;
-    }
-    frame = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u);
-    ram[CONTRA_RAM_ENEMY_FRAME + x] = frame;
-    if (frame >= max_frames)
-    {
-        contra_rom_advance_enemy_routine(core, x); /* -> the slot's next routine */
-        return;
-    }
-    if ((uint8_t)(frame + 1u) >= max_frames)
-    {
-        contra_rom_disable_enemy_collision(core, x); /* last sprite */
-    }
-    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x0Au;
-    ram[CONTRA_RAM_ENEMY_SPRITES + x] =
-        large ? explosion_type_01[frame] : explosion_type_00[frame];
+    contra_rom_enemy_routine_explosion_inplace(core, x);
 }
 
 /* --- level-1 fortress boss door (enemy type 0x11), bank0.asm:2184 ---
@@ -13450,7 +14318,7 @@ static void contra_rom_boss_door_routine_00(ContraCore *core, uint8_t x)
    door and advance to its explosion routine). */
 static void contra_rom_boss_door_routine_02(ContraCore *core, uint8_t x)
 {
-    contra_init_apu_channels(core);
+    contra_init_apu_channels(core, (uint8_t)((core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] << 1) + 1u)); /* Y from exe_enemy_routine */
     contra_play_sound(core, 0x57u);                    /* sound_57: boss destroyed */
     core->ram[CONTRA_RAM_DELAY_TIME_LOW_BYTE] = 0xFFu; /* auto-move delay */
     core->ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] = 0x01u;
@@ -13523,7 +14391,14 @@ static void contra_rom_boss_door_routine_06(ContraCore *core, uint8_t x)
        The ROM sets the 8-frame delay before the draw; setting it after is
        equivalent now that the draw helper no longer touches the delay. */
     idx = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
-    contra_rom_draw_enemy_supertile_a_set_delay(core, x, contra_door_tunnel_supertile_tbl[idx]);
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x08u;
+    if (contra_rom_draw_enemy_supertile_a_set_delay(core, x, contra_door_tunnel_supertile_tbl[idx]))
+    {
+        return; /* graphics buffer full: retry next frame */
+    }
+    /* set_supertile_bg_collision: the same code for both columns */
+    contra_rom_set_supertile_bg_collisions(core, contra_door_tunnel_collision_tbl[idx],
+                                           contra_door_tunnel_collision_tbl[idx]);
     contra_rom_record_supertile_collision_override(
         core, (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] - 12u),
         (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] - 12u),
@@ -15631,7 +16506,7 @@ static void contra_rom_boss_ufo_routine_09(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
 
-    contra_init_apu_channels(core);
+    contra_init_apu_channels(core, (uint8_t)((core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] << 1) + 1u)); /* Y from exe_enemy_routine */
     contra_play_sound(core, 0x55u);
     contra_rom_disable_enemy_collision(core, x);
     ram[CONTRA_RAM_ENEMY_VAR_1 + x] = 0x04u;
@@ -16387,7 +17262,7 @@ static void contra_rom_boss_giant_soldier_routine_05(ContraCore *core, uint8_t x
 
 static void contra_rom_boss_giant_soldier_routine_06(ContraCore *core, uint8_t x)
 {
-    contra_init_apu_channels(core);
+    contra_init_apu_channels(core, (uint8_t)((core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] << 1) + 1u)); /* Y from exe_enemy_routine */
     contra_play_sound(core, 0x55u);
     core->ram[CONTRA_RAM_DELAY_TIME_LOW_BYTE] = 0xFFu;
     core->ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] = 0x01u;
@@ -16859,11 +17734,7 @@ static void contra_rom_rising_spiked_wall_routine_02(ContraCore *core, uint8_t x
                (table entries 0-3) the stamped cell turns solid -- left half
                empty ($00), right half solid ($0f); the wall column occupies
                the right 16px of its super-tile. */
-            contra_rom_set_supertile_bg_collisions(
-                core,
-                (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] - 0x0Du),
-                (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + row[0]),
-                0x00u, 0x0Fu);
+            contra_rom_set_supertile_bg_collisions_override(core, (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] - 0x0Du), (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + row[0]), 0x00u, 0x0Fu);
         }
     }
     ram[CONTRA_RAM_ENEMY_VAR_2 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_2 + x] - 1u);
@@ -16918,11 +17789,7 @@ static void contra_rom_spiked_wall_destroy_anim(ContraCore *core, uint8_t x)
            keeps the map's collision. Without this the standing spiked wall
            (solid in the original level map) still blocked the player after
            it was shot to rubble. */
-        contra_rom_set_supertile_bg_collisions(
-            core,
-            (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] - 0x0Du),
-            (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + contra_spiked_wall_destroyed_update_tbl[idx][0]),
-            0x00u, 0x00u);
+        contra_rom_set_supertile_bg_collisions_override(core, (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] - 0x0Du), (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + contra_spiked_wall_destroyed_update_tbl[idx][0]), 0x00u, 0x00u);
     }
     ram[CONTRA_RAM_ENEMY_VAR_4 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_4 + x] + 1u);
     if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
@@ -17691,7 +18558,7 @@ static void contra_rom_boss_heart_routine_03(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
 
-    contra_init_apu_channels(core);
+    contra_init_apu_channels(core, (uint8_t)((core->ram[CONTRA_RAM_ENEMY_ROUTINE + x] << 1) + 1u)); /* Y from exe_enemy_routine */
     contra_play_sound(core, 0x57u);
     ram[CONTRA_RAM_DELAY_TIME_LOW_BYTE] = 0xFFu;
     ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] = 0x01u;
@@ -18640,10 +19507,10 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                     case 0x02u: contra_rom_indoor_soldier_routine_01(core, x); break;
                     case 0x03u: contra_rom_shared_indoor_soldier_hit_routine_00(core, x); break;
                     case 0x04u: contra_rom_shared_indoor_soldier_hit_routine_01(core, x); break;
-                    /* table tail (bank0:3423-3425): init_explosion,
+                    /* table tail (bank0:3424-3426): init_explosion,
                        shared_enemy_routine_03 (explosion_type_02), remove_enemy */
                     case 0x05u: contra_rom_enemy_routine_init_explosion_step(core, x); break;
-                    case 0x06u: contra_rom_enemy_routine_explosion_step(core, x); break;
+                    case 0x06u: contra_rom_shared_enemy_routine_03(core, x); break;
                     case 0x07u: contra_rom_enemy_routine_remove_inplace(core, x); break;
                     default: break;
                 }
@@ -18701,7 +19568,7 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                     case 0x04u: contra_rom_shared_indoor_soldier_hit_routine_01(core, x); break;
                     case 0x05u: contra_rom_jumping_soldier_routine_04(core, x); break;
                     case 0x06u: contra_rom_enemy_routine_init_explosion_step(core, x); break;
-                    case 0x07u: contra_rom_enemy_routine_explosion_step(core, x); break;
+                    case 0x07u: contra_rom_shared_enemy_routine_03(core, x); break;
                     case 0x08u: contra_rom_enemy_routine_remove_inplace(core, x); break; /* remove_enemy keeps the husk */
                     default: break; /* hit/explosion via the 0xFE actor */
                 }
@@ -18729,9 +19596,9 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                     case 0x03u: contra_rom_four_soldiers_routine_02(core, x); break;
                     case 0x04u: contra_rom_shared_indoor_soldier_hit_routine_00(core, x); break;
                     case 0x05u: contra_rom_shared_indoor_soldier_hit_routine_01(core, x); break;
-                    /* table tail (bank0:3812-3814) */
+                    /* table tail (bank0:3813-3815) */
                     case 0x06u: contra_rom_enemy_routine_init_explosion_step(core, x); break;
-                    case 0x07u: contra_rom_enemy_routine_explosion_step(core, x); break;
+                    case 0x07u: contra_rom_shared_enemy_routine_03(core, x); break;
                     case 0x08u: contra_rom_enemy_routine_remove_inplace(core, x); break;
                     default: break;
                 }
@@ -18863,7 +19730,7 @@ static void contra_rom_exe_enemy_type(ContraCore *core, uint8_t x)
                     case 0x03u: contra_rom_shared_indoor_soldier_hit_routine_00(core, x); break;
                     case 0x04u: contra_rom_shared_indoor_soldier_hit_routine_01(core, x); break;
                     case 0x05u: contra_rom_enemy_routine_init_explosion_step(core, x); break;
-                    case 0x06u: contra_rom_enemy_routine_explosion_step(core, x); break;
+                    case 0x06u: contra_rom_shared_enemy_routine_03(core, x); break;
                     case 0x07u:
                         contra_rom_enemy_routine_remove_inplace(core, x);
                         core->ram[CONTRA_RAM_GRENADE_LAUNCHER_FLAG] = 0x00u;
@@ -19735,6 +20602,7 @@ static void contra_rom_check_players_collision(ContraCore *core, uint8_t slot)
 static void contra_rom_exe_all_enemy_routine(ContraCore *core)
 {
     int slot;
+    contra_load_bank_number(core, 0x00u); /* load_bank_0_exe_all_enemy_routine */
 
     /* clear the "player is riding a non-dangerous enemy" flags (bank7:7317); they
        are re-set this frame only if the player is still standing on a platform. */
@@ -19749,6 +20617,7 @@ static void contra_rom_exe_all_enemy_routine(ContraCore *core)
         {
             continue;
         }
+        core->ram[0x83u] = sx; /* stx ENEMY_CURRENT_SLOT */
         contra_rom_exe_enemy_type(core, sx);
         if ((core->ram[CONTRA_RAM_ENEMY_ROUTINE + sx] == 0u) ||
             (core->ram[CONTRA_RAM_ENEMY_SPRITES + sx] == 0u))
@@ -19862,6 +20731,7 @@ static void contra_rom_load_indoor_enemy_data(ContraCore *core)
     size_t screen_count;
     size_t y;
     int slot;
+    contra_load_bank_number(core, 0x02u); /* load_bank_2_load_screen_enemy_data */
 
     if (ram[CONTRA_RAM_ENEMY_SCREEN_READ_OFFSET] != 0u)
     {
@@ -20177,7 +21047,9 @@ static void contra_rom_create_default_soldiers(ContraCore *core)
     const uint8_t dir = (ram[CONTRA_RAM_SOLDIER_GENERATION_X_POS] < 0x80u) ? 0x01u : 0x00u;
     int y;
 
-    ram[0x06u] = 0x00u;
+    /* $06 is NOT initialized: the ROM increments whatever the last writer
+       left there (typically draw_sprites at the end of the previous frame)
+       and uses its bit 1 as each soldier's ledge-handling attribute */
     ram[0x07u] = dir; /* the ROM keeps the direction in the $07 temp */
     for (y = 2; y >= 0; --y)
     {
@@ -20320,6 +21192,7 @@ soldier_gen_exit:
 static void contra_rom_exe_soldier_generation(ContraCore *core)
 {
     uint8_t *const ram = core->ram;
+    contra_load_bank_number(core, 0x02u); /* load_bank_2_exe_soldier_generation */
 
     if (ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER] != ram[CONTRA_RAM_SOLDIER_GEN_SCREEN])
     {
@@ -20385,6 +21258,16 @@ static void contra_end_level_set_delay_advance(ContraCore *core, uint8_t delay)
         (uint8_t)(core->ram[CONTRA_RAM_END_LEVEL_ROUTINE_INDEX] + 1u);
 }
 
+/* bank3 make_player_invisible: hidden, level-end state cleared, sprite
+   buffer entry (PLAYER_SPRITES) cleared -- PLAYER_SPRITE_CODE is kept */
+static void contra_make_player_invisible(ContraCore *core, uint8_t player_index)
+{
+    core->ram[CONTRA_RAM_PLAYER_HIDDEN + player_index] = 0xFFu;
+    core->ram[CONTRA_RAM_LEVEL_END_LVL_ROUTINE_STATE + player_index] = 0x00u;
+    core->ram[CONTRA_RAM_CPU_SPRITE_BUFFER + player_index] = 0x00u;
+}
+
+/* bank3 make_off_screen_player_invisible_exit */
 static void contra_make_off_screen_player_invisible(ContraCore *core, uint8_t player_index)
 {
     const uint8_t sprite_y = core->ram[CONTRA_RAM_SPRITE_Y_POS + player_index];
@@ -20394,11 +21277,7 @@ static void contra_make_off_screen_player_invisible(ContraCore *core, uint8_t pl
     {
         return;
     }
-
-    core->ram[CONTRA_RAM_PLAYER_HIDDEN + player_index] = 0xFFu;
-    core->ram[CONTRA_RAM_LEVEL_END_LVL_ROUTINE_STATE + player_index] = 0x00u;
-    core->ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] = 0x00u;
-    core->ram[CONTRA_RAM_CPU_SPRITE_BUFFER + player_index] = 0x00u;
+    contra_make_player_invisible(core, player_index);
 }
 
 /* end_of_lvl_routine_lvl_3 (bank3:1439): two states -- walk to the dragon gate at
@@ -20436,10 +21315,7 @@ static void contra_run_level_3_end_level_player_routine(ContraCore *core, uint8_
     {
         return; /* not yet fallen to the top of the wall below the gate */
     }
-    /* make_player_invisible (bank3:1550): disappear behind the wall. */
-    ram[CONTRA_RAM_PLAYER_HIDDEN + player_index] = 0xFFu;
-    ram[CONTRA_RAM_LEVEL_END_LVL_ROUTINE_STATE + player_index] = 0x00u;
-    ram[CONTRA_RAM_PLAYER_SPRITE_CODE + player_index] = 0x00u;
+    contra_make_player_invisible(core, player_index); /* disappear behind the wall */
 }
 
 static void contra_run_level_1_end_level_player_routine(ContraCore *core, uint8_t player_index, uint8_t state_index)
@@ -20570,6 +21446,7 @@ static void contra_run_level_8_end_level_player_routine(
 static void contra_run_end_level_sequence(ContraCore *core)
 {
     uint8_t *const ram = core->ram;
+    contra_load_bank_number(core, 0x03u); /* load_bank_3_run_end_lvl_sequence_routine */
 
     ram[CONTRA_RAM_CONTROLLER_STATE + 0u] = 0x00u;
     ram[CONTRA_RAM_CONTROLLER_STATE + 1u] = 0x00u;
@@ -20808,6 +21685,7 @@ static void contra_level_routine_05(ContraCore *core)
         return;
     }
 
+    contra_note_raster_cut(core, 115u, 66u); /* clear_ppu: ROM frames 7442/15508 */
     contra_load_level_intro_screen_graphics(core);
     ram[CONTRA_RAM_VERTICAL_SCROLL] = 0x00u; /* intro screen scrolls from 0 */
     /* The ROM busy-writes the next stage's intro graphics across several
@@ -20839,7 +21717,7 @@ static void contra_level_routine_06(ContraCore *core)
 
     if ((input_diff & CONTRA_BUTTON_START) != 0u)
     {
-        contra_init_apu_channels(core);
+        contra_init_apu_channels(core, core->ram[CONTRA_RAM_CONTROLLER_STATE]); /* Y = P1 input */
         if (ram[CONTRA_RAM_CONT_END_SELECTION] != 0u)
         {
             contra_set_game_routine_index(core, 0x00u);
@@ -21289,7 +22167,7 @@ static void contra_end_game_sequence_02(ContraCore *core)
     }
     core->ram[CONTRA_RAM_LEVEL_SUPERTILE_DATA_PTR] = 0x20u; /* zp $44: credits
         PPU write pointer high byte ($43 low is already 0) */
-    contra_init_apu_channels(core);
+    contra_init_apu_channels(core, core->ram[CONTRA_RAM_CONTROLLER_STATE]);
     contra_reset_delay_timer(core);
     contra_play_sound(core, 0x4Au); /* end credits music */
     contra_zero_out_nametables(core);
@@ -21394,6 +22272,7 @@ static void contra_game_end_routine_05(ContraCore *core)
 
 static void contra_game_routine_06(ContraCore *core)
 {
+    contra_load_bank_number(core, 0x04u); /* game_routine_06 */
     switch (core->ram[CONTRA_RAM_GAME_END_ROUTINE_INDEX])
     {
         case 0x00u: contra_game_end_routine_00(core); break;
@@ -21632,20 +22511,6 @@ static void contra_write_overlay_supertile_to_ppu(
     );
 }
 
-static void contra_calculate_level_1_nametable_update_supertile_ppu_addr(
-    const ContraCore *core,
-    int enemy_x,
-    int enemy_y,
-    uint16_t *tile_ppu_addr,
-    uint16_t *attr_ppu_addr
-)
-{
-    const int scroll_offset = (int)core->ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET];
-    const int aligned_x = (((enemy_x - 12) + scroll_offset) & ~7) - scroll_offset;
-    const int aligned_y = (enemy_y - 12) & ~7;
-
-    contra_calculate_update_supertile_ppu_addr(core, aligned_x, aligned_y, tile_ppu_addr, attr_ppu_addr);
-}
 
 static void contra_write_level_1_nametable_update_supertile_to_ppu_addr(
     ContraCore *core,
@@ -21664,30 +22529,6 @@ static void contra_write_level_1_nametable_update_supertile_to_ppu_addr(
     );
 }
 
-static void contra_write_level_1_nametable_update_supertile_to_ppu(
-    ContraCore *core,
-    int enemy_x,
-    int enemy_y,
-    uint8_t supertile_index
-)
-{
-    uint16_t tile_ppu_addr;
-    uint16_t attr_ppu_addr;
-
-    contra_calculate_level_1_nametable_update_supertile_ppu_addr(
-        core,
-        enemy_x,
-        enemy_y,
-        &tile_ppu_addr,
-        &attr_ppu_addr
-    );
-    contra_write_level_1_nametable_update_supertile_to_ppu_addr(
-        core,
-        tile_ppu_addr,
-        attr_ppu_addr,
-        supertile_index
-    );
-}
 
 static void contra_process_level_1_weapon_box_restore(ContraCore *core)
 {
@@ -21712,30 +22553,6 @@ static void contra_process_level_1_weapon_box_restore(ContraCore *core)
     core->level1_weapon_box_restore_y = 0;
 }
 
-static void contra_render_level_1_overlay_supertile(
-    ContraCore *core,
-    int dest_x,
-    int dest_y,
-    uint8_t supertile_index
-)
-{
-    contra_write_overlay_supertile_to_ppu(
-        core,
-        contra_level_1_nametable_update_supertile_data_addr,
-        contra_level_1_nametable_update_palette_data_addr,
-        dest_x,
-        dest_y,
-        supertile_index
-    );
-    contra_render_overlay_supertile(
-        core,
-        contra_level_1_nametable_update_supertile_data_addr,
-        contra_level_1_nametable_update_palette_data_addr,
-        dest_x,
-        dest_y,
-        supertile_index
-    );
-}
 
 static void contra_render_level_2_overlay_supertile(
     ContraCore *core,
@@ -21798,45 +22615,6 @@ static void contra_render_level_3_overlay_supertile(
     );
 }
 
-static void contra_render_level_1_nametable_update_supertile(
-    ContraCore *core,
-    int enemy_x,
-    int enemy_y,
-    uint8_t supertile_index
-)
-{
-    /*
-     * The original engine writes the supertile to the nametable rounded down
-     * to an 8-pixel grid in *world* space (set_ppu_addresses_in_mem
-     * `AND #$F8` after adding HORIZONTAL_SCROLL/VERTICAL_SCROLL). Match that
-     * so the supertile's 8x8 tiles line up with the underlying wall tiles
-     * instead of leaking the wall pattern through and producing a doubled
-     * appearance, while still scrolling smoothly with the level.
-     */
-    const int scroll_offset = (int)core->ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET];
-    const int aligned_x = (((enemy_x - 12) + scroll_offset) & ~7) - scroll_offset;
-    const int aligned_y = (enemy_y - 12) & ~7;
-
-    /* draw_enemy_supertile_10 (bank7:8552) draws from the CURRENT level's
-       nametable update data. Level 3 spawns the same shared enemies that restore
-       a background super-tile (pill box 0x02, rotating gun 0x04, red turret 0x07),
-       so on level 3 read from the level-3 data, not level-1. */
-    if (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x02u)
-    {
-        contra_write_overlay_supertile_to_ppu(
-            core, contra_level_3_nametable_update_supertile_data_addr,
-            contra_level_3_nametable_update_palette_data_addr,
-            aligned_x, aligned_y, supertile_index);
-        contra_render_overlay_supertile(
-            core, contra_level_3_nametable_update_supertile_data_addr,
-            contra_level_3_nametable_update_palette_data_addr,
-            aligned_x, aligned_y, supertile_index);
-        return;
-    }
-
-    contra_write_level_1_nametable_update_supertile_to_ppu(core, enemy_x, enemy_y, supertile_index);
-    contra_render_level_1_overlay_supertile(core, aligned_x, aligned_y, supertile_index);
-}
 
 /* level_2_4_tile_animation (bank 3, CPU $86E1): 11 five-byte entries
    {row_flag, tile0, tile1, tile2, tile3}. For level 2/4 the row flag is always 0,
@@ -22336,9 +23114,221 @@ static void contra_render_frame(ContraCore *core, bool update_latches)
     }
 }
 
+/* Mesen's (and the 2C02's commonly measured) power-up palette RAM */
+static const uint8_t contra_power_on_palette[CONTRA_PPU_PALETTE_SIZE] = {
+    0x09u, 0x01u, 0x00u, 0x01u, 0x00u, 0x02u, 0x02u, 0x0Du, 0x08u, 0x10u, 0x08u, 0x24u, 0x00u, 0x00u, 0x04u, 0x2Cu,
+    0x09u, 0x01u, 0x34u, 0x03u, 0x00u, 0x04u, 0x00u, 0x14u, 0x08u, 0x3Au, 0x00u, 0x02u, 0x00u, 0x20u, 0x2Cu, 0x08u};
+
+/* true while the legacy level compositor still owns this scene (stages 3-8:
+   their nametable writes are not yet routed through CPU_GRAPHICS_BUFFER).
+   A forced-blank frame (rendering off, e.g. during the next stage's intro
+   load, when CURRENT_LEVEL has already advanced) is the PPU model's. */
+static bool contra_scene_uses_legacy_renderer(const ContraCore *core)
+{
+    const uint8_t *const ram = core->ram;
+    const bool gameplay = (ram[CONTRA_RAM_GAME_ROUTINE_INDEX] == 0x05u) ||
+                          ((ram[CONTRA_RAM_GAME_ROUTINE_INDEX] == 0x02u) && (ram[CONTRA_RAM_DEMO_MODE] != 0u));
+
+    return gameplay && (ram[CONTRA_RAM_CURRENT_LEVEL] >= 0x02u) &&
+           (ram[CONTRA_RAM_CURRENT_LEVEL] != 0x03u) && /* base 2 shares the base 1 (indoor) pipeline */
+           (ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] >= 0x04u) && ((core->ppu.mask & 0x18u) != 0u);
+}
+
+/* Scan out one frame from the PPU model (what the 2C02 draws during the
+   visible scanlines that follow the NMI) and convert it to RGB. */
+static void contra_present_frame(ContraCore *core)
+{
+    size_t i;
+
+    core->frame_from_ppu_model = 0u;
+    if (contra_scene_uses_legacy_renderer(core))
+    {
+        memcpy(core->latched_oam, core->ppu_oam, sizeof(core->latched_oam));
+        contra_latch_ppu_render_state(core);
+        contra_render_frame(core, false);
+        return;
+    }
+    core->frame_from_ppu_model = 1u;
+
+    {
+        const ContraPpuMemory mem = contra_ppu_memory(core);
+
+        contra_ppu_render_frame(&core->ppu, &mem, core->frame_colors);
+    }
+    for (i = 0u; i < (size_t)(CONTRA_FRAMEBUFFER_WIDTH * CONTRA_FRAMEBUFFER_HEIGHT); ++i)
+    {
+        core->framebuffer[i] = contra_nes_palette_rgba[core->frame_colors[i] & 0x3Fu];
+    }
+}
+
+/* The NMI's game loop can call clear_ppu (rendering off) mid-picture -- the
+   level loads do. The PPU has then already scanned out everything before that
+   moment, and the rest of the frame is the backdrop. Where exactly depends on
+   how many CPU cycles the NMI and the logic before the call took; per call
+   site that is constant to a few dots, so the load routines note the scanline
+   and dot measured against the ROM (reference recording register log). */
+static void contra_note_raster_cut(ContraCore *core, uint16_t scanline, uint16_t dot)
+{
+    uint16_t pos = (uint16_t)(scanline * 341u + dot + 1u);
+
+    if ((core->ppu.mask & 0x18u) == 0u)
+    {
+        return; /* rendering already off: nothing changes on screen */
+    }
+    if (core->raster_cut_hint != 0u)
+    {
+        pos = core->raster_cut_hint; /* the replay knows this frame's exact timing */
+    }
+    if ((core->raster_cut == 0u) || (pos < core->raster_cut))
+    {
+        core->raster_cut = pos;
+        if (core->frame_from_ppu_model != 0u)
+        {
+            /* the load has not touched PPU memory yet: redraw the cut line
+               the way clear_ppu's mid-line writes made the PPU fetch it */
+            const unsigned line = (unsigned)(pos - 1u) / 341u;
+            const unsigned dot = (unsigned)(pos - 1u) % 341u;
+            const ContraPpuMemory mem = contra_ppu_memory(core);
+            size_t x;
+
+            contra_ppu_render_clear_ppu_line(&core->ppu, &mem, core->frame_colors, line, dot);
+            for (x = 0u; (line < CONTRA_FRAMEBUFFER_HEIGHT) && (x < CONTRA_FRAMEBUFFER_WIDTH); ++x)
+            {
+                const size_t i = (size_t)line * CONTRA_FRAMEBUFFER_WIDTH + x;
+
+                core->framebuffer[i] = contra_nes_palette_rgba[core->frame_colors[i] & 0x3Fu];
+            }
+        }
+    }
+}
+
+static void contra_apply_raster_cut(ContraCore *core)
+{
+    const uint16_t cut = (uint16_t)(core->raster_cut - 1u);
+    const uint16_t cut_line = (uint16_t)(cut / 341u);
+    const uint16_t cut_dot = (uint16_t)(cut % 341u);
+    const uint8_t backdrop = (uint8_t)(core->ppu_palette[0] & 0x3Fu);
+    unsigned y;
+
+    core->raster_cut = 0u;
+    for (y = cut_line; y < CONTRA_FRAMEBUFFER_HEIGHT; ++y)
+    {
+        /* pixel x is output at dot x + 1; a $2001 write at dot D still lets
+           that dot's pixel (x = D - 1) through */
+        const unsigned first_x = (y == cut_line) ? (unsigned)cut_dot : 0u;
+        unsigned x;
+
+        for (x = first_x; x < CONTRA_FRAMEBUFFER_WIDTH; ++x)
+        {
+            const size_t i = (size_t)y * CONTRA_FRAMEBUFFER_WIDTH + x;
+
+            core->frame_colors[i] = backdrop;
+            core->framebuffer[i] = contra_nes_palette_rgba[backdrop];
+        }
+    }
+}
+
+/* bank7 nmi_start up to the game loop. Returns false for the nested-NMI path
+   (NMI_CHECK set: the previous frame's game loop was still running). */
+static bool contra_nmi_prologue(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t mask;
+
+    contra_ppu_read_status(&core->ppu);
+    if (ram[CONTRA_RAM_NMI_CHECK] != 0u)
+    {
+        /* handle_sounds_set_ppu_scroll_rti */
+        mask = (ram[CONTRA_RAM_PPU_READY] != 0u) ? 0x00u : ram[CONTRA_RAM_PPUMASK_SETTINGS];
+        contra_ppu_write_mask(&core->ppu, mask);
+        contra_set_ppu_scroll(core);
+        return false;
+    }
+
+    contra_clear_ppu(core);
+    contra_ppu_write_oam_addr(&core->ppu, 0x00u);
+    {
+        const ContraPpuMemory mem = contra_ppu_memory(core);
+
+        contra_ppu_oam_dma(&core->ppu, &mem, &ram[CONTRA_RAM_OAMDMA_CPU_BUFFER]);
+    }
+    contra_write_palette_colors_to_ppu(core);
+    contra_write_cpu_graphics_buffer_to_ppu(core);
+    mask = ram[CONTRA_RAM_PPUMASK_SETTINGS];
+    if (ram[CONTRA_RAM_PPU_READY] != 0u)
+    {
+        ram[CONTRA_RAM_PPU_READY] = (uint8_t)(ram[CONTRA_RAM_PPU_READY] - 1u);
+        if (ram[CONTRA_RAM_PPU_READY] != 0u)
+        {
+            mask = 0x00u;
+        }
+    }
+    contra_ppu_write_mask(&core->ppu, mask);
+    contra_set_ppu_addr_to_nametables(core);
+    ram[CONTRA_RAM_NMI_CHECK] = (uint8_t)(ram[CONTRA_RAM_NMI_CHECK] + 1u);
+    return true;
+}
+
+/* bank7 nmi_start after exe_game_routine: bank 1 + draw_sprites + terminate
+   the graphics buffer + mark the frame complete */
+static void contra_nmi_epilogue(ContraCore *core)
+{
+    contra_load_bank_number(core, 0x01u);
+    contra_draw_sprites(core);
+    contra_write_0_to_cpu_graphics_buffer(core);
+    core->ram[CONTRA_RAM_NMI_CHECK] = 0x00u;
+}
+
+/* bank7 reset_vector from clear_ppu to configure_PPU (runs during frame 3 of
+   a power-on: the reset code first spins through two vblanks) */
+static void contra_reset_vector(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+    size_t index;
+
+    ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x00u;
+    contra_clear_ppu(core);
+    memset(&ram[0x000u], 0, 0x1C0u); /* clear_memory $0000-$01BF */
+    memset(&ram[0x200u], 0, 0x5E0u); /* clear_memory $0200-$07DF */
+    for (index = 0u; index < 16u; ++index)
+    {
+        ram[0x7F0u + index] = (uint8_t)(0xF0u + index);
+    }
+    ram[CONTRA_RAM_HIGH_SCORE_LOW] = 0xC8u;
+    ram[CONTRA_RAM_HIGH_SCORE_HIGH] = 0x00u;
+    ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER] = 0x00u;
+    /* init_APU_channels: backs Y up in $F7 (Y = $FF after clear_memory) and
+       maps bank 1 around init_pulse_and_noise_channels */
+    contra_init_apu_channels(core, 0xFFu); /* Y = $FF after clear_memory */
+    contra_configure_ppu(core);
+}
+
 void contra_core_init(ContraCore *core)
 {
     contra_core_reset(core);
+}
+
+/* NOT a ROM path (tests, debug warps): finish the power-on sequence, then
+   leave the RAM a game started from the title screen has when game_routine_05
+   begins -- attract mode off (game_routine_03) and the title's delay timer
+   run out -- so a caller can poke GAME_ROUTINE_INDEX / CURRENT_LEVEL / ... to
+   start directly in a level */
+static void contra_core_finish_power_on(ContraCore *core)
+{
+    while (core->startup_wait_frames != 0u)
+    {
+        contra_core_set_input(core, NULL);
+        contra_core_step_frame(core);
+    }
+    core->ram[CONTRA_RAM_DEMO_MODE] = 0x00u;
+    core->ram[CONTRA_RAM_DELAY_TIME_LOW_BYTE] = 0x00u;
+    core->ram[CONTRA_RAM_DELAY_TIME_HIGH_BYTE] = 0x00u;
+}
+
+void contra_core_boot(ContraCore *core)
+{
+    contra_core_init(core);
+    contra_core_finish_power_on(core);
 }
 
 void contra_core_reset(ContraCore *core)
@@ -22346,12 +23336,11 @@ void contra_core_reset(ContraCore *core)
     size_t index;
 
     memset(core, 0, sizeof(*core));
+    /* power-on: RAM all zero (Mesen's default), palette RAM at its power-up
+       values, the reset code spins until frame 3, then NMIs start at frame 4
+       and game_routine_00's intro graphics load runs until frame 10 */
     core->startup_wait_frames = 0x0Au;
-
-    for (index = 0u; index < 16u; ++index)
-    {
-        core->ram[0x7F0u + index] = (uint8_t)(0xF0u + index);
-    }
+    memcpy(core->ppu_palette, contra_power_on_palette, sizeof(core->ppu_palette));
 
     for (index = 0u; index < CONTRA_NATIVE_MAX_ENEMIES; ++index)
     {
@@ -22364,16 +23353,7 @@ void contra_core_reset(ContraCore *core)
         }
     }
 
-    memset(core->ppu_palette, 0x0Fu, sizeof(core->ppu_palette));
-    core->ram[CONTRA_RAM_HIGH_SCORE_LOW] = 0xC8u;
-    core->ram[CONTRA_RAM_HIGH_SCORE_HIGH] = 0x00u;
-    core->ram[CONTRA_RAM_PLAYER_MODE] = 0x00u;
-    core->ram[CONTRA_RAM_PLAYER_MODE_1D] = 0x01u;
-    core->ram[CONTRA_RAM_PPU_READY] = 0x05u;
-    core->ram[CONTRA_RAM_PPUCTRL_SETTINGS] = 0xB0u;
-    core->ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER] = 0x00u;
-
-    contra_render_frame(core, true);
+    contra_present_frame(core);
 }
 
 void contra_core_set_input(ContraCore *core, const ContraInputSnapshot *input)
@@ -22387,85 +23367,121 @@ void contra_core_set_input(ContraCore *core, const ContraInputSnapshot *input)
     core->pending_input = *input;
 }
 
+/* A real-NES lag frame: the previous frame's game loop overran, so this NMI
+   takes the nested path (mask + scroll only) and the logic does not advance.
+   Front-ends never need this (the port never overruns); replay tools call it
+   for the recording's lag frames so the picture matches. */
+void contra_core_step_lag_frame(ContraCore *core)
+{
+    core->ram[CONTRA_RAM_NMI_CHECK] = 0x01u;
+    (void)contra_nmi_prologue(core);
+    core->ram[CONTRA_RAM_NMI_CHECK] = 0x00u;
+    contra_present_frame(core);
+}
+
+static void contra_core_step_frame_body(ContraCore *core);
+
 void contra_core_step_frame(ContraCore *core)
 {
+    contra_core_step_frame_body(core);
+    core->raster_cut_hint = 0u;
+}
+
+static void contra_core_step_frame_body(ContraCore *core)
+{
+    uint8_t *const ram = core->ram;
+
     if (core->startup_wait_frames != 0u)
     {
-        const bool startup_state =
-            (core->ram[CONTRA_RAM_GAME_ROUTINE_INDEX] == 0u) &&
-            (core->ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] == 0u) &&
-            (core->ram[CONTRA_RAM_HORIZONTAL_SCROLL] == 0u);
+        /* frame numbers 1..10 of the power-on sequence */
+        const uint8_t startup_frame = (uint8_t)(0x0Bu - core->startup_wait_frames);
 
-        if (startup_state)
+        core->startup_wait_frames = (uint8_t)(core->startup_wait_frames - 1u);
+        if (startup_frame == 0x03u)
         {
-            const uint8_t startup_frame = (uint8_t)(0x0Bu - core->startup_wait_frames);
-
-            if (startup_frame >= 0x04u)
-            {
-                core->ram[CONTRA_RAM_FRAME_COUNTER] = 0x01u;
-            }
-
-            if (startup_frame >= 0x05u)
-            {
-                core->ram[CONTRA_RAM_DEMO_MODE] = 0x01u;
-            }
-
-            if (startup_frame == 0x0Au)
-            {
-                core->startup_wait_frames = 0u;
-                contra_game_routine_00(core);
-                contra_flush_cpu_graphics_buffer_to_ppu(core);
-                contra_render_frame(core, true);
-                return;
-            }
-
-            core->startup_wait_frames = (uint8_t)(core->startup_wait_frames - 1u);
-            contra_render_frame(core, true);
+            contra_reset_vector(core);
+        }
+        else if (startup_frame == 0x04u)
+        {
+            /* the first NMI; game_routine_00 starts its (multi-frame) load */
+            (void)contra_nmi_prologue(core);
+            contra_present_frame(core);
+            contra_load_bank_number(core, 0x01u);
+            contra_apply_controller_state(core);
+            ram[CONTRA_RAM_FRAME_COUNTER] = 0x01u;
             return;
         }
+        else if (startup_frame >= 0x05u)
+        {
+            ram[CONTRA_RAM_DEMO_MODE] = 0x01u;
+        }
 
-        core->startup_wait_frames = 0u;
+        if (startup_frame == 0x0Au)
+        {
+            /* game_routine_00 completes (configure_PPU at scanline 109) and
+               the rest of that NMI runs */
+            contra_game_routine_00(core);
+            contra_present_frame(core);
+            contra_nmi_epilogue(core);
+            return;
+        }
+        contra_present_frame(core);
+        return;
     }
 
     if (core->level_graphics_wait_frames != 0u)
     {
-        bool update_latches = false;
-
         core->level_graphics_wait_frames = (uint8_t)(core->level_graphics_wait_frames - 1u);
+        contra_present_frame(core);
         if (core->level_graphics_wait_frames == 0u)
         {
             contra_finish_level_graphics_load(core);
-            contra_flush_cpu_graphics_buffer_to_ppu(core);
-            update_latches = true;
+            contra_nmi_epilogue(core);
         }
-        contra_render_frame(core, update_latches);
         return;
     }
 
     if (core->frame_stall_frames != 0u)
     {
         core->frame_stall_frames = (uint8_t)(core->frame_stall_frames - 1u);
-        if ((core->frame_stall_frames == 0u) && (core->frame_stall_routine_reset != 0u))
+        contra_present_frame(core);
+        if (core->frame_stall_frames == 0u)
         {
-            core->frame_stall_routine_reset = 0u;
-            core->ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x00u;
+            /* the load finished: the rest of the blocked NMI's game loop runs
+               (level_routine_05_exit, then draw_sprites / write_0 / NMI_CHECK) */
+            if (core->frame_stall_routine_reset != 0u)
+            {
+                core->frame_stall_routine_reset = 0u;
+                ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x00u;
+            }
+            contra_nmi_epilogue(core);
         }
-        contra_render_frame(core, true);
         return;
     }
 
-    /* the NMI flushed CPU_GRAPHICS_BUFFER at the end of the previous frame:
-       this frame's writers (fence animation, enemy super-tile stamps) start
-       from an empty buffer. Only the BUDGET is modeled (ram[$21]); the actual
-       pixels go straight to the native renderer. */
-    core->ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET] = 0x00u;
+    if (!contra_nmi_prologue(core))
+    {
+        contra_present_frame(core);
+        return;
+    }
+    contra_present_frame(core);
 
-    contra_flush_pending_horizontal_level_writes(core);
+    /* the game loop inside the NMI */
+    contra_load_bank_number(core, 0x01u);
     contra_process_level_1_weapon_box_restore(core);
     contra_apply_controller_state(core);
     contra_exe_game_routine(core);
-    contra_flush_cpu_graphics_buffer_to_ppu(core);
-    contra_render_frame(core, core->level_graphics_wait_frames == 0u);
+    if (core->raster_cut != 0u)
+    {
+        contra_apply_raster_cut(core);
+    }
+    if ((core->level_graphics_wait_frames != 0u) || (core->frame_stall_frames != 0u))
+    {
+        /* a multi-frame PPU load began: the ROM's game loop stays blocked in
+           it (NMIs off) until the load completes */
+        return;
+    }
+    contra_nmi_epilogue(core);
 }
 
 /* DEBUG (NOT part of the faithful port): warp an initialized core straight to the
@@ -22482,6 +23498,7 @@ void contra_core_debug_warp_level2_boss(ContraCore *core)
     unsigned room;
     unsigned frame;
 
+    contra_core_finish_power_on(core); /* the reset code would wipe the warp state */
     up.player[0] = CONTRA_BUTTON_UP;
 
     /* force a single-player Level 2 game and run it to gameplay (level_routine 4) */
@@ -22579,6 +23596,7 @@ void contra_core_debug_warp_level4(ContraCore *core)
     ContraInputSnapshot none = {{0u, 0u}};
     unsigned frame;
 
+    contra_core_finish_power_on(core); /* the reset code would wipe the warp state */
     ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
     ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x00u;
     ram[CONTRA_RAM_CURRENT_LEVEL] = 0x03u;
@@ -22608,6 +23626,7 @@ void contra_core_debug_warp_level5(ContraCore *core)
     ContraInputSnapshot none = {{0u, 0u}};
     unsigned frame;
 
+    contra_core_finish_power_on(core); /* the reset code would wipe the warp state */
     ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
     ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x00u;
     ram[CONTRA_RAM_CURRENT_LEVEL] = 0x04u; /* Level 5 (snow field) */
@@ -22637,6 +23656,7 @@ void contra_core_debug_warp_level7(ContraCore *core)
     ContraInputSnapshot none = {{0u, 0u}};
     unsigned frame;
 
+    contra_core_finish_power_on(core); /* the reset code would wipe the warp state */
     ram[CONTRA_RAM_GAME_ROUTINE_INDEX] = 0x05u;
     ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] = 0x00u;
     ram[CONTRA_RAM_CURRENT_LEVEL] = 0x06u; /* Level 7 (hangar) */

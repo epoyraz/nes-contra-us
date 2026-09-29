@@ -19,6 +19,7 @@ endfunction()
 
 add_library(contra_core STATIC
     contra_core/src/core.c
+    contra_core/src/ppu.c
 )
 
 target_include_directories(contra_core
@@ -55,6 +56,20 @@ target_link_libraries(contra_play_replay_trace PRIVATE contra_core)
 
 contra_apply_warnings(contra_play_replay_trace)
 contra_apply_coverage(contra_play_replay_trace)
+
+find_package(ZLIB)
+if(ZLIB_FOUND)
+    # Exhaustive RAM -> PPU -> pixel parity check against a Mesen .ctel archive
+    # (tools/capture_telemetry.sh). See docs/Parity Telemetry.md.
+    add_executable(contra_parity_telemetry
+        tools/parity_telemetry.c
+    )
+
+    target_link_libraries(contra_parity_telemetry PRIVATE contra_core ZLIB::ZLIB)
+
+    contra_apply_warnings(contra_parity_telemetry)
+    contra_apply_coverage(contra_parity_telemetry)
+endif()
 
 add_executable(contra_level2_boss_framebuffer
     tools/level2_boss_framebuffer.c
