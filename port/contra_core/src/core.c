@@ -2735,6 +2735,49 @@ static bool contra_rom_draw_enemy_supertile_a_set_delay(ContraCore *core, uint8_
     return full;
 }
 
+static void contra_rom_set_supertile_bg_collisions(ContraCore *core, uint8_t left, uint8_t right);
+
+/* bank7 update_2_enemy_supertiles: super-tile $10 at the enemy position, then
+   `second` 32 px below it; y = 0 also rewrites the bg collision (empty/solid
+   under the first, a walkable ground row under the second). Returns true when
+   CPU_GRAPHICS_BUFFER was full (carry set). */
+static bool contra_rom_update_2_enemy_supertiles(ContraCore *core, uint8_t x, uint8_t second, uint8_t y)
+{
+    uint8_t *const ram = core->ram;
+    uint8_t ey;
+    uint8_t ex;
+
+    ram[0x07u] = y;
+    if (contra_rom_draw_enemy_supertile_10(core, x))
+    {
+        return true;
+    }
+    ram[0x10u] = second;
+    if (ram[0x07u] == 0u)
+    {
+        contra_rom_set_supertile_bg_collisions(core, 0x00u, 0x0Fu);
+    }
+    if (ram[CONTRA_RAM_ENEMY_Y_POS + x] >= 0xECu)
+    {
+        return false; /* off the bottom: nametable_update_exit */
+    }
+    ey = (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + 0x14u);
+    if (ram[CONTRA_RAM_ENEMY_X_POS + x] < 0x0Cu)
+    {
+        return false; /* off the left: nametable_update_exit */
+    }
+    ex = (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + x] - 0x0Cu);
+    if (contra_rom_load_bank_3_update_nametable_supertile(core, ex, ey))
+    {
+        return true;
+    }
+    if (ram[0x07u] == 0u)
+    {
+        contra_rom_set_supertile_bg_collisions(core, 0x01u, 0x01u);
+    }
+    return false;
+}
+
 /* bank7 update_enemy_nametable_tiles: tile animation a at enemy pos - 4 */
 static bool contra_rom_update_enemy_nametable_tiles(ContraCore *core, uint8_t x, uint8_t a)
 {
@@ -8619,9 +8662,15 @@ static void contra_rom_enemy_bullet_routine_00(ContraCore *core, uint8_t x)
 
 static void contra_rom_enemy_bullet_routine_01(ContraCore *core, uint8_t x)
 {
-    const uint8_t btype = (core->ram[CONTRA_RAM_ENEMY_VAR_1 + x] < 6u)
+    /* dragon arm orb fireball: flip/palette cycle, one step every 4 frames */
+    static const uint8_t bullet_04_palette_mirror_tbl[4] = {0x01u, 0x41u, 0xC1u, 0x81u};
+    uint8_t btype = (core->ram[CONTRA_RAM_ENEMY_VAR_1 + x] < 6u)
         ? core->ram[CONTRA_RAM_ENEMY_VAR_1 + x] : 0u;
 
+    if ((btype == 0x00u) && (core->ram[CONTRA_RAM_CURRENT_LEVEL] == 0x04u))
+    {
+        btype = 0x05u; /* snow field: regular bullets are drawn red */
+    }
     core->ram[CONTRA_RAM_ENEMY_SPRITES + x] = contra_bullet_sprite_tbl[btype];
     core->ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] = contra_bullet_palette_tbl[btype];
     contra_rom_update_enemy_pos(core, x); /* applies velocity + scroll, removes off-screen */
@@ -8670,6 +8719,11 @@ static void contra_rom_enemy_bullet_routine_01(ContraCore *core, uint8_t x)
         {
             contra_rom_remove_enemy(core, x);
         }
+    }
+    else if (core->ram[CONTRA_RAM_ENEMY_VAR_1 + x] == 0x04u)
+    {
+        core->ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] =
+            bullet_04_palette_mirror_tbl[(core->ram[CONTRA_RAM_FRAME_COUNTER] >> 2u) & 0x03u];
     }
 }
 
@@ -9089,8 +9143,13 @@ static void contra_rom_add_4_to_enemy_y_pos(ContraCore *core, uint8_t x)
    Codes match the ROM: 0 empty, 1 floor, 2 water, 0x80 solid. */
 static uint8_t contra_rom_add_y_to_y_pos_get_bg_collision(const ContraCore *core, uint8_t x, uint8_t y_off)
 {
-    const uint8_t ey = (uint8_t)(core->ram[CONTRA_RAM_ENEMY_Y_POS + x] + y_off);
-    return contra_get_outdoor_bg_collision(core, core->ram[CONTRA_RAM_ENEMY_X_POS + x], ey);
+    const unsigned ey = (unsigned)core->ram[CONTRA_RAM_ENEMY_Y_POS + x] + y_off;
+
+    if (ey > 0xFFu)
+    {
+        return 0x00u; /* past the bottom of the screen: empty (bank7 @exit) */
+    }
+    return contra_get_outdoor_bg_collision(core, core->ram[CONTRA_RAM_ENEMY_X_POS + x], (uint8_t)ey);
 }
 
 /* set_enemy_y_velocity_to_0 (bank7:7858-7862): zero only ENEMY_Y_VELOCITY FRACT and
@@ -9158,13 +9217,9 @@ static void contra_rom_soldier_routine_01(ContraCore *core, uint8_t x)
     if (ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] != 0u)
     {
         /* Vertical levels first anchor the soldier to terrain scroll, then use
-           the normal one-decrement spawn delay path. The guard must check the
-           ROUTINE (the husk-keeping remove_enemy leaves the TYPE in place). */
+           the normal one-decrement spawn delay path -- also when the scroll
+           just removed it (the ROM jmps on with the husk) */
         contra_rom_add_scroll_to_enemy_pos(core, x);
-        if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
-        {
-            return;
-        }
         ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
             (uint8_t)(ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] - 1u);
         if (ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] != 0u)
@@ -9311,9 +9366,13 @@ static uint8_t contra_rom_add_a_y_to_enemy_pos_get_bg_collision(
     const ContraCore *core, uint8_t x, uint8_t a, uint8_t y_off)
 {
     const uint8_t ex = (uint8_t)(core->ram[CONTRA_RAM_ENEMY_X_POS + x] + a);
-    const uint8_t ey = (uint8_t)(core->ram[CONTRA_RAM_ENEMY_Y_POS + x] + y_off);
+    const unsigned ey = (unsigned)core->ram[CONTRA_RAM_ENEMY_Y_POS + x] + y_off;
 
-    return contra_get_outdoor_bg_collision(core, ex, ey);
+    if (ey > 0xFFu)
+    {
+        return 0x00u; /* past the bottom of the screen: empty (bank7 @exit) */
+    }
+    return contra_get_outdoor_bg_collision(core, ex, (uint8_t)ey);
 }
 
 /* set_soldier_sprite (bank0.asm:1709): sprite code from ENEMY_FRAME, flip when
@@ -14868,13 +14927,15 @@ static void contra_rom_boss_mouth_routine_01(ContraCore *core, uint8_t x)
     contra_rom_advance_enemy_routine(core, x);
 }
 
-/* boss_mouth_draw_supertiles_set_delay (bank0:4559): time the open/close animation.
-   The mouth's two super-tiles are drawn from ENEMY_FRAME by the per-frame overlay
-   redraw, so here only the timer is advanced. Returns true on the frames the ROM's
-   carry-clear "drew a new frame" path is taken. */
+/* boss_mouth_draw_supertiles_set_delay (bank0:4559): when the delay runs out,
+   draw the mouth's two super-tiles for ENEMY_FRAME (no collision change); a full
+   CPU_GRAPHICS_BUFFER retries next frame. Returns true when both were drawn
+   (carry clear). */
 static bool contra_rom_boss_mouth_anim_step(ContraCore *core, uint8_t x)
 {
     uint8_t *const ram = core->ram;
+    const uint8_t y = (uint8_t)(ram[CONTRA_RAM_ENEMY_FRAME + x] << 1);
+    bool full;
 
     contra_rom_add_scroll_to_enemy_pos(core, x);
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] =
@@ -14883,8 +14944,10 @@ static bool contra_rom_boss_mouth_anim_step(ContraCore *core, uint8_t x)
     {
         return false;
     }
-    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x06u; /* delay between animation frames */
-    return true;
+    ram[0x10u] = contra_boss_mouth_nametable_update_tbl[y % 6u];
+    full = contra_rom_update_2_enemy_supertiles(core, x, contra_boss_mouth_nametable_update_tbl[(y + 1u) % 6u], 0x01u);
+    ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = full ? 0x01u : 0x06u; /* delay between animation frames */
+    return !full;
 }
 
 /* boss_mouth_routine_02 (bank0:4539): animate the mouth opening; once fully open,
@@ -14975,11 +15038,9 @@ static void contra_rom_boss_mouth_routine_04(ContraCore *core, uint8_t x)
 
 /* boss_mouth_routine_08 (bank0:4682): the dragon-defeated set piece -- every
    other frame (ENEMY_VAR_3 toggling) walk 14 fixed positions, draw the
-   destroyed background super-tile (budget-gated, retried on failure) and spawn
-   a two-round 0x89 explosion there; after all 14, set the level-end delay to
-   0x60 and remove. (The super-tile pixels themselves are cosmetic for the
-   native renderer; the budget byte cost and the slot's X/Y walk are the
-   structural effects.) */
+   destroyed background super-tile (boss_mouth_destroyed_nametable_update_tbl;
+   a full CPU_GRAPHICS_BUFFER retries) and spawn a two-round 0x89 explosion
+   there; after all 14, set the level-end delay to 0x60 and remove. */
 static void contra_rom_boss_mouth_routine_08(ContraCore *core, uint8_t x)
 {
     static const uint8_t y_tbl[14] = {
@@ -14988,6 +15049,8 @@ static void contra_rom_boss_mouth_routine_08(ContraCore *core, uint8_t x)
     static const uint8_t x_tbl[14] = {
         0x50u, 0xB0u, 0x70u, 0x90u, 0x70u, 0x90u, 0x70u, 0x90u,
         0x70u, 0x90u, 0x70u, 0x90u, 0x70u, 0x90u};
+    static const uint8_t destroyed_supertile_tbl[14] = {
+        0x19u, 0x19u, 0x19u, 0x19u, 0x1Au, 0x1Bu, 0x29u, 0x2Au, 0x1Cu, 0x1Du, 0x1Eu, 0x1Fu, 0x26u, 0x27u};
     uint8_t *const ram = core->ram;
     uint8_t i;
 
@@ -15005,9 +15068,9 @@ static void contra_rom_boss_mouth_routine_08(ContraCore *core, uint8_t x)
     }
     ram[CONTRA_RAM_ENEMY_Y_POS + x] = y_tbl[i];
     ram[CONTRA_RAM_ENEMY_X_POS + x] = x_tbl[i];
-    if (!contra_rom_enemy_supertile_draw_budget(core))
+    if (contra_rom_draw_enemy_supertile_a(core, x, destroyed_supertile_tbl[i]))
     {
-        return; /* draw failed: retry next toggle */
+        return; /* CPU_GRAPHICS_BUFFER full: retry next toggle */
     }
     contra_rom_create_explosion_at(core, x_tbl[i], y_tbl[i]);
 
@@ -23129,8 +23192,8 @@ static bool contra_scene_uses_legacy_renderer(const ContraCore *core)
     const bool gameplay = (ram[CONTRA_RAM_GAME_ROUTINE_INDEX] == 0x05u) ||
                           ((ram[CONTRA_RAM_GAME_ROUTINE_INDEX] == 0x02u) && (ram[CONTRA_RAM_DEMO_MODE] != 0u));
 
-    return gameplay && (ram[CONTRA_RAM_CURRENT_LEVEL] >= 0x02u) &&
-           (ram[CONTRA_RAM_CURRENT_LEVEL] != 0x03u) && /* base 2 shares the base 1 (indoor) pipeline */
+    /* stage 3 (waterfall) and the base 2 are on the faithful pipeline */
+    return gameplay && (ram[CONTRA_RAM_CURRENT_LEVEL] >= 0x04u) &&
            (ram[CONTRA_RAM_LEVEL_ROUTINE_INDEX] >= 0x04u) && ((core->ppu.mask & 0x18u) != 0u);
 }
 
