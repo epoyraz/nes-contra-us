@@ -5022,9 +5022,28 @@ static void contra_update_player_bullets(ContraCore *core)
     {
         const uint8_t bullet_slot = (uint8_t)(ram[CONTRA_RAM_PLAYER_BULLET_SLOT + bullet_index] & 0x0Fu);
 
-        if (bullet_slot == 0u)
+        if (ram[CONTRA_RAM_PLAYER_BULLET_SLOT + bullet_index] == 0u)
         {
             continue;
+        }
+        /* bank6 run_player_bullet_routines / run_player_bullet_routine: $10 =
+           bullet slot, $11 = owner, $0A/$0B = the bullet type's routine table
+           (player_bullet_routine_ptr_tbl $b98c; indoor types +6), $08/$09 = the
+           routine being dispatched -- leftovers later code reads */
+        {
+            const uint8_t location = ram[CONTRA_RAM_LEVEL_LOCATION_TYPE];
+            const uint8_t type = (uint8_t)(bullet_slot + ((((location & 0x80u) == 0u) && (location != 0u)) ? 6u : 0u));
+            const uint16_t table_addr = (uint16_t)(0xB98Cu + (uint16_t)(uint8_t)(type << 1));
+            uint16_t routine_addr;
+
+            ram[0x10u] = (uint8_t)bullet_index;
+            ram[0x11u] = ram[CONTRA_RAM_PLAYER_BULLET_OWNER + bullet_index];
+            ram[0x0Au] = contra_rom_read_u8(6u, table_addr);
+            ram[0x0Bu] = contra_rom_read_u8(6u, (uint16_t)(table_addr + 1u));
+            routine_addr = (uint16_t)((uint16_t)(ram[0x0Au] | ((uint16_t)ram[0x0Bu] << 8)) +
+                                      (uint16_t)(uint8_t)(ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE + bullet_index] << 1));
+            ram[0x08u] = contra_rom_read_u8(6u, routine_addr);
+            ram[0x09u] = contra_rom_read_u8(6u, (uint16_t)(routine_addr + 1u));
         }
 
         if ((bullet_slot != 0x05u) && (ram[CONTRA_RAM_PLAYER_BULLET_ROUTINE + bullet_index] == 0u))
@@ -5882,17 +5901,17 @@ static void contra_set_player_sprite_and_attrs(ContraCore *core, uint8_t player_
 
     core->ram[CONTRA_RAM_CPU_SPRITE_BUFFER + player_index] = sprite_code;
 
-    if (core->ram[CONTRA_RAM_ELECTROCUTED_TIMER + player_index] != 0u)
-    {
-        effect_palette = 0x02u;
-    }
-    else if ((core->ram[CONTRA_RAM_INVINCIBILITY_TIMER + player_index] != 0u) &&
-             (((uint8_t)(core->ram[CONTRA_RAM_FRAME_COUNTER] ^ contra_player_effect_xor_tbl[player_index]) & 0x04u) != 0u))
-    {
-        effect_palette = 0x05u;
-    }
-
+    /* bank2 set_player_paused_sprite_attr: electrocution ($00 = 2) and the
+       barrier ($00 = 4) flash between attribute 4 and 5 (sprite palette
+       override) on (FRAME_COUNTER ^ player_effect_xor_tbl) & $00 */
     attr = effect_palette;
+    if ((core->ram[CONTRA_RAM_ELECTROCUTED_TIMER + player_index] != 0u) ||
+        (core->ram[CONTRA_RAM_INVINCIBILITY_TIMER + player_index] != 0u))
+    {
+        core->ram[0x00u] = (core->ram[CONTRA_RAM_ELECTROCUTED_TIMER + player_index] != 0u) ? 0x02u : 0x04u;
+        attr = ((((uint8_t)(core->ram[CONTRA_RAM_FRAME_COUNTER] ^ contra_player_effect_xor_tbl[player_index])) &
+                 core->ram[0x00u]) != 0u) ? 0x05u : 0x04u;
+    }
     if ((core->ram[CONTRA_RAM_PLAYER_BG_FLAG_EDGE_DETECT + player_index] & 0x80u) != 0u)
     {
         attr |= 0x20u;
@@ -5903,6 +5922,7 @@ static void contra_set_player_sprite_and_attrs(ContraCore *core, uint8_t player_
         attr |= 0x08u;
     }
 
+    core->ram[0x00u] = attr;
     attr |= (uint8_t)(core->ram[CONTRA_RAM_PLAYER_SPRITE_FLIP + player_index] & 0xC8u);
     core->ram[CONTRA_RAM_SPRITE_ATTR + player_index] = attr;
 }
@@ -10764,6 +10784,7 @@ static void contra_rom_create_roller_with_segment(
     uint8_t *const ram = core->ram;
     int slot;
 
+    ram[0x0Fu] = seg;
     if (ram[CONTRA_RAM_ENEMY_ATTACK_FLAG] == 0u)
     {
         return;
@@ -11183,10 +11204,13 @@ static void contra_rom_indoor_soldier_routine_01(ContraCore *core, uint8_t x)
         }
         else
         {
-            /* roller, spawned 8px below the soldier (bank0:3469) */
-            contra_rom_create_roller(
-                core, ram[CONTRA_RAM_ENEMY_X_POS + x],
-                (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + 8u), 0x00u);
+            /* roller, spawned 8px below the soldier (bank0:3469): add_with_enemy_pos
+               puts the position in $09/$08, and create_roller takes its
+               ENEMY_ATTRIBUTES from $0A -- which this path never sets, so the roller
+               inherits the last collision box height (set_enemy_collision_box) */
+            ram[0x09u] = ram[CONTRA_RAM_ENEMY_X_POS + x];
+            ram[0x08u] = (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + x] + 8u);
+            contra_rom_create_roller(core, ram[0x09u], ram[0x08u], ram[0x0Au]);
         }
     }
 }
@@ -11532,7 +11556,7 @@ static void contra_rom_indoor_roller_gen_routine_01(ContraCore *core, uint8_t x)
 
     if (ram[CONTRA_RAM_INDOOR_ENEMY_ATTACK_COUNT] >= 0x07u)
     {
-        contra_rom_clear_enemy(core, x); /* rollers stop after 7 rounds */
+        contra_rom_remove_enemy(core, x); /* rollers stop after 7 rounds */
         return;
     }
     if ((ram[CONTRA_RAM_FRAME_COUNTER] & 0x01u) == 0u)
@@ -11552,6 +11576,8 @@ static void contra_rom_indoor_roller_gen_routine_01(ContraCore *core, uint8_t x)
     }
     pattern = contra_roller_gen_init_tbl[pidx];
     pattern_len = contra_roller_gen_init_len[pidx];
+    ram[0x10u] = (pidx == 0u) ? 0x34u : 0x6Du; /* roller_gen_init_00 $9634 / _01 $966d */
+    ram[0x11u] = 0x96u;
 
     off = ram[CONTRA_RAM_ENEMY_VAR_1 + x];
     for (guard = 0u; guard < 32u; ++guard) /* burst until a non-zero delay */
@@ -11570,8 +11596,12 @@ static void contra_rom_indoor_roller_gen_routine_01(ContraCore *core, uint8_t x)
         xidx = (uint8_t)((posattr >> 4u) % 7u);
         delay = pattern[off + 1u];
         off = (uint8_t)(off + 2u);
+        ram[0x0Bu] = posattr;
+        ram[0x0Au] = roller_attr; /* ENEMY_ATTRIBUTES for the roller (it lingers in $0A) */
         ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = delay;
         ram[CONTRA_RAM_ENEMY_VAR_1 + x] = off;
+        ram[0x09u] = contra_roller_initial_x_pos_tbl[xidx];
+        ram[0x08u] = 0x70u;
         contra_rom_create_roller_with_segment(
             core, contra_roller_initial_x_pos_tbl[xidx], 0x70u, xidx, roller_attr);
         if (delay != 0u)
@@ -12324,8 +12354,8 @@ static void contra_rom_spinning_bubbles_routine_01(ContraCore *core, uint8_t x)
         ram[CONTRA_RAM_ENEMY_FRAME + x] = (uint8_t)((ram[CONTRA_RAM_ENEMY_FRAME + x] + 1u) % 6u);
     }
     ram[CONTRA_RAM_ENEMY_SPRITES + x] = (uint8_t)(0x6Du + ram[CONTRA_RAM_ENEMY_FRAME + x]);
-    contra_rom_update_enemy_pos(core, x);
-    if ((ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u) || (ram[CONTRA_RAM_ENEMY_VAR_3 + x] >= 0x14u))
+    contra_rom_update_enemy_pos(core, x); /* a removal here does not stop the routine */
+    if (ram[CONTRA_RAM_ENEMY_VAR_3 + x] >= 0x14u)
     {
         return;
     }
@@ -12337,6 +12367,9 @@ static void contra_rom_spinning_bubbles_routine_01(ContraCore *core, uint8_t x)
     }
     ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] = 0x08u;
     ram[CONTRA_RAM_ENEMY_VAR_3 + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_VAR_3 + x] + 1u);
+    ram[0x09u] = ram[CONTRA_RAM_ENEMY_X_POS + x]; /* set_08_09_to_enemy_pos */
+    ram[0x08u] = ram[CONTRA_RAM_ENEMY_Y_POS + x];
+    ram[0x0Au] = ram[CONTRA_RAM_ENEMY_VAR_2 + x]; /* the player to aim at */
     /* aim_var_1_for_quadrant_aim_dir_01: rotate VAR_1 one step on the 24-dir
        wheel toward the ORIGINAL closest player (VAR_2). The ROM's carry exits
        without retuning when no rotation was needed OR the step landed exactly
@@ -20108,66 +20141,23 @@ static void contra_rom_add_enemy_score(ContraCore *core, uint8_t slot, uint8_t p
    enemy's bullet hitbox; on a hit subtract HP (HP >= 0xF0 is invulnerable, e.g.
    the open pill box) and remove the enemy when HP reaches 0. Laser hits consume
    the beam's oldest segment (pass-through). */
-/* set_enemy_collision_box @collision_code_f (bank7:7136): the variable-size
-   bullet hitbox used by the fire beams and rising/standing spiked walls
-   (collision code 0x0F). The box grows with ENEMY_VAR_1 (negated when
-   ENEMY_ATTRIBUTES bit 6 is set); the adj-table placeholder bytes 0xFF/0xFE are
-   replaced by +/-(VAR_1 + 8). Without this the L6/L7 spiked walls were never
-   hit-tested and could not be destroyed. */
-static void contra_rom_collision_code_f_bullet_box(
-    const ContraCore *core, uint8_t slot,
-    uint8_t *box_y, uint8_t *box_x, uint8_t *box_h, uint8_t *box_w)
-{
-    static const uint8_t base[4] = {0xFEu, 0xFEu, 0x04u, 0x04u}; /* bullet box (table 4) */
-    static const uint8_t adj[4][4] = {
-        {0xFAu, 0xF8u, 0x0Cu, 0xFFu}, /* variable width, fixed x (growing right) */
-        {0xFAu, 0xFEu, 0x0Cu, 0xFFu}, /* variable width, variable x (growing left) */
-        {0xF8u, 0xFAu, 0xFFu, 0x0Cu}, /* variable height, fixed y (growing down) */
-        {0xFEu, 0xF6u, 0xFFu, 0x14u}, /* variable height, variable y (growing up) */
-    };
-    const uint8_t *const ram = core->ram;
-    const uint8_t attr = ram[CONTRA_RAM_ENEMY_ATTRIBUTES + slot];
-    const uint8_t var1 = ram[CONTRA_RAM_ENEMY_VAR_1 + slot];
-    const uint8_t ctrl = (uint8_t)(((attr & 0x40u) ? (uint8_t)(0u - var1) : var1) + 0x08u);
-    const uint8_t *const a = adj[((attr >> 4u) & 0x0Cu) >> 2u];
-    uint8_t v[4];
-    int i;
-
-    for (i = 0; i < 4; ++i)
-    {
-        const uint8_t raw = a[i];
-        v[i] = (raw < 0xFEu) ? raw : ((raw == 0xFFu) ? ctrl : (uint8_t)(0u - ctrl));
-    }
-    *box_y = (uint8_t)(v[0] + base[0] + ram[CONTRA_RAM_ENEMY_Y_POS + slot]);
-    *box_x = (uint8_t)(v[1] + base[1] + ram[CONTRA_RAM_ENEMY_X_POS + slot]);
-    *box_h = (uint8_t)(v[2] + base[2]);
-    *box_w = (uint8_t)(v[3] + base[3]);
-}
+static void contra_rom_set_enemy_collision_box(ContraCore *core, uint8_t slot, uint8_t table, uint8_t caller_x);
 
 static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slot)
 {
     uint8_t *const ram = core->ram;
-    const uint8_t code = (uint8_t)(ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + slot] & 0x0Fu);
     uint8_t box_y;
     uint8_t box_x;
     uint8_t box_h;
     uint8_t box_w;
     int bullet;
 
-    if (code >= 15u)
-    {
-        /* collision code 0x0F: variable box (fire beams / spiked walls) */
-        contra_rom_collision_code_f_bullet_box(core, slot, &box_y, &box_x, &box_h, &box_w);
-    }
-    else
-    {
-        const uint8_t *const box = contra_collision_box_codes_04[code];
-
-        box_y = (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + slot] + box[0]);
-        box_x = (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + slot] + box[1]);
-        box_h = box[2];
-        box_w = box[3];
-    }
+    ram[0x10u] = (uint8_t)((ram[CONTRA_RAM_ENEMY_STATE_WIDTH + slot] & 0x30u) << 2);
+    contra_rom_set_enemy_collision_box(core, slot, 0x04u, slot); /* bullet box table */
+    box_y = ram[0x08u];
+    box_x = ram[0x09u];
+    box_h = ram[0x0Au];
+    box_w = ram[0x0Bu];
 
     for (bullet = 0x0F; bullet >= 0; --bullet)
     {
@@ -20481,6 +20471,69 @@ static const uint8_t contra_collision_box_codes_03[15][4] = {
     {0xE4u, 0xF2u, 0x35u, 0x1Cu}, {0xDAu, 0xEDu, 0x4Au, 0x26u},
     {0xE6u, 0xF1u, 0x2Au, 0x1Eu}};
 
+/* bank7 set_enemy_collision_box: the current enemy's collision box for box
+   table `table` (0 player in water, 1 jumping, 2 crouching, 3 standing, 4
+   player bullets), left where the ROM leaves it -- $08 top, $09 left, $0A
+   height, $0B width, $0E/$0F the table address, $11 the caller's X, and $0C
+   for the variable (code $0F) boxes. Later code reads these leftovers (e.g.
+   create_roller's ENEMY_ATTRIBUTES = $0A). */
+static void contra_rom_set_enemy_collision_box(ContraCore *core, uint8_t slot, uint8_t table, uint8_t caller_x)
+{
+    static const uint16_t collision_box_codes_addr[5] = {0xE4F2u, 0xE52Eu, 0xE56Au, 0xE5A6u, 0xE5E2u};
+    static const uint8_t (*const collision_box_codes[5])[4] = {
+        contra_collision_box_codes_00, contra_collision_box_codes_01, contra_collision_box_codes_02,
+        contra_collision_box_codes_03, contra_collision_box_codes_04};
+    static const uint8_t collision_code_f_base_tbl[5][4] = {
+        {0x00u, 0xFBu, 0x0Au, 0x0Au}, {0xF8u, 0xFCu, 0x10u, 0x08u}, {0xF4u, 0xF5u, 0x04u, 0x16u},
+        {0xF1u, 0xFCu, 0x1Du, 0x08u}, {0xFEu, 0xFEu, 0x04u, 0x04u}};
+    static const uint8_t collision_code_f_adj_tbl[4][4] = {
+        {0xFAu, 0xF8u, 0x0Cu, 0xFFu}, /* variable width, fixed x (growing right) */
+        {0xFAu, 0xFEu, 0x0Cu, 0xFFu}, /* variable width, variable x (growing left) */
+        {0xF8u, 0xFAu, 0xFFu, 0x0Cu}, /* variable height, fixed y (growing down) */
+        {0xFEu, 0xF6u, 0xFFu, 0x14u}, /* variable height, variable y (growing up) */
+    };
+    uint8_t *const ram = core->ram;
+    const uint8_t code = (uint8_t)(ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + slot] & 0x0Fu);
+    const uint8_t *adj;
+    uint8_t v[4];
+    int i;
+
+    ram[0x11u] = caller_x;
+    ram[0x0Eu] = (uint8_t)(collision_box_codes_addr[table] & 0xFFu);
+    ram[0x0Fu] = (uint8_t)(collision_box_codes_addr[table] >> 8);
+    if (code != 0x0Fu)
+    {
+        const uint8_t *const box = collision_box_codes[table][code];
+
+        ram[0x08u] = (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + slot] + box[0]);
+        ram[0x09u] = (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + slot] + box[1]);
+        ram[0x0Au] = box[2];
+        ram[0x0Bu] = box[3];
+        return;
+    }
+
+    /* @collision_code_f: fire beams and spiked walls grow with ENEMY_VAR_1
+       (negated when ENEMY_ATTRIBUTES bit 6 is set); the adjustment table's
+       placeholders $FF/$FE become +/-$0C */
+    {
+        const uint8_t attr = ram[CONTRA_RAM_ENEMY_ATTRIBUTES + slot];
+        const uint8_t var1 = ram[CONTRA_RAM_ENEMY_VAR_1 + slot];
+
+        ram[0x0Cu] = (uint8_t)((((attr & 0x40u) != 0u) ? (uint8_t)(0u - var1) : var1) + 0x08u);
+        adj = collision_code_f_adj_tbl[((attr >> 4u) & 0x0Cu) >> 2u];
+    }
+    for (i = 0; i < 4; ++i)
+    {
+        const uint8_t raw = adj[i];
+
+        v[i] = (raw < 0xFEu) ? raw : ((raw == 0xFFu) ? ram[0x0Cu] : (uint8_t)(0u - ram[0x0Cu]));
+    }
+    ram[0x08u] = (uint8_t)(v[0] + collision_code_f_base_tbl[table][0] + ram[CONTRA_RAM_ENEMY_Y_POS + slot]);
+    ram[0x09u] = (uint8_t)(v[1] + collision_code_f_base_tbl[table][1] + ram[CONTRA_RAM_ENEMY_X_POS + slot]);
+    ram[0x0Au] = (uint8_t)(v[2] + collision_code_f_base_tbl[table][2]);
+    ram[0x0Bu] = (uint8_t)(v[3] + collision_code_f_base_tbl[table][3]);
+}
+
 /* check_players_collision (bank7.asm:6671): if a normal-state player's body
    overlaps this enemy's collision box, kill the player (barrier invincibility
    destroys the enemy instead; new-life invincibility passes through). The
@@ -20491,20 +20544,12 @@ static const uint8_t contra_collision_box_codes_03[15][4] = {
 static void contra_rom_check_players_collision(ContraCore *core, uint8_t slot)
 {
     uint8_t *const ram = core->ram;
-    const uint8_t code = (uint8_t)(ram[CONTRA_RAM_ENEMY_SCORE_COLLISION + slot] & 0x0Fu);
     int player;
 
-    if (code >= 15u)
-    {
-        return;
-    }
     for (player = 1; player >= 0; --player)
     {
         const unsigned p = (unsigned)player;
-        const uint8_t (*tbl)[4];
-        const uint8_t *box;
-        uint8_t box_y;
-        uint8_t box_x;
+        uint8_t table;
 
         if (ram[CONTRA_RAM_PLAYER_STATE + p] != 0x01u)
         {
@@ -20566,28 +20611,26 @@ static void contra_rom_check_players_collision(ContraCore *core, uint8_t slot)
             {
                 continue; /* invisible while crouching in water -- no collision */
             }
-            tbl = contra_collision_box_codes_00; /* in water */
+            table = 0x00u; /* in water */
         }
         else if (ram[CONTRA_RAM_PLAYER_JUMP_STATUS + p] != 0u)
         {
-            tbl = contra_collision_box_codes_01; /* jumping */
+            table = 0x01u; /* jumping */
         }
         else if (ram[CONTRA_RAM_PLAYER_SPRITE_CODE + p] == 0x17u)
         {
-            tbl = contra_collision_box_codes_02; /* crouching (lower/shorter box) */
+            table = 0x02u; /* crouching (lower/shorter box) */
         }
         else
         {
-            tbl = contra_collision_box_codes_03; /* standing */
+            table = 0x03u; /* standing */
         }
-        box = tbl[code];
-        box_y = (uint8_t)(ram[CONTRA_RAM_ENEMY_Y_POS + slot] + box[0]);
-        box_x = (uint8_t)(ram[CONTRA_RAM_ENEMY_X_POS + slot] + box[1]);
-        if ((uint8_t)(ram[CONTRA_RAM_SPRITE_Y_POS + p] - box_y) >= box[2])
+        contra_rom_set_enemy_collision_box(core, slot, table, (uint8_t)p);
+        if ((uint8_t)(ram[CONTRA_RAM_SPRITE_Y_POS + p] - ram[0x08u]) >= ram[0x0Au])
         {
             continue;
         }
-        if ((uint8_t)(ram[CONTRA_RAM_SPRITE_X_POS + p] - box_x) >= box[3])
+        if ((uint8_t)(ram[CONTRA_RAM_SPRITE_X_POS + p] - ram[0x09u]) >= ram[0x0Bu])
         {
             continue; /* outside the box */
         }
