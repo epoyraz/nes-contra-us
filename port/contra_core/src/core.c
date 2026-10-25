@@ -2259,22 +2259,26 @@ static void contra_load_bank_3_handle_scroll(ContraCore *core)
 /* bank7 load_bank_2_alternate_tile_loading / alternate_tile_loading: stream
    the level's alternate CHR 32 bytes per frame through the graphics buffer
    (block: mode 1, $20 bytes, 1 block), only while the buffer is < $10 full */
-static void contra_load_bank_2_alternate_tile_loading(ContraCore *core)
+/* returns the Y the ROM routine exits with (callers leak it, e.g. into
+   init_APU_channels' `sty $f7`) */
+static uint8_t contra_load_bank_2_alternate_tile_loading(ContraCore *core)
 {
     uint8_t *const ram = core->ram;
     uint8_t *const buf = &ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER];
     uint8_t x;
-    uint8_t y;
+    uint8_t y = 0x02u;
 
     contra_load_bank_number(core, 0x02u);
     if (ram[CONTRA_RAM_ALT_GRAPHIC_DATA_LOADING_FLAG] == 0u)
     {
-        return;
+        return 0x02u; /* ldy #$02 from load_bank_2_alternate_tile_loading */
     }
     if ((ram[CONTRA_RAM_ALT_GRAPHIC_DATA_LOADING_FLAG] & 0x80u) == 0u)
     {
         const uint8_t level = ram[CONTRA_RAM_CURRENT_LEVEL];
         const uint16_t entry = (uint16_t)(0xCD2Cu + /* alt_graphic_data_ptr_tbl */ (uint16_t)(uint8_t)((level << 2) + level));
+
+        y = (uint8_t)((level << 2) + level); /* tay */
 
         ram[CONTRA_RAM_ALT_GFX_PPU_ADDR_LO] = contra_rom_read_u8(7u, entry);
         ram[CONTRA_RAM_ALT_GFX_PPU_ADDR_HI] = contra_rom_read_u8(7u, (uint16_t)(entry + 1u));
@@ -2283,7 +2287,7 @@ static void contra_load_bank_2_alternate_tile_loading(ContraCore *core)
         if (contra_rom_read_u8(7u, (uint16_t)(entry + 4u)) == 0u)
         {
             ram[CONTRA_RAM_ALT_GRAPHIC_DATA_LOADING_FLAG] = 0x00u;
-            return;
+            return y;
         }
         ram[CONTRA_RAM_ALT_GFX_CHUNK_COUNT] = contra_rom_read_u8(7u, (uint16_t)(entry + 4u));
         ram[CONTRA_RAM_ALT_GRAPHIC_DATA_LOADING_FLAG] = 0x80u;
@@ -2293,7 +2297,7 @@ static void contra_load_bank_2_alternate_tile_loading(ContraCore *core)
     x = ram[CONTRA_RAM_GRAPHICS_BUFFER_OFFSET];
     if (x >= 0x10u)
     {
-        return;
+        return y;
     }
     buf[x] = 0x01u;
     buf[(uint8_t)(x + 2u)] = 0x01u;
@@ -2320,7 +2324,7 @@ static void contra_load_bank_2_alternate_tile_loading(ContraCore *core)
     if (ram[CONTRA_RAM_ALT_GFX_CHUNK_COUNT] == 0u)
     {
         ram[CONTRA_RAM_ALT_GRAPHIC_DATA_LOADING_FLAG] = 0x00u;
-        return;
+        return y;
     }
     {
         uint16_t addr = (uint16_t)(ram[CONTRA_RAM_ALT_GFX_READ_ADDR_LO] |
@@ -2334,6 +2338,7 @@ static void contra_load_bank_2_alternate_tile_loading(ContraCore *core)
         ram[CONTRA_RAM_ALT_GFX_PPU_ADDR_LO] = (uint8_t)(addr & 0xFFu);
         ram[CONTRA_RAM_ALT_GFX_PPU_ADDR_HI] = (uint8_t)(addr >> 8);
     }
+    return y;
 }
 
 /* ==========================================================================
@@ -5284,77 +5289,49 @@ static uint8_t contra_get_outdoor_horizontal_bg_collision(
     return (collision_code == 3u) ? 0x80u : collision_code;
 }
 
+/* get_enemy_bg_collision -> bg_collision_logic -> read_bg_collision_byte
+   (bank7:6421-6529) with $10 = 0: the collision code at screen (x, y) read
+   from the BG_COLLISION_DATA ring ($0680) that set_supertile_bg_collisions /
+   set_tile_collision maintain. */
+static uint8_t contra_rom_bg_collision_logic(const ContraCore *core, uint8_t screen_x, uint8_t screen_y)
+{
+    static const uint8_t collision_code_lookup_tbl[4] = {0x00u, 0x01u, 0x02u, 0x80u};
+    const uint8_t *const ram = core->ram;
+    const unsigned y_sum = (unsigned)screen_y + ram[CONTRA_RAM_VERTICAL_SCROLL];
+    const unsigned x_sum = (unsigned)screen_x + ram[CONTRA_RAM_HORIZONTAL_SCROLL];
+    uint8_t row = (uint8_t)y_sum;
+    uint8_t nametable = (uint8_t)(ram[CONTRA_RAM_PPUCTRL_SETTINGS] & 0x01u);
+    uint8_t offset;
+    uint8_t bits;
+
+    /* @vert_overflow: the add carried or landed on the attribute rows -- the
+       carry is set on both paths, so adc #$0f adds #$10 */
+    if ((y_sum > 0xFFu) || (row >= 0xF0u))
+    {
+        row = (uint8_t)(row + 0x10u);
+    }
+    if (x_sum > 0xFFu)
+    {
+        nametable ^= 0x01u; /* HORIZONTAL_SCROLL + X carried into the other nametable */
+    }
+    offset = (uint8_t)(((row >> 2u) & 0x3Cu) | ((uint8_t)x_sum >> 6u) | (nametable != 0u ? 0x40u : 0x00u));
+    if (screen_y >= 0xE0u)
+    {
+        return 0x00u; /* read_bg_collision_byte: $15 past the last bg collision row */
+    }
+    bits = (uint8_t)(ram[0x680u + offset] >> (6u - (((uint8_t)x_sum >> 3u) & 0x06u)));
+    return collision_code_lookup_tbl[bits & 0x03u];
+}
+
 static uint8_t contra_get_outdoor_bg_collision(
     const ContraCore *core,
     uint8_t screen_x,
     uint8_t screen_y
 )
 {
-    uint8_t pattern_index;
-    uint8_t collision_code;
-
-    /* read_bg_collision_byte (bank7:6404): the raw screen Y (pre-scroll, $15)
-       past 0xE0 is "past last bg collision row" -> empty. On the waterfall
-       this is what lets falling rocks drop off the bottom instead of bouncing
-       on the last supertile row. */
-    if (screen_y >= 0xE0u)
-    {
-        return 0u;
-    }
-
-    if (core->ram[CONTRA_RAM_LEVEL_SCROLLING_TYPE] == 0u)
-    {
-        return contra_get_outdoor_horizontal_bg_collision(core, screen_x, screen_y);
-    }
-
-    {
-        /* bg_collision_logic (bank7:6439): $11 = Y + VERTICAL_SCROLL, +0x10 when
-           the 8-bit add carries OR lands in 0xF0..0xFF (skipping the attribute
-           rows). BG_COLLISION_DATA is a 15-row ring updated as the level streams:
-           a row belongs to the NEXT screen once it has fully scrolled in at the
-           window top (row*16 >= VERTICAL_SCROLL), and still holds the CURRENT
-           screen's stale data otherwise -- including rows that have scrolled off
-           the bottom. The waterfall soldier generator depends on the stale rows:
-           probes at y=0..6 wrap to ring row 12 (only partially revealed for the
-           next screen) and find the current screen's lone left-column floor
-           (frame 20968), while freshly streamed top-of-screen soldiers stand on
-           fully-revealed next-screen rows (frame 16121). */
-        const uint8_t screen_number = core->ram[CONTRA_RAM_LEVEL_SCREEN_NUMBER];
-        const uint8_t vs = core->ram[CONTRA_RAM_VERTICAL_SCROLL];
-        /* the next screen's rows stream in at the window top as the level
-           scrolls; rows at/below 240-scroll_off have been written. At off=0
-           (unscrolled screen) the boundary is 240: no ring row belongs to the
-           next screen yet. */
-        const uint16_t streamed_boundary =
-            (uint16_t)(240u - core->ram[CONTRA_RAM_LEVEL_SCREEN_SCROLL_OFFSET]);
-        const uint16_t sum = (uint16_t)screen_y + vs;
-        uint8_t row_px = (uint8_t)sum;
-
-        if ((sum > 0xFFu) || (row_px >= 0xF0u))
-        {
-            row_px = (uint8_t)(row_px + 0x10u);
-        }
-        /* quadrant snap: BG_COLLISION_DATA samples only the top-left tile of
-           each 16x16 quadrant (set_tile_collision, bank7:6222) */
-        {
-            const uint8_t data_screen = ((uint16_t)(row_px & 0xF0u) >= streamed_boundary)
-                ? (uint8_t)(screen_number + 1u)
-                : screen_number;
-            const uint16_t world_tile_y =
-                (uint16_t)((uint16_t)data_screen * 30u +
-                           (((uint16_t)row_px >> 3u) & ~(uint16_t)1u));
-
-            if (!contra_read_level_collision_pattern_index(
-                    core, (uint16_t)((screen_x >> 3u) & 0x1Eu), world_tile_y, &pattern_index))
-            {
-                return 0u;
-            }
-        }
-    }
-
-    collision_code = contra_classify_pattern_collision(core, pattern_index);
-    return (collision_code == 3u) ? 0x80u : collision_code;
+    return contra_rom_bg_collision_logic(core, screen_x, screen_y);
 }
+
 
 static uint8_t contra_get_player_bg_collision_code(const ContraCore *core, uint8_t player_index)
 {
@@ -7429,12 +7406,18 @@ static void contra_set_a_as_current_level_routine(ContraCore *core, uint8_t leve
     core->ram[CONTRA_RAM_END_LEVEL_ROUTINE_INDEX] = 0x00u;
 }
 
-/* bank7 set_graphics_zero_mode: only the mode and the buffer's first byte */
-static void contra_set_graphics_zero_mode(ContraCore *core)
+/* bank7 set_graphics_zero_mode: only the mode and the buffer's first byte;
+   `y` is the caller's leftover Y that init_APU_channels backs up in $f7 */
+static void contra_set_graphics_zero_mode_y(ContraCore *core, uint8_t y)
 {
     core->ram[CONTRA_RAM_GRAPHICS_BUFFER_MODE] = 0x00u;
     core->ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER] = 0x00u;
-    contra_init_apu_channels(core, 0x03u); /* Y = 3 from load_bank_3_run_end_lvl_sequence_routine */
+    contra_init_apu_channels(core, y);
+}
+
+static void contra_set_graphics_zero_mode(ContraCore *core)
+{
+    contra_set_graphics_zero_mode_y(core, 0x03u); /* Y = 3 from load_bank_3_run_end_lvl_sequence_routine */
 }
 
 static void contra_clear_level_runtime_memory(ContraCore *core)
@@ -8830,11 +8813,9 @@ static void contra_rom_sniper_routine_02(ContraCore *core, uint8_t x)
     uint8_t attr;
 
     contra_rom_sniper_set_sprite(core, x);
+    /* zombie tail: remove_enemy_far is `jmp remove_enemy`, which RTSes back
+       here -- the removed sniper still runs its attack delay this frame */
     contra_rom_add_scroll_to_enemy_pos(core, x);
-    if (ram[CONTRA_RAM_ENEMY_ROUTINE + x] == 0u)
-    {
-        return;
-    }
     ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] =
         (uint8_t)(ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] - 1u);
     if (ram[CONTRA_RAM_ENEMY_ATTACK_DELAY + x] != 0u)
@@ -20209,6 +20190,20 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
         {
             continue;
         }
+        /* @bullet_enemy_collision (bank7:7002): |ENEMY_X_POS - bullet x| >= $80
+           is a box overlap through the 8-bit wrap (enemy at the right edge,
+           bullet at the left) -- not a hit, keep looping */
+        {
+            const uint8_t enemy_x = ram[CONTRA_RAM_ENEMY_X_POS + slot];
+            const uint8_t bullet_x = ram[CONTRA_RAM_PLAYER_BULLET_X_POS + b];
+            const uint8_t dx = (enemy_x >= bullet_x) ? (uint8_t)(enemy_x - bullet_x)
+                                                     : (uint8_t)(bullet_x - enemy_x);
+
+            if (dx >= 0x80u)
+            {
+                continue;
+            }
+        }
 
         /* hit -- the ROM's loop RTSes after the first overlapping bullet
            (bank7:7035), so an enemy takes at most ONE bullet per frame; the
@@ -21314,7 +21309,7 @@ static void contra_rom_exe_soldier_generation(ContraCore *core)
     }
 }
 
-static void contra_run_level_enemy_logic(ContraCore *core)
+static uint8_t contra_run_level_enemy_logic(ContraCore *core)
 {
     contra_load_bank_3_handle_scroll(core);
     contra_rom_exe_all_enemy_routine(core);
@@ -21329,7 +21324,7 @@ static void contra_run_level_enemy_logic(ContraCore *core)
     }
     contra_rom_exe_soldier_generation(core);
     contra_load_palette_indexes(core);
-    contra_load_bank_2_alternate_tile_loading(core);
+    return contra_load_bank_2_alternate_tile_loading(core);
 }
 
 static void contra_init_game_over(ContraCore *core)
@@ -21338,10 +21333,12 @@ static void contra_init_game_over(ContraCore *core)
     contra_set_a_as_current_level_routine(core, 0x0Au);
 }
 
-static void contra_set_to_level_routine_05(ContraCore *core)
+/* falls through into set_graphics_zero_mode (bank7:3232) */
+static void contra_set_to_level_routine_05(ContraCore *core, uint8_t y)
 {
     core->ram[CONTRA_RAM_BOSS_DEFEATED_FLAG] = 0x00u;
     contra_set_a_as_current_level_routine(core, 0x05u);
+    contra_set_graphics_zero_mode_y(core, y);
 }
 
 static bool contra_check_game_over_run_enemy_logic(ContraCore *core)
@@ -21914,14 +21911,15 @@ static void contra_level_routine_09(ContraCore *core)
 
 static void contra_level_routine_0a(ContraCore *core)
 {
-    contra_run_level_enemy_logic(core);
+    const uint8_t y = contra_run_level_enemy_logic(core);
+
     core->ram[CONTRA_RAM_GAME_OVER_DELAY_TIMER] = (uint8_t)(core->ram[CONTRA_RAM_GAME_OVER_DELAY_TIMER] - 1u);
     if (core->ram[CONTRA_RAM_GAME_OVER_DELAY_TIMER] != 0u)
     {
         return;
     }
 
-    contra_set_to_level_routine_05(core);
+    contra_set_to_level_routine_05(core, y);
 }
 
 static void contra_run_level_routine(ContraCore *core)

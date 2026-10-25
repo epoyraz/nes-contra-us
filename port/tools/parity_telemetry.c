@@ -202,7 +202,7 @@ static void load_symbols(const char *path)
         if (sscanf(p, " %63s ; $%x", name, &addr) == 2 && addr < 0x800u)
         {
             symbols[symbol_count].addr = (uint16_t)addr;
-            snprintf(symbols[symbol_count].name, sizeof(symbols[symbol_count].name), "%s", name);
+            snprintf(symbols[symbol_count].name, sizeof(symbols[symbol_count].name), "%.*s", (int)sizeof(symbols[symbol_count].name) - 1, name);
             ++symbol_count;
         }
     }
