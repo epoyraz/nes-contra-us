@@ -56,6 +56,84 @@ static ContraInputSnapshot contra_collect_keyboard_input(void)
     return input;
 }
 
+/* Up to two pads, by connection order: the first drives player 1, the second
+   player 2. Buttons go by their printed labels (SDL's default for Nintendo
+   layouts): SNES A/X -> NES A (jump), SNES B/Y -> NES B (fire). */
+static SDL_GameController *contra_pads[2];
+
+static void contra_open_pad(int device_index)
+{
+    size_t slot;
+
+    if (SDL_IsGameController(device_index) == SDL_FALSE)
+    {
+        return;
+    }
+    for (slot = 0u; slot < 2u; ++slot)
+    {
+        if (contra_pads[slot] == NULL)
+        {
+            contra_pads[slot] = SDL_GameControllerOpen(device_index);
+            if (contra_pads[slot] != NULL)
+            {
+                fprintf(stderr, "controller %u: %s\n", (unsigned)slot + 1u,
+                        SDL_GameControllerName(contra_pads[slot]));
+            }
+            return;
+        }
+    }
+}
+
+static void contra_close_pad(SDL_JoystickID instance_id)
+{
+    size_t slot;
+
+    for (slot = 0u; slot < 2u; ++slot)
+    {
+        if ((contra_pads[slot] != NULL) &&
+            (SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(contra_pads[slot])) == instance_id))
+        {
+            SDL_GameControllerClose(contra_pads[slot]);
+            contra_pads[slot] = NULL;
+        }
+    }
+}
+
+static uint8_t contra_collect_pad_input(SDL_GameController *pad)
+{
+    static const struct
+    {
+        SDL_GameControllerButton button;
+        uint8_t contra_button;
+    } map[] = {
+        {SDL_CONTROLLER_BUTTON_DPAD_RIGHT, CONTRA_BUTTON_RIGHT},
+        {SDL_CONTROLLER_BUTTON_DPAD_LEFT, CONTRA_BUTTON_LEFT},
+        {SDL_CONTROLLER_BUTTON_DPAD_DOWN, CONTRA_BUTTON_DOWN},
+        {SDL_CONTROLLER_BUTTON_DPAD_UP, CONTRA_BUTTON_UP},
+        {SDL_CONTROLLER_BUTTON_START, CONTRA_BUTTON_START},
+        {SDL_CONTROLLER_BUTTON_BACK, CONTRA_BUTTON_SELECT},
+        {SDL_CONTROLLER_BUTTON_A, CONTRA_BUTTON_A},
+        {SDL_CONTROLLER_BUTTON_X, CONTRA_BUTTON_A},
+        {SDL_CONTROLLER_BUTTON_B, CONTRA_BUTTON_B},
+        {SDL_CONTROLLER_BUTTON_Y, CONTRA_BUTTON_B},
+    };
+    uint8_t buttons = 0u;
+    size_t i;
+
+    if (pad == NULL)
+    {
+        return 0u;
+    }
+    for (i = 0u; i < sizeof(map) / sizeof(map[0]); ++i)
+    {
+        if (SDL_GameControllerGetButton(pad, map[i].button) != 0u)
+        {
+            buttons |= map[i].contra_button;
+        }
+    }
+    return buttons;
+}
+
 int main(int argc, char **argv)
 {
     ContraCore core;
@@ -73,7 +151,7 @@ int main(int argc, char **argv)
 
     SDL_SetMainReady();
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0)
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMECONTROLLER) != 0)
     {
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return 1;
@@ -175,9 +253,19 @@ int main(int argc, char **argv)
             {
                 running = false;
             }
+            else if (event.type == SDL_CONTROLLERDEVICEADDED)
+            {
+                contra_open_pad(event.cdevice.which);
+            }
+            else if (event.type == SDL_CONTROLLERDEVICEREMOVED)
+            {
+                contra_close_pad(event.cdevice.which);
+            }
         }
 
         input = contra_collect_keyboard_input();
+        input.player[0] |= contra_collect_pad_input(contra_pads[0]);
+        input.player[1] |= contra_collect_pad_input(contra_pads[1]);
         contra_core_set_input(&core, &input);
 
         while ((accumulator_seconds >= frame_step_seconds) && (sim_steps < 5))

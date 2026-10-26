@@ -1865,7 +1865,7 @@ static bool test_level8_alien_guardian_runs_its_routine_set(void)
     CHECK(core.ram[CONTRA_RAM_AUTO_SCROLL_TIMER_01] != 0x00u);
 
     /* one full mouth cycle (0x20 frames) opens the mouth and stamps the
-       jaw super-tiles into the overlay cache */
+       jaw super-tiles through CPU_GRAPHICS_BUFFER (VAR_2 = 0: drawn) */
     for (frame = 0u; frame < 0x21u; ++frame)
     {
         step_no_input(&core);
@@ -1874,7 +1874,7 @@ static bool test_level8_alien_guardian_runs_its_routine_set(void)
     CHECK(core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x02u);
     CHECK(core.ram[CONTRA_RAM_ENEMY_VAR_1 + slot] == 0x92u);
     CHECK(core.ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + slot] == 0x02u);
-    CHECK(core.l7_supertile_update_count > 0u);
+    CHECK(core.ram[CONTRA_RAM_ENEMY_VAR_2 + slot] == 0x00u);
     return true;
 }
 
@@ -2071,7 +2071,9 @@ static bool test_level6_boss_robot_not_misrouted_to_level3_or_level2(void)
     step_no_input(&core);
     CHECK(core.ram[CONTRA_RAM_ENEMY_ROUTINE + slot] == 0x03u);
     CHECK(find_first_active_enemy_type(&core, 0x14u, &projectile_slot));
-    CHECK(core.ram[CONTRA_RAM_ENEMY_X_POS + projectile_slot] == 0xA0u);
+    /* create_spiked_projectile: X + #$f0 overflows for X = #$80, and that
+       carry rides into the facing-right `adc #$30` (#$70 + #$30 + 1) */
+    CHECK(core.ram[CONTRA_RAM_ENEMY_X_POS + projectile_slot] == 0xA1u);
     CHECK(core.ram[CONTRA_RAM_ENEMY_Y_POS + projectile_slot] == 0x83u);
 
     core.ram[CONTRA_RAM_ENEMY_TYPE + slot] = 0x13u;
