@@ -1,0 +1,36 @@
+web/build.ps1
+  s_d5aecae3542bf9::t_ae0a970702a9e8 4-6,41-42,51-52
+web/controller.js
+  s_d5aecae3542bf9::t_a7fafab29e2d0b 669,675-777,780-785
+web/build.sh
+  s_d5aecae3542bf9::t_0570f0a0294b1d 6-9,48-49,53-54
+web/deploy-pages.ps1
+  s_d5aecae3542bf9::t_3dfb68162e173c 31,42
+  s_d5aecae3542bf9::t_f3140b6237a7b5 7-8
+web/styles.css
+  s_d5aecae3542bf9::t_a7fafab29e2d0b 757-781
+web/pages-workflow.yml
+  s_d5aecae3542bf9::t_3dfb68162e173c 8-10
+tools/mesen_play_recorder.lua
+  s_d5aecae3542bf9::t_5aaef93a73a5d0 62-66,304-316
+web/README.md
+  s_d5aecae3542bf9::t_f49eb95b395e83 29-33,54,74-75
+web/dist/contra.js
+  s_d5aecae3542bf9::t_7ad123afed6cb9 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c2b2d2408ee119cbabf2e09d59db3901dc1e2e34",
+  "prompts": {},
+  "sessions": {
+    "s_d5aecae3542bf9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3a9c687b-8fc3-4aca-a14d-ef7e5296862d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Enes Poyraz <epoyraz.eth@googlemail.com>"
+    }
+  }
+}
