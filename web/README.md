@@ -26,9 +26,11 @@ RGBA each frame and the JS loop copies it straight from wasm memory onto the
 canvas with `putImageData`. Input flows the other way: JS computes the NES
 button bitmask and calls the exported `contra_web_set_input`.
 
-`baserom.nes` (CHR / graphics data the core reads at startup) is **embedded into
-the build** via Emscripten's `--preload-file`; it is not committed (it stays
-git-ignored). You need it at the repo root to build.
+The game ROM is **not** part of the build or the site. On first visit the page
+asks the player for their own Contra (USA) `.nes` file, checks its SHA-1, keeps
+it in the browser's IndexedDB (so it is asked for only once) and writes it into
+Emscripten's in-memory file system as `baserom.nes`, where the core reads its
+graphics and data tables. The ROM never leaves the player's machine.
 
 ## Build
 
@@ -49,7 +51,7 @@ Add `-Debug` / `--debug` for an `-O0` build with assertions.
 
 ## Run
 
-Serve `web/` over HTTP (the `.wasm`/`.data` won't load from `file://`):
+Serve `web/` over HTTP (the `.wasm` won't load from `file://`):
 
 ```bash
 python -m http.server -d web 8000
@@ -69,9 +71,8 @@ Then open <http://localhost:8000/>.
 
 ## Deploy to GitHub Pages
 
-`baserom.nes` is embedded into the build and is git-ignored, so GitHub Pages
-can't build this in CI. Instead, build locally and publish the artifacts to the
-`gh-pages` branch (served at the branch root):
+Build locally and publish the artifacts to the `gh-pages` branch (served at the
+branch root):
 
 ```powershell
 pwsh web/deploy-pages.ps1               # build + publish to the `fork` remote

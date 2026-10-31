@@ -5,9 +5,9 @@
 # why it lives under web/ rather than .github/workflows/ on those branches).
 #
 # Why Actions instead of the classic branch build: the legacy Pages builder can
-# stall/err out, and (unlike CI) we can't rebuild here anyway — the wasm bundle
-# embeds the git-ignored baserom.nes. So we just publish what's already on the
-# branch. Requires Pages "Build and deployment > Source = GitHub Actions".
+# stall/err out, and the bundle is built locally with Emscripten anyway. So we
+# just publish what's already on the branch. (The game ROM is not part of the
+# site: players load their own copy in the browser.) Requires Pages "Build and deployment > Source = GitHub Actions".
 name: Deploy gh-pages
 
 on:

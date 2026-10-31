@@ -666,18 +666,123 @@
     return;
   }
 
-  /* Resolve contra.wasm / contra.data relative to contra.js. Emscripten's
-     preload-data loader otherwise fetches contra.data relative to the HTML page
-     (a 404 when the build lives in dist/, which leaves the module promise
-     pending forever). */
+  /* Resolve contra.wasm relative to contra.js (the build lives in dist/). */
   var moduleBase = (function () {
     var s = document.querySelector('script[src$="contra.js"]');
     return s ? s.src.replace(/contra\.js(\?.*)?$/, "") : "";
   })();
 
+  /* The ROM is not distributed with this page: the player supplies their own
+     Contra (USA) cartridge dump. It is checked, kept in this browser's
+     IndexedDB (so it is asked for only once) and never uploaded anywhere. The
+     core reads its graphics and data tables from it. */
+  var ROM_SHA1 = "c9ea66bb7cb30ad5343f1721b1d4d3219859319b";
+  var ROM_DB = "contra-port";
+  var ROM_STORE = "rom";
+
+  function sha1Hex(bytes) {
+    return crypto.subtle.digest("SHA-1", bytes).then(function (digest) {
+      return Array.prototype.map.call(new Uint8Array(digest), function (b) {
+        return ("0" + b.toString(16)).slice(-2);
+      }).join("");
+    });
+  }
+
+  function openRomDb() {
+    return new Promise(function (resolve, reject) {
+      var req = indexedDB.open(ROM_DB, 1);
+      req.onupgradeneeded = function () { req.result.createObjectStore(ROM_STORE); };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+
+  function loadSavedRom() {
+    return openRomDb().then(function (db) {
+      return new Promise(function (resolve) {
+        var req = db.transaction(ROM_STORE, "readonly").objectStore(ROM_STORE).get("contra");
+        req.onsuccess = function () { resolve(req.result ? new Uint8Array(req.result) : null); };
+        req.onerror = function () { resolve(null); };
+      });
+    }).catch(function () { return null; });
+  }
+
+  function saveRom(bytes) {
+    return openRomDb().then(function (db) {
+      db.transaction(ROM_STORE, "readwrite").objectStore(ROM_STORE).put(bytes.buffer, "contra");
+    }).catch(function () { /* private mode etc.: just ask again next time */ });
+  }
+
+  function checkRom(bytes) {
+    return sha1Hex(bytes).then(function (hex) { return hex === ROM_SHA1; });
+  }
+
+  /* Ask for the ROM in the loading panel; resolves with its verified bytes. */
+  function askForRom(message) {
+    var panel = document.getElementById("loading");
+    return new Promise(function (resolve) {
+      panel.style.display = "flex";
+      panel.classList.add("rom-picker");
+      panel.innerHTML = "";
+      var box = document.createElement("div");
+      box.className = "rom-box";
+      var text = document.createElement("p");
+      text.textContent = message ||
+        "This port needs your own copy of the Contra (USA) NES ROM. " +
+        "It stays in your browser and is never uploaded.";
+      var input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".nes";
+      var label = document.createElement("label");
+      label.className = "lobby-btn";
+      label.textContent = "Choose Contra (USA) .nes file";
+      label.appendChild(input);
+      var error = document.createElement("p");
+      error.className = "rom-error";
+      box.appendChild(text);
+      box.appendChild(label);
+      box.appendChild(error);
+      panel.appendChild(box);
+      input.addEventListener("change", function () {
+        var file = input.files && input.files[0];
+        if (!file) {
+          return;
+        }
+        file.arrayBuffer().then(function (buf) {
+          var bytes = new Uint8Array(buf);
+          return checkRom(bytes).then(function (ok) {
+            if (!ok) {
+              error.textContent = "That file is not the Contra (USA) ROM this port expects.";
+              input.value = "";
+              return;
+            }
+            panel.classList.remove("rom-picker");
+            panel.innerHTML = "Loading\u2026";
+            saveRom(bytes);
+            resolve(bytes);
+          });
+        });
+      });
+    });
+  }
+
+  function obtainRom() {
+    return loadSavedRom().then(function (saved) {
+      if (!saved) {
+        return askForRom();
+      }
+      return checkRom(saved).then(function (ok) { return ok ? saved : askForRom(); });
+    });
+  }
+
   ContraModule({
     locateFile: function (path) { return moduleBase + path; }
-  }).then(start).catch(function (err) {
+  }).then(function (Module) {
+    return obtainRom().then(function (rom) {
+      Module.FS.writeFile("/baserom.nes", rom);
+      start(Module);
+    });
+  }).catch(function (err) {
     var msg = document.getElementById("loading");
     if (msg) {
       msg.textContent = "Failed to start: " + err;

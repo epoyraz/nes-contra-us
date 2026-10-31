@@ -4,8 +4,8 @@
 # (index.html, styles.css, controller.js, net.js, dist/*, .nojekyll) to the `gh-pages`
 # branch, which GitHub Pages serves at the branch root.
 #
-# GitHub Pages can't build this itself: the build embeds baserom.nes, which is
-# git-ignored and never committed. So we build locally and push the artifacts.
+# The bundle is built locally with Emscripten and the artifacts are pushed. The
+# game ROM is never part of it: players load their own copy in the browser.
 #
 #   pwsh web/deploy-pages.ps1                 # build + deploy to `fork` gh-pages
 #   pwsh web/deploy-pages.ps1 -SkipBuild      # reuse the existing web/dist
@@ -28,7 +28,7 @@ $DistDir   = Join-Path $ScriptDir "dist"
 
 # 1. Build (unless told to reuse the existing dist).
 if ($SkipBuild) {
-  if (-not (Test-Path (Join-Path $DistDir "contra.data"))) {
+  if (-not (Test-Path (Join-Path $DistDir "contra.wasm"))) {
     throw "web/dist is missing or incomplete; run without -SkipBuild to build it."
   }
   Write-Output "Skipping build; using existing web/dist."
@@ -39,7 +39,7 @@ if ($SkipBuild) {
 
 # Files that make up the served site.
 $RuntimeFiles = @("index.html", "styles.css", "controller.js", "net.js")
-$DistFiles    = @("contra.js", "contra.wasm", "contra.data")
+$DistFiles    = @("contra.js", "contra.wasm")
 $WorkflowTemplate = Join-Path $ScriptDir "pages-workflow.yml"
 
 foreach ($f in $RuntimeFiles) {

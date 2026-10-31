@@ -59,6 +59,11 @@ do
     end
 end
 local heavy = (os.getenv("CONTRA_MESEN_PLAY_HEAVY") == "1")
+-- "1": live recording writes only the inputs (frame, p1_raw, p2_raw, polls).
+-- Everything else is regenerated exactly by the headless re-trace
+-- (CONTRA_MESEN_PLAY_REPLAY_JSONL), so this costs nothing in fidelity and keeps
+-- a live session lag-free on slower machines.
+local lean = (os.getenv("CONTRA_MESEN_PLAY_LEAN") == "1")
 local ram_dump_path = os.getenv("CONTRA_MESEN_PLAY_RAM_DUMP_PATH")
 local oam_dump_path = os.getenv("CONTRA_MESEN_PLAY_OAM_DUMP_PATH")
 local nametable_dump_path = os.getenv("CONTRA_MESEN_PLAY_NAMETABLE_DUMP_PATH")
@@ -295,6 +300,19 @@ local prev_frame_counter = -1
 local function emit_frame()
     local enemies = {}
     local pbullets = {}
+
+    if lean and replay_path == nil then
+        if raw_source == "latched" then
+            pending_raw[1] = read_ram(0xF1)
+            pending_raw[2] = read_ram(0xF2)
+        end
+        output:write(string.format("{\"frame\":%u,\"p1_raw\":%u,\"p2_raw\":%u,\"polls\":%u}\n",
+            frame, pending_raw[1], pending_raw[2], polls_this_frame))
+        if frame % 60 == 0 then
+            output:flush()
+        end
+        return
+    end
 
     if dump_frame ~= 0 and frame == dump_frame then
         dump_state(nil)

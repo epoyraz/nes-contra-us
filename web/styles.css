@@ -754,3 +754,28 @@ body {
 .room-players li.here {
   color: #fff;
 }
+
+/* ROM picker (shown in the loading panel until the player supplies a ROM) */
+.loading.rom-picker {
+  background: rgba(0, 0, 0, 0.85);
+  color: #ddd;
+  font-size: 14px;
+  letter-spacing: 0;
+  text-align: center;
+  padding: 16px;
+}
+.rom-box {
+  max-width: 220px;
+}
+.rom-box label input {
+  display: none;
+}
+.rom-box .lobby-btn {
+  display: inline-block;
+  cursor: pointer;
+  margin: 8px 0;
+}
+.rom-error {
+  color: #ff6666;
+  min-height: 1em;
+}

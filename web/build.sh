@@ -3,7 +3,10 @@
 # Build the Contra WebAssembly port with Emscripten.
 #
 # Requires the Emscripten SDK. By default this looks for it at $EMSDK, then at
-# ~/emsdk. Output lands in web/dist/ (contra.js, contra.wasm, contra.data).
+# ~/emsdk. Output lands in web/dist/ (contra.js, contra.wasm).
+#
+# The game ROM is NOT part of the build: the page asks the player for their own
+# Contra (USA) .nes file and hands it to the core at runtime.
 #
 #   ./web/build.sh           # release (-O2)
 #   ./web/build.sh --debug   # -O0 + assertions for troubleshooting
@@ -21,12 +24,6 @@ fi
 if ! command -v emcc >/dev/null 2>&1; then
   echo "emcc not found. Install the Emscripten SDK and/or set \$EMSDK." >&2
   echo "  https://emscripten.org/docs/getting_started/downloads.html" >&2
-  exit 1
-fi
-
-ROM="$REPO_ROOT/baserom.nes"
-if [ ! -f "$ROM" ]; then
-  echo "baserom.nes not found at $ROM (supplies CHR/graphics; embedded into the build)." >&2
   exit 1
 fi
 
@@ -48,10 +45,11 @@ emcc \
   -sEXPORT_NAME=ContraModule \
   -sALLOW_MEMORY_GROWTH=1 \
   -sEXIT_RUNTIME=0 \
-  -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,HEAPU8 \
+  -sFORCE_FILESYSTEM=1 \
+  -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,HEAPU8,FS \
   -sEXPORTED_FUNCTIONS=_main,_contra_web_init,_contra_web_reset,_contra_web_set_input,_contra_web_set_inputs,_contra_web_state_hash,_contra_web_step,_contra_web_framebuffer,_contra_web_width,_contra_web_height,_contra_web_warp_level2_boss,_contra_web_warp_level4 \
-  --preload-file "$ROM@baserom.nes" \
   -o "$DIST/contra.js"
 
-echo "Build complete -> $DIST (contra.js, contra.wasm, contra.data)"
+rm -f "$DIST/contra.data"
+echo "Build complete -> $DIST (contra.js, contra.wasm)"
 echo "Serve it:  python -m http.server -d \"$SCRIPT_DIR\" 8000   then open http://localhost:8000/"
