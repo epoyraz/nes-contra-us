@@ -114,7 +114,7 @@ body {
 /* NES controller (CodePen epzilla/AqweZk, compiled SCSS -> CSS)           */
 /* ----------------------------------------------------------------------- */
 
-#controller {
+.nes-controller {
   position: relative;   /* pen used absolute; relative lets us center it in flow */
   margin: 0 auto;
   width: 600px;
@@ -131,7 +131,7 @@ body {
   touch-action: none;
 }
 
-#inset-area {
+.nes-inset-area {
   position: absolute;
   width: 550px;
   height: 175px;
@@ -141,7 +141,7 @@ body {
   background-color: #202020;
 }
 
-#nintendo-text {
+.nes-nintendo-text {
   position: relative;
   top: 40px;
   left: 383px;
@@ -150,7 +150,7 @@ body {
   font-family: "Prosto One", sans-serif;
 }
 
-#mid-stripe {
+.nes-mid-stripe {
   position: relative;
   width: 180px;
   height: 175px;
@@ -158,37 +158,37 @@ body {
   left: 165px;
 }
 
-#mid-stripe .stripe {
+.nes-mid-stripe .stripe {
   width: 100%;
   background-color: #777;
 }
 
-#mid-stripe #stripe1 {
+.nes-mid-stripe .nes-stripe1 {
   height: 25px;
   border-bottom-right-radius: 5px;
   border-bottom-left-radius: 5px;
 }
 
-#mid-stripe #stripe2 {
+.nes-mid-stripe .nes-stripe2 {
   height: 25px;
   margin-top: 7px;
   border-radius: 5px;
 }
 
-#mid-stripe #stripe3 {
+.nes-mid-stripe .nes-stripe3 {
   height: 25px;
   margin-top: 7px;
   border-radius: 5px;
 }
 
-#mid-stripe #stripe4 {
+.nes-mid-stripe .nes-stripe4 {
   height: 15px;
   margin-top: 71px;
   border-top-right-radius: 5px;
   border-top-left-radius: 5px;
 }
 
-#fill-tri-top {
+.nes-fill-tri-top {
   position: absolute;
   width: 0;
   height: 0;
@@ -198,7 +198,7 @@ body {
   border-top: 20px solid transparent;
 }
 
-#fill-tri-bottom {
+.nes-fill-tri-bottom {
   position: absolute;
   width: 0;
   height: 0;
@@ -208,7 +208,7 @@ body {
   border-left: 20px solid transparent;
 }
 
-#bottom {
+.nes-bottom {
   position: absolute;
   width: 570px;
   height: 12px;
@@ -218,7 +218,7 @@ body {
   border-left: 20px solid transparent;
 }
 
-#right {
+.nes-right {
   position: absolute;
   width: 12px;
   height: 225px;
@@ -228,7 +228,7 @@ body {
   border-top: 20px solid transparent;
 }
 
-#fill-tri-bottom-right {
+.nes-fill-tri-bottom-right {
   position: absolute;
   width: 0;
   height: 0;
@@ -239,7 +239,7 @@ body {
   z-index: -1;
 }
 
-#fill-circle {
+.nes-fill-circle {
   position: absolute;
   width: 20px;
   height: 30px;
@@ -286,12 +286,12 @@ body {
   background-color: #cc0000;
 }
 
-#a-box {
+.nes-a-box {
   left: 450px;
   top: 100px;
 }
 
-#a-box::after {
+.nes-a-box::after {
   content: "A";
   font-weight: bolder;
   position: absolute;
@@ -300,15 +300,15 @@ body {
   color: #cc0000;
 }
 
-#a-box #a-button:active,
-#a-box #a-button.pressed {
+.nes-a-box .nes-a-button:active,
+.nes-a-box .nes-a-button.pressed {
   margin-top: 6px;
   margin-left: 6px;
   border: 0px;
 }
 
-#a-box #a-button:active::before,
-#a-box #a-button.pressed::before {
+.nes-a-box .nes-a-button:active::before,
+.nes-a-box .nes-a-button.pressed::before {
   content: "";
   position: absolute;
   display: block;
@@ -324,12 +324,12 @@ body {
   background-color: #cc0000;
 }
 
-#b-box {
+.nes-b-box {
   left: 390px;
   top: 100px;
 }
 
-#b-box::after {
+.nes-b-box::after {
   content: "B";
   font-weight: bolder;
   position: absolute;
@@ -338,15 +338,15 @@ body {
   color: #cc0000;
 }
 
-#b-box #b-button:active,
-#b-box #b-button.pressed {
+.nes-b-box .nes-b-button:active,
+.nes-b-box .nes-b-button.pressed {
   margin-top: 6px;
   margin-left: 6px;
   border: 0px;
 }
 
-#b-box #b-button:active::before,
-#b-box #b-button.pressed::before {
+.nes-b-box .nes-b-button:active::before,
+.nes-b-box .nes-b-button.pressed::before {
   content: "";
   position: absolute;
   display: block;
@@ -362,7 +362,7 @@ body {
   background-color: #cc0000;
 }
 
-#middle-buttons {
+.nes-middle-buttons {
   position: absolute;
   width: 170px;
   height: 45px;
@@ -373,7 +373,7 @@ body {
   border: 5px inset white;
 }
 
-#middle-buttons .middle-button {
+.nes-middle-buttons .middle-button {
   position: absolute;
   width: 50px;
   height: 20px;
@@ -384,12 +384,12 @@ body {
   cursor: pointer;
 }
 
-#middle-buttons #select {
+.nes-middle-buttons .nes-select {
   left: 25px;
   top: 15px;
 }
 
-#middle-buttons #select::before {
+.nes-middle-buttons .nes-select::before {
   content: "SELECT";
   position: absolute;
   color: #cc0000;
@@ -397,15 +397,15 @@ body {
   left: -5px;
 }
 
-#middle-buttons #select:active,
-#middle-buttons #select.pressed {
+.nes-middle-buttons .nes-select:active,
+.nes-middle-buttons .nes-select.pressed {
   left: 27px;
   top: 17px;
   box-shadow: 0px 0px #000;
 }
 
-#middle-buttons #select:active::before,
-#middle-buttons #select.pressed::before {
+.nes-middle-buttons .nes-select:active::before,
+.nes-middle-buttons .nes-select.pressed::before {
   content: "SELECT";
   position: absolute;
   color: #cc0000;
@@ -413,27 +413,27 @@ body {
   left: -7px;
 }
 
-#middle-buttons #start {
+.nes-middle-buttons .nes-start {
   left: 95px;
   top: 15px;
 }
 
-#middle-buttons #start::before {
+.nes-middle-buttons .nes-start::before {
   content: "START";
   position: absolute;
   color: #cc0000;
   top: -50px;
 }
 
-#middle-buttons #start:active,
-#middle-buttons #start.pressed {
+.nes-middle-buttons .nes-start:active,
+.nes-middle-buttons .nes-start.pressed {
   left: 97px;
   top: 17px;
   box-shadow: 0px 0px #000;
 }
 
-#middle-buttons #start:active::before,
-#middle-buttons #start.pressed::before {
+.nes-middle-buttons .nes-start:active::before,
+.nes-middle-buttons .nes-start.pressed::before {
   content: "START";
   position: absolute;
   color: #cc0000;
@@ -441,7 +441,7 @@ body {
   left: -2px;
 }
 
-#d-pad {
+.nes-d-pad {
   position: absolute;
   top: 110px;
   left: 65px;
@@ -449,7 +449,7 @@ body {
   width: 100px;
 }
 
-#d-pad .d-pad-button {
+.nes-d-pad .d-pad-button {
   position: absolute;
   height: 34px;
   width: 34px;
@@ -462,56 +462,56 @@ body {
   cursor: pointer;
 }
 
-#d-pad #up-button {
+.nes-d-pad .nes-up-button {
   left: 33px;
   box-shadow: -3px 0 0 #888;
   transform: rotate(180deg);
 }
 
-#d-pad #up-button:active,
-#d-pad #up-button.pressed {
+.nes-d-pad .nes-up-button:active,
+.nes-d-pad .nes-up-button.pressed {
   transform: rotate(180deg) rotate3d(1, 0, 0, 30deg);
   box-shadow: -1px 0 0 #888;
 }
 
-#d-pad #left-button {
+.nes-d-pad .nes-left-button {
   top: 33px;
   box-shadow: 3px 0px 0px #888;
   transform: rotate(90deg);
 }
 
-#d-pad #left-button:active,
-#d-pad #left-button.pressed {
+.nes-d-pad .nes-left-button:active,
+.nes-d-pad .nes-left-button.pressed {
   transform: rotate(90deg) rotate3d(1, 0, 0, 20deg);
   box-shadow: 1px 0 0 #888;
 }
 
-#d-pad #right-button {
+.nes-d-pad .nes-right-button {
   top: 33px;
   left: 66px;
   box-shadow: -3px 3px 0 #888;
   transform: rotate(270deg);
 }
 
-#d-pad #right-button:active,
-#d-pad #right-button.pressed {
+.nes-d-pad .nes-right-button:active,
+.nes-d-pad .nes-right-button.pressed {
   transform: rotate(270deg) rotate3d(1, 0, 0, 20deg);
   box-shadow: -1px 1px 0 #888;
 }
 
-#d-pad #down-button {
+.nes-d-pad .nes-down-button {
   left: 33px;
   top: 66px;
   box-shadow: 3px 1px 0px #888;
 }
 
-#d-pad #down-button:active,
-#d-pad #down-button.pressed {
+.nes-d-pad .nes-down-button:active,
+.nes-d-pad .nes-down-button.pressed {
   transform: rotate3d(1, 0, 0, 30deg);
   box-shadow: 1px 0 0 #888;
 }
 
-#d-pad #middle-part {
+.nes-d-pad .nes-middle-part {
   position: absolute;
   height: 34px;
   width: 34px;
@@ -520,7 +520,7 @@ body {
   background-color: black;
 }
 
-#d-pad #middle-part::before {
+.nes-d-pad .nes-middle-part::before {
   content: "";
   position: absolute;
   top: 50%;
@@ -533,7 +533,7 @@ body {
   border-radius: 50%;
 }
 
-#notSoSecretCode {
+.nes-notSoSecretCode {
   position: absolute;
   left: 700px;
   color: white;
@@ -569,9 +569,50 @@ body {
    can't reflow. Shrink it with `zoom` (not `transform: scale`) so its layout
    box shrinks too — otherwise the box stays 600px wide and forces horizontal
    page overflow on phones. */
-@media (max-width: 640px) { #controller { zoom: 0.62; } }
-@media (max-width: 420px) { #controller { zoom: 0.50; } }
-@media (max-width: 340px) { #controller { zoom: 0.44; } }
+@media (max-width: 640px) { .nes-controller { zoom: 0.62; } }
+@media (max-width: 420px) { .nes-controller { zoom: 0.50; } }
+@media (max-width: 340px) { .nes-controller { zoom: 0.44; } }
+
+/* Two-player: both controllers side by side, centered, scaled to share the
+   row (2 x 600px * zoom + gap). */
+.pads {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 20px;
+  width: 100%;
+}
+
+.pad {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.pad-label {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: #aaa;
+}
+
+.pad-label[hidden],
+.pad[hidden] {
+  display: none;
+}
+
+.pad.local .pad-label {
+  color: #fff;
+}
+
+/* The other player's controller only mirrors their presses. */
+.pad.remote .nes-controller {
+  pointer-events: none;
+}
+
+.pads.two-player .nes-controller { zoom: 0.55; }
+@media (max-width: 700px) { .pads.two-player { gap: 8px; } .pads.two-player .nes-controller { zoom: 0.36; } }
+@media (max-width: 480px) { .pads.two-player .nes-controller { zoom: 0.27; } }
+@media (max-width: 360px) { .pads.two-player .nes-controller { zoom: 0.23; } }
 
 /* ----------------------------------------------------------------------- */
 /* Lobby + online status (not from the pen)                                */
