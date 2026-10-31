@@ -18,7 +18,7 @@ web/index.html         page shell: the "TV" canvas + the NES controller markup
 web/styles.css         layout + the CodePen controller (SCSS compiled to plain CSS)
 web/controller.js      boots the wasm module, 60 Hz loop, keyboard + on-screen input
 web/build.ps1 / .sh    one-command Emscripten build
-web/dist/              build output (git-ignored): contra.js / .wasm / .data
+web/dist/              build output: contra.js / contra.wasm
 ```
 
 The core renders into a 256×240 framebuffer in memory; `main.c` repacks it to
