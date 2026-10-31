@@ -1,7 +1,7 @@
 # Deploy the WebAssembly Contra build to GitHub Pages.
 #
 # Builds web/dist (via web/build.ps1) then publishes the runtime files
-# (index.html, styles.css, controller.js, dist/*, .nojekyll) to the `gh-pages`
+# (index.html, styles.css, controller.js, net.js, dist/*, .nojekyll) to the `gh-pages`
 # branch, which GitHub Pages serves at the branch root.
 #
 # GitHub Pages can't build this itself: the build embeds baserom.nes, which is
@@ -38,7 +38,7 @@ if ($SkipBuild) {
 }
 
 # Files that make up the served site.
-$RuntimeFiles = @("index.html", "styles.css", "controller.js")
+$RuntimeFiles = @("index.html", "styles.css", "controller.js", "net.js")
 $DistFiles    = @("contra.js", "contra.wasm", "contra.data")
 $WorkflowTemplate = Join-Path $ScriptDir "pages-workflow.yml"
 
