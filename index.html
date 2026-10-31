@@ -61,40 +61,46 @@
     </p>
 
     <!-- NES controller — markup from CodePen epzilla/AqweZk, wired to the game. -->
-    <div id="controller">
-      <div id="inset-area">
-        <div id="nintendo-text">Nintendo</div>
-        <div id="mid-stripe">
-          <div id="stripe1" class="stripe"></div>
-          <div id="stripe2" class="stripe"></div>
-          <div id="stripe3" class="stripe"></div>
-          <div id="stripe4" class="stripe"></div>
-        </div>
-        <div id="a-box" class="button-box">
-          <div id="a-button" class="red-button"></div>
-        </div>
-        <div id="b-box" class="button-box">
-          <div id="b-button" class="red-button"></div>
+    <!-- Player 1's pad; controller.js clones it for Player 2 in online games. -->
+    <div id="pads" class="pads">
+      <div class="pad" data-player="1">
+        <p class="pad-label" hidden></p>
+        <div class="nes-controller">
+          <div class="nes-inset-area">
+            <div class="nes-nintendo-text">Nintendo</div>
+            <div class="nes-mid-stripe">
+              <div class="nes-stripe1 stripe"></div>
+              <div class="nes-stripe2 stripe"></div>
+              <div class="nes-stripe3 stripe"></div>
+              <div class="nes-stripe4 stripe"></div>
+            </div>
+            <div class="nes-a-box button-box">
+              <div class="nes-a-button red-button"></div>
+            </div>
+            <div class="nes-b-box button-box">
+              <div class="nes-b-button red-button"></div>
+            </div>
+          </div>
+          <div class="nes-fill-tri-top"></div>
+          <div class="nes-fill-tri-bottom"></div>
+          <div class="nes-bottom"></div>
+          <div class="nes-right"></div>
+          <div class="nes-fill-tri-bottom-right"></div>
+          <div class="nes-fill-circle"></div>
+          <div class="nes-middle-buttons">
+            <div class="nes-select middle-button"></div>
+            <div class="nes-start middle-button"></div>
+          </div>
+          <div class="nes-d-pad">
+            <div class="nes-up-button d-pad-button">&#8659;</div>
+            <div class="nes-left-button d-pad-button">&#8659;</div>
+            <div class="nes-right-button d-pad-button">&#8659;</div>
+            <div class="nes-down-button d-pad-button">&#8659;</div>
+            <div class="nes-middle-part"></div>
+          </div>
+          <div class="nes-notSoSecretCode">WOOHOO!<br>HOORAY FOR NOSTALGIA!!!</div>
         </div>
       </div>
-      <div id="fill-tri-top"></div>
-      <div id="fill-tri-bottom"></div>
-      <div id="bottom"></div>
-      <div id="right"></div>
-      <div id="fill-tri-bottom-right"></div>
-      <div id="fill-circle"></div>
-      <div id="middle-buttons">
-        <div id="select" class="middle-button"></div>
-        <div id="start" class="middle-button"></div>
-      </div>
-      <div id="d-pad">
-        <div id="up-button" class="d-pad-button">&#8659;</div>
-        <div id="left-button" class="d-pad-button">&#8659;</div>
-        <div id="right-button" class="d-pad-button">&#8659;</div>
-        <div id="down-button" class="d-pad-button">&#8659;</div>
-        <div id="middle-part"></div>
-      </div>
-      <div id="notSoSecretCode">WOOHOO!<br>HOORAY FOR NOSTALGIA!!!</div>
     </div>
   </main>
 

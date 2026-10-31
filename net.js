@@ -83,14 +83,36 @@
     }
   }
 
+  /* STUN finds each browser's public address; TURN relays the traffic when
+     a network blocks direct WebRTC connections (mobile carriers, strict
+     routers). PeerJS's own free TURN servers no longer answer, so the relay
+     is Metered (metered.ca, app "nes-contra", free 500 MB/month trial). A
+     TURN login is public by nature: every page that uses it ships it. */
+  var TURN_USER = "473eeff290d5a4175b4ce537";
+  var TURN_PASS = "85WFqv91LnAVBAdK";
+  var ICE_SERVERS = [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun.relay.metered.ca:80" },
+    { urls: "turn:global.relay.metered.ca:80", username: TURN_USER, credential: TURN_PASS },
+    { urls: "turn:global.relay.metered.ca:80?transport=tcp", username: TURN_USER, credential: TURN_PASS },
+    { urls: "turn:global.relay.metered.ca:443", username: TURN_USER, credential: TURN_PASS },
+    { urls: "turns:global.relay.metered.ca:443?transport=tcp", username: TURN_USER, credential: TURN_PASS }
+  ];
+  /* How long Player 2 waits for the direct/relayed connection to open. */
+  var CONNECT_TIMEOUT_MS = 20000;
+
+  function getIceServers() {
+    return Promise.resolve(ICE_SERVERS);
+  }
+
   function host(handlers) {
     var peer = null;
     var cancelled = false;
     var connected = false;
 
-    function open() {
+    function open(iceServers) {
       var code = newCode();
-      peer = new Peer(PREFIX + code);
+      peer = new Peer(PREFIX + code, { config: { iceServers: iceServers } });
       peer.on("open", function () {
         if (!cancelled) {
           handlers.onCode(code);
@@ -102,8 +124,14 @@
           conn.on("open", function () { conn.close(); });
           return;
         }
-        connected = true;
+        /* Only the first connection that actually opens takes the seat: one
+           that never gets through (blocked network) must not lock the room. */
         conn.on("open", function () {
+          if (connected || cancelled) {
+            conn.close();
+            return;
+          }
+          connected = true;
           /* Stop listening on the broker; the data channel stays up. */
           peer.disconnect();
           handlers.onConnected(wrapConnection(conn));
@@ -112,7 +140,7 @@
       peer.on("error", function (err) {
         if (err.type === "unavailable-id" && !connected) {
           peer.destroy();
-          open(); /* code already taken: roll a new one */
+          open(iceServers); /* code already taken: roll a new one */
           return;
         }
         if (!connected && !cancelled) {
@@ -121,7 +149,11 @@
       });
     }
 
-    open();
+    getIceServers().then(function (iceServers) {
+      if (!cancelled) {
+        open(iceServers);
+      }
+    });
     return {
       close: function () {
         cancelled = true;
@@ -136,29 +168,54 @@
     var code = normalizeCode(rawCode);
     var cancelled = false;
     var connected = false;
-    var peer = new Peer();
+    var peer = null;
+    var timer = 0;
 
-    peer.on("open", function () {
-      var conn = peer.connect(PREFIX + code, { reliable: true, serialization: "json" });
-      conn.on("open", function () {
-        if (cancelled) {
-          conn.close();
-          return;
-        }
-        connected = true;
-        peer.disconnect();
-        handlers.onConnected(wrapConnection(conn));
-      });
-    });
-    peer.on("error", function (err) {
+    function fail(message) {
       if (!connected && !cancelled) {
-        handlers.onError(describeError(err));
+        cancelled = true;
+        clearTimeout(timer);
+        if (peer) {
+          peer.destroy();
+        }
+        handlers.onError(message);
       }
+    }
+
+    getIceServers().then(function (iceServers) {
+      if (cancelled) {
+        return;
+      }
+      peer = new Peer({ config: { iceServers: iceServers } });
+      peer.on("open", function () {
+        var conn = peer.connect(PREFIX + code, { reliable: true, serialization: "json" });
+        timer = setTimeout(function () {
+          fail("Found the room, but couldn't connect to Player 1. One of your networks " +
+               "blocks direct connections. Try again, or switch networks (e.g. Wi-Fi " +
+               "instead of mobile data).");
+        }, CONNECT_TIMEOUT_MS);
+        conn.on("open", function () {
+          if (cancelled) {
+            conn.close();
+            return;
+          }
+          connected = true;
+          clearTimeout(timer);
+          peer.disconnect();
+          handlers.onConnected(wrapConnection(conn));
+        });
+      });
+      peer.on("error", function (err) {
+        fail(describeError(err));
+      });
     });
     return {
       close: function () {
         cancelled = true;
-        peer.destroy();
+        clearTimeout(timer);
+        if (peer) {
+          peer.destroy();
+        }
       }
     };
   }

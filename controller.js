@@ -50,16 +50,16 @@
     Space: BTN.A   /* alt jump   */
   };
 
-  /* On-screen controller element id -> button bit. */
+  /* On-screen controller element class -> button bit. */
   var BUTTON_MAP = {
-    "up-button": BTN.UP,
-    "down-button": BTN.DOWN,
-    "left-button": BTN.LEFT,
-    "right-button": BTN.RIGHT,
-    "a-button": BTN.A,
-    "b-button": BTN.B,
-    "select": BTN.SELECT,
-    "start": BTN.START
+    "nes-up-button": BTN.UP,
+    "nes-down-button": BTN.DOWN,
+    "nes-left-button": BTN.LEFT,
+    "nes-right-button": BTN.RIGHT,
+    "nes-a-button": BTN.A,
+    "nes-b-button": BTN.B,
+    "nes-select": BTN.SELECT,
+    "nes-start": BTN.START
   };
 
   function setupKeyboard() {
@@ -85,86 +85,90 @@
     });
   }
 
-  /* {element, bit} for every on-screen button. The render loop mirrors the
-     combined (keyboard | on-screen) input state onto each button's `pressed`
-     styling — a single source of truth, so physical key presses light up the
-     virtual controller too. */
-  var pressables = [];
-
-  function setupOnScreenController() {
-    Object.keys(BUTTON_MAP).forEach(function (id) {
-      var el = document.getElementById(id);
-      if (!el) {
+  /* One on-screen controller. Online, there are two side by side: this
+     browser's own (local: pointer input drives the game) and the other
+     player's (it only mirrors their presses). The render loop reflects a
+     button bitmask onto each pad's `pressed` styling, so physical key presses
+     light up the virtual controller too. */
+  function makePad(el) {
+    var pad = { el: el, label: el.querySelector(".pad-label"), local: true, pressables: [], lastMask: -1 };
+    Object.keys(BUTTON_MAP).forEach(function (cls) {
+      var btn = el.querySelector("." + cls);
+      if (!btn) {
         return;
       }
-      var bit = BUTTON_MAP[id];
-      pressables.push({ el: el, bit: bit });
+      var bit = BUTTON_MAP[cls];
+      pad.pressables.push({ el: btn, bit: bit });
       var press = function (e) {
-        pointerMask |= bit;
-        if (e.pointerId !== undefined && el.setPointerCapture) {
-          try { el.setPointerCapture(e.pointerId); } catch (_) {}
-        }
         e.preventDefault();
+        if (!pad.local) {
+          return;
+        }
+        pointerMask |= bit;
+        if (e.pointerId !== undefined && btn.setPointerCapture) {
+          try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+        }
       };
       var release = function (e) {
-        pointerMask &= ~bit;
+        if (pad.local) {
+          pointerMask &= ~bit;
+        }
         if (e && e.preventDefault) {
           e.preventDefault();
         }
       };
-      el.addEventListener("pointerdown", press);
-      el.addEventListener("pointerup", release);
-      el.addEventListener("pointercancel", release);
-      el.addEventListener("pointerleave", release);
+      btn.addEventListener("pointerdown", press);
+      btn.addEventListener("pointerup", release);
+      btn.addEventListener("pointercancel", release);
+      btn.addEventListener("pointerleave", release);
       /* Block the synthetic context menu / text selection on long press. */
-      el.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+      btn.addEventListener("contextmenu", function (e) { e.preventDefault(); });
     });
+    return pad;
   }
 
-  /* Reflect the combined button bitmask onto the on-screen controller. Only
-     touches the DOM when the mask changes, so it's cheap to call every frame. */
-  var lastVisualMask = -1;
-  function syncPressedVisual(mask) {
-    if (mask === lastVisualMask) {
+  /* Only touches the DOM when the mask changes, so it's cheap every frame. */
+  function syncPressedVisual(pad, mask) {
+    if (mask === pad.lastMask) {
       return;
     }
-    lastVisualMask = mask;
-    for (var i = 0; i < pressables.length; i += 1) {
-      pressables[i].el.classList.toggle("pressed", (mask & pressables[i].bit) !== 0);
+    pad.lastMask = mask;
+    for (var i = 0; i < pad.pressables.length; i += 1) {
+      pad.pressables[i].el.classList.toggle("pressed", (mask & pad.pressables[i].bit) !== 0);
     }
   }
 
   /* The Konami-code easter egg from the original pen (up up down down left right
      left right b a, then Start), rewritten without jQuery. */
-  function setupKonami() {
+  function setupKonami(padEl) {
     var codeString = "";
-    var on = function (id, fn) {
-      var el = document.getElementById(id);
+    var on = function (cls, fn) {
+      var el = padEl.querySelector("." + cls);
       if (el) {
         el.addEventListener("click", fn);
       }
     };
-    on("up-button", function () {
+    on("nes-up-button", function () {
       codeString = (codeString === "" || codeString === "u") ? codeString + "u" : "u";
     });
-    on("down-button", function () {
+    on("nes-down-button", function () {
       codeString = (codeString === "uu" || codeString === "uud") ? codeString + "d" : "";
     });
-    on("left-button", function () {
+    on("nes-left-button", function () {
       codeString = (codeString === "uudd" || codeString === "uuddlr") ? codeString + "l" : "";
     });
-    on("right-button", function () {
+    on("nes-right-button", function () {
       codeString = (codeString === "uuddl" || codeString === "uuddlrl") ? codeString + "r" : "";
     });
-    on("b-button", function () {
+    on("nes-b-button", function () {
       codeString = (codeString === "uuddlrlr") ? codeString + "b" : "";
     });
-    on("a-button", function () {
+    on("nes-a-button", function () {
       codeString = (codeString === "uuddlrlrb") ? codeString + "a" : "";
     });
-    on("start", function () {
+    on("nes-start", function () {
       if (codeString === "uuddlrlrba") {
-        var el = document.getElementById("notSoSecretCode");
+        var el = padEl.querySelector(".nes-notSoSecretCode");
         if (el) {
           el.style.display = "block";
           el.classList.add("blink");
@@ -201,8 +205,31 @@
     }
 
     setupKeyboard();
-    setupOnScreenController();
-    setupKonami();
+
+    var padsRow = document.getElementById("pads");
+    var pad1El = padsRow.querySelector(".pad");
+    var pad2El = pad1El.cloneNode(true);
+    pad2El.setAttribute("data-player", "2");
+    pad2El.hidden = true;
+    padsRow.appendChild(pad2El);
+    var pads = [makePad(pad1El), makePad(pad2El)];
+    setupKonami(pad1El);
+
+    /* Solo: one pad. Online: Player 1's pad left, Player 2's right. */
+    function setPadLayout(online, me) {
+      padsRow.classList.toggle("two-player", online);
+      pad2El.hidden = !online;
+      pads.forEach(function (pad, i) {
+        pad.local = online ? (i === me - 1) : (i === 0);
+        pad.el.classList.toggle("local", online && pad.local);
+        pad.el.classList.toggle("remote", online && !pad.local);
+        pad.label.hidden = !online;
+        pad.label.textContent = "Player " + (i + 1) + (pad.local ? " (you)" : "");
+        pad.lastMask = -1;
+      });
+      pointerMask = 0;
+      syncPressedVisual(pads[online ? 2 - me : 1], 0);
+    }
 
     /* null = solo; otherwise the lockstep session (see startOnline). */
     var net = null;
@@ -252,7 +279,8 @@
         desynced: false,
         stallSince: 0,
         ping: 0,
-        lastHeard: performance.now()
+        lastHeard: performance.now(),
+        remoteShown: 0
       };
       for (f = 0; f < INPUT_DELAY; f += 1) {
         net.local[f] = 0;
@@ -289,6 +317,7 @@
         link.send({ t: "p", ts: performance.now() });
       }, 1000);
       bootCore();
+      setPadLayout(true, player);
       updateOnlineStatus();
       run();
     }
@@ -303,6 +332,7 @@
       net = null;
       running = false;
       setStatus("");
+      setPadLayout(false, 1);
       showLobby(message);
     }
 
@@ -346,6 +376,7 @@
       if (remoteMask === undefined) {
         return false;
       }
+      net.remoteShown = remoteMask;
       if (net.player === 1) {
         setInputs(net.local[net.frame], remoteMask);
       } else {
@@ -385,7 +416,6 @@
       last = now;
 
       var combined = keyboardMask | pointerMask;
-      syncPressedVisual(combined);
 
       /* Catch up at 60 Hz, but never spiral (cap at 5 steps like the SDL host). */
       var steps = 0;
@@ -416,6 +446,13 @@
         updateOnlineStatus();
       } else if (acc > 250) {
         acc = 0; /* tab was backgrounded; don't fast-forward on return */
+      }
+
+      if (net) {
+        syncPressedVisual(pads[net.player - 1], combined);
+        syncPressedVisual(pads[2 - net.player], net.remoteShown);
+      } else {
+        syncPressedVisual(pads[0], combined);
       }
 
       drawFrame();
