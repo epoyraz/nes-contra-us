@@ -40,6 +40,7 @@ fi
 
 emcc \
   "$REPO_ROOT/port/contra_core/src/core.c" \
+  "$REPO_ROOT/port/contra_core/src/ppu.c" \
   "$REPO_ROOT/port/platform_web/main.c" \
   -I "$REPO_ROOT/port/contra_core/include" \
   "${OPT[@]}" \
@@ -48,7 +49,7 @@ emcc \
   -sALLOW_MEMORY_GROWTH=1 \
   -sEXIT_RUNTIME=0 \
   -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,HEAPU8 \
-  -sEXPORTED_FUNCTIONS=_main,_contra_web_init,_contra_web_reset,_contra_web_set_input,_contra_web_step,_contra_web_framebuffer,_contra_web_width,_contra_web_height,_contra_web_warp_level2_boss,_contra_web_warp_level4 \
+  -sEXPORTED_FUNCTIONS=_main,_contra_web_init,_contra_web_reset,_contra_web_set_input,_contra_web_set_inputs,_contra_web_state_hash,_contra_web_step,_contra_web_framebuffer,_contra_web_width,_contra_web_height,_contra_web_warp_level2_boss,_contra_web_warp_level4 \
   --preload-file "$ROM@baserom.nes" \
   -o "$DIST/contra.js"
 

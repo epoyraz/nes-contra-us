@@ -572,3 +572,144 @@ body {
 @media (max-width: 640px) { #controller { zoom: 0.62; } }
 @media (max-width: 420px) { #controller { zoom: 0.50; } }
 @media (max-width: 340px) { #controller { zoom: 0.44; } }
+
+/* ----------------------------------------------------------------------- */
+/* Lobby + online status (not from the pen)                                */
+/* ----------------------------------------------------------------------- */
+
+.lobby {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.88);
+  padding: 12px;
+}
+
+.lobby[hidden],
+.lobby-panel[hidden],
+.lobby-btn[hidden],
+.net-status[hidden] {
+  display: none;
+}
+
+.lobby-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  width: 100%;
+  max-width: 300px;
+}
+
+.lobby-panel h2 {
+  margin: 0 0 4px;
+  font-size: 18px;
+  color: #fff;
+}
+
+.lobby-panel p {
+  margin: 0;
+  font-size: 13px;
+  color: #bbb;
+}
+
+.lobby-btn {
+  font-family: inherit;
+  font-size: 14px;
+  padding: 9px 12px;
+  border: 2px solid #cc0000;
+  border-radius: 6px;
+  background: #cc0000;
+  color: #fff;
+  cursor: pointer;
+}
+
+.lobby-btn:hover,
+.lobby-btn:focus-visible {
+  background: #e01818;
+  outline: none;
+}
+
+.lobby-btn-quiet {
+  background: transparent;
+  border-color: #666;
+  color: #ccc;
+}
+
+.lobby-btn-quiet:hover,
+.lobby-btn-quiet:focus-visible {
+  background: #333;
+}
+
+.join-form {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+}
+
+.join-form input {
+  flex: 1;
+  min-width: 0;
+  font-family: inherit;
+  font-size: 16px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 8px;
+  border: 2px solid #666;
+  border-radius: 6px;
+  background: #111;
+  color: #fff;
+}
+
+.room-code {
+  font-size: 32px !important;
+  letter-spacing: 6px;
+  color: #ffd84a !important;
+}
+
+.net-status {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: #ccc;
+}
+
+.net-status.bad {
+  color: #ff7070;
+}
+
+.invite-link {
+  font-family: "Segoe UI", sans-serif;
+  font-size: 12px;
+  padding: 7px 8px;
+  border: 2px solid #666;
+  border-radius: 6px;
+  background: #111;
+  color: #ffd84a;
+  text-align: center;
+}
+
+.invite-link[hidden],
+.room-players[hidden] {
+  display: none;
+}
+
+.room-players {
+  list-style: none;
+  margin: 4px 0;
+  padding: 0;
+  text-align: left;
+  font-size: 14px;
+}
+
+.room-players li {
+  padding: 5px 8px;
+  border-bottom: 1px solid #333;
+  color: #777;
+}
+
+.room-players li.here {
+  color: #fff;
+}
