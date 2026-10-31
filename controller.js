@@ -5,8 +5,11 @@
  *   - boot the Emscripten module (web/dist/contra.js, factory `ContraModule`)
  *   - drive a 60 Hz fixed-step loop, reading the core's RGBA framebuffer straight
  *     out of wasm memory and blitting it to the <canvas> with putImageData
- *   - merge keyboard + on-screen NES controller input into the local player mask
- *   - optionally run two-browser co-op through WebSocket input lockstep
+ *   - merge two input sources into this browser's button bitmask:
+ *       (a) the physical keyboard
+ *       (b) the on-screen NES controller (mouse + touch via Pointer Events)
+ *   - the lobby: solo, or an online 2-player room (web/net.js) where each
+ *     browser drives its own player and the two cores run in lockstep
  *   - the Konami-code easter egg from the original CodePen (vanilla-JS rewrite)
  */
 
@@ -27,9 +30,6 @@
 
   var FB_WIDTH = 256;
   var FB_HEIGHT = 240;
-  var STEP_MS = 1000 / 60;
-  var NET_INPUT_DELAY = 6;
-  var NET_HASH_INTERVAL = 60;
 
   /* Input is the OR of the keyboard mask and the on-screen-controller mask, so a
      button held on either source counts as pressed. */
@@ -62,30 +62,6 @@
     "start": BTN.START
   };
 
-  var pressables = [];
-  var lastVisualMask = -1;
-
-  var net = {
-    socket: null,
-    wsUrl: "",
-    room: "",
-    player: 0,
-    players: 0,
-    ready: {},
-    running: false,
-    sentFrame: 0,
-    simFrame: 0,
-    inputs: Object.create(null),
-    localHashes: Object.create(null),
-    remoteHashes: Object.create(null),
-    desynced: false,
-    runtime: null
-  };
-
-  function localInputMask() {
-    return keyboardMask | pointerMask;
-  }
-
   function setupKeyboard() {
     window.addEventListener("keydown", function (e) {
       var bit = KEY_MAP[e.code];
@@ -108,6 +84,12 @@
       keyboardMask = 0;
     });
   }
+
+  /* {element, bit} for every on-screen button. The render loop mirrors the
+     combined (keyboard | on-screen) input state onto each button's `pressed`
+     styling — a single source of truth, so physical key presses light up the
+     virtual controller too. */
+  var pressables = [];
 
   function setupOnScreenController() {
     Object.keys(BUTTON_MAP).forEach(function (id) {
@@ -139,8 +121,9 @@
     });
   }
 
-  /* Reflect the local button bitmask onto the on-screen controller. Only touches
-     the DOM when the mask changes, so it's cheap to call every frame. */
+  /* Reflect the combined button bitmask onto the on-screen controller. Only
+     touches the DOM when the mask changes, so it's cheap to call every frame. */
+  var lastVisualMask = -1;
   function syncPressedVisual(mask) {
     if (mask === lastVisualMask) {
       return;
@@ -151,6 +134,8 @@
     }
   }
 
+  /* The Konami-code easter egg from the original pen (up up down down left right
+     left right b a, then Start), rewritten without jQuery. */
   function setupKonami() {
     var codeString = "";
     var on = function (id, fn) {
@@ -188,324 +173,24 @@
     });
   }
 
-  function defaultWebSocketUrl() {
-    var params = new URLSearchParams(window.location.search);
-    var explicit = params.get("ws");
-    if (explicit) {
-      return explicit;
-    }
-    if (window.location.hostname.indexOf("github.io") !== -1) {
-      return "";
-    }
-    if (!window.location.host || window.location.protocol === "file:") {
-      return "";
-    }
-    return (window.location.protocol === "https:" ? "wss://" : "ws://") +
-      window.location.host + "/ws";
-  }
-
-  function setNetStatus(text, className) {
-    var el = document.getElementById("net-status");
-    if (!el) {
-      return;
-    }
-    el.textContent = text;
-    el.className = "net-status " + className;
-  }
-
-  function setRoomInfo(text) {
-    var el = document.getElementById("room-info");
-    if (el) {
-      el.textContent = text;
-    }
-  }
-
-  function updateLobbyButtons(inRoom) {
-    var create = document.getElementById("create-room");
-    var join = document.getElementById("join-room");
-    var room = document.getElementById("room-code");
-    var ready = document.getElementById("ready-room");
-    var leave = document.getElementById("leave-room");
-    var canUseNetwork = net.wsUrl !== "";
-
-    if (create) { create.disabled = !canUseNetwork || inRoom; }
-    if (join) { join.disabled = !canUseNetwork || inRoom; }
-    if (room) { room.disabled = !canUseNetwork || inRoom; }
-    if (ready) { ready.disabled = !inRoom || net.running; }
-    if (leave) { leave.disabled = !inRoom; }
-  }
-
-  function roomSummary() {
-    if (!net.room) {
-      return "Single-player mode. Run node web/multiplayer-server.mjs for local rooms.";
-    }
-    return "Room " + net.room + " · You are P" + net.player +
-      " · players " + net.players + "/2 · ready P1:" +
-      (net.ready[1] ? "yes" : "no") + " P2:" + (net.ready[2] ? "yes" : "no");
-  }
-
-  function sendNet(message) {
-    if (net.socket && net.socket.readyState === WebSocket.OPEN) {
-      net.socket.send(JSON.stringify(message));
-    }
-  }
-
-  function resetNetSimulation() {
-    if (!net.runtime) {
-      return;
-    }
-    net.runtime.reset();
-    net.runtime.applyDebugWarp();
-    net.running = true;
-    net.sentFrame = 0;
-    net.simFrame = 0;
-    net.inputs = Object.create(null);
-    net.localHashes = Object.create(null);
-    net.remoteHashes = Object.create(null);
-    net.desynced = false;
-    setNetStatus("Playing P" + net.player, "online");
-    setRoomInfo(roomSummary() + " · lockstep delay " + NET_INPUT_DELAY + " frames");
-  }
-
-  function storeNetworkInput(player, frame, input) {
-    if (frame < net.simFrame) {
-      return;
-    }
-    if (!net.inputs[frame]) {
-      net.inputs[frame] = [undefined, undefined];
-    }
-    net.inputs[frame][player - 1] = input & 0xFF;
-  }
-
-  function pruneNetworkInputs() {
-    var cutoff = net.simFrame - 120;
-    Object.keys(net.inputs).forEach(function (key) {
-      if (Number(key) < cutoff) {
-        delete net.inputs[key];
-      }
-    });
-    Object.keys(net.localHashes).forEach(function (key) {
-      if (Number(key) < cutoff) {
-        delete net.localHashes[key];
-      }
-    });
-    Object.keys(net.remoteHashes).forEach(function (key) {
-      if (Number(key) < cutoff) {
-        delete net.remoteHashes[key];
-      }
-    });
-  }
-
-  function networkTick(localMask) {
-    var frameToSend;
-    var pair;
-    var hash;
-
-    if (!net.running || !net.player) {
-      return;
-    }
-
-    frameToSend = net.sentFrame;
-    storeNetworkInput(net.player, frameToSend, localMask);
-    sendNet({ type: "input", frame: frameToSend, input: localMask });
-    net.sentFrame += 1;
-
-    if (net.sentFrame <= NET_INPUT_DELAY) {
-      return;
-    }
-
-    pair = net.inputs[net.simFrame];
-    if (!pair || pair[0] === undefined || pair[1] === undefined) {
-      setNetStatus("Waiting", "waiting");
-      return;
-    }
-
-    net.runtime.setInputs(pair[0], pair[1]);
-    net.runtime.step();
-    net.simFrame += 1;
-
-    if ((net.simFrame % NET_HASH_INTERVAL) === 0) {
-      hash = net.runtime.stateHash() >>> 0;
-      net.localHashes[net.simFrame] = hash;
-      sendNet({ type: "hash", frame: net.simFrame, hash: hash });
-      if (net.remoteHashes[net.simFrame] !== undefined &&
-          net.remoteHashes[net.simFrame] !== hash) {
-        net.desynced = true;
-        setNetStatus("Desync", "error");
-        setRoomInfo("Desync detected at frame " + net.simFrame + ". Leave and rejoin the room.");
-      }
-    }
-
-    if (!net.desynced) {
-      setNetStatus("Playing P" + net.player, "online");
-    }
-    pruneNetworkInputs();
-  }
-
-  function handleNetMessage(message) {
-    if (message.type === "room") {
-      net.room = message.room;
-      net.player = message.player;
-      net.players = message.players;
-      net.ready = message.ready || {};
-      setNetStatus("Room " + net.room, "waiting");
-      setRoomInfo(roomSummary());
-      updateLobbyButtons(true);
-      return;
-    }
-    if (message.type === "peer") {
-      net.players = message.players;
-      net.ready = message.ready || {};
-      setRoomInfo(roomSummary());
-      return;
-    }
-    if (message.type === "start") {
-      resetNetSimulation();
-      return;
-    }
-    if (message.type === "input") {
-      storeNetworkInput(message.player, message.frame, message.input);
-      return;
-    }
-    if (message.type === "hash") {
-      if (message.player !== net.player && net.runtime) {
-        var remoteHash = message.hash >>> 0;
-        net.remoteHashes[message.frame] = remoteHash;
-        if (net.localHashes[message.frame] !== undefined &&
-            net.localHashes[message.frame] !== remoteHash) {
-          net.desynced = true;
-          setNetStatus("Desync", "error");
-          setRoomInfo("Desync detected at frame " + message.frame + ". Leave and rejoin the room.");
-        }
-      }
-      return;
-    }
-    if (message.type === "error") {
-      setNetStatus("Error", "error");
-      setRoomInfo(message.message || "Network error");
-    }
-  }
-
-  function connectAndSend(message) {
-    if (!net.wsUrl) {
-      setNetStatus("Offline", "error");
-      setRoomInfo("No WebSocket relay configured. Run node web/multiplayer-server.mjs locally, or open with ?ws=wss://your-relay/ws.");
-      return;
-    }
-
-    if (net.socket && net.socket.readyState === WebSocket.OPEN) {
-      sendNet(message);
-      return;
-    }
-
-    net.socket = new WebSocket(net.wsUrl);
-    setNetStatus("Connecting", "waiting");
-    setRoomInfo("Connecting to " + net.wsUrl + " ...");
-
-    net.socket.addEventListener("open", function () {
-      sendNet(message);
-    });
-    net.socket.addEventListener("message", function (event) {
-      try {
-        handleNetMessage(JSON.parse(event.data));
-      } catch (err) {
-        setNetStatus("Error", "error");
-        setRoomInfo("Bad server message: " + err.message);
-      }
-    });
-    net.socket.addEventListener("close", function () {
-      net.socket = null;
-      net.running = false;
-      net.room = "";
-      net.player = 0;
-      net.players = 0;
-      net.ready = {};
-      setNetStatus("Offline", "offline");
-      setRoomInfo("Disconnected. Single-player mode is active.");
-      updateLobbyButtons(false);
-    });
-    net.socket.addEventListener("error", function () {
-      setNetStatus("Error", "error");
-      setRoomInfo("Could not connect to " + net.wsUrl);
-    });
-  }
-
-  function setupMultiplayer(runtime) {
-    var create = document.getElementById("create-room");
-    var join = document.getElementById("join-room");
-    var room = document.getElementById("room-code");
-    var ready = document.getElementById("ready-room");
-    var leave = document.getElementById("leave-room");
-
-    net.runtime = runtime;
-    net.wsUrl = defaultWebSocketUrl();
-    updateLobbyButtons(false);
-
-    if (!net.wsUrl) {
-      setRoomInfo("Multiplayer needs a WebSocket relay. For local testing run node web/multiplayer-server.mjs, or deploy a relay and open this page with ?ws=wss://your-relay/ws.");
-    } else {
-      setRoomInfo("Multiplayer relay: " + net.wsUrl);
-    }
-
-    if (create) {
-      create.addEventListener("click", function () {
-        connectAndSend({ type: "create" });
-      });
-    }
-    if (join) {
-      join.addEventListener("click", function () {
-        var code = room ? room.value.trim().toUpperCase() : "";
-        if (!code) {
-          setNetStatus("Error", "error");
-          setRoomInfo("Enter a room code to join.");
-          return;
-        }
-        connectAndSend({ type: "join", room: code });
-      });
-    }
-    if (ready) {
-      ready.addEventListener("click", function () {
-        sendNet({ type: "ready" });
-        ready.disabled = true;
-      });
-    }
-    if (leave) {
-      leave.addEventListener("click", function () {
-        sendNet({ type: "leave" });
-        if (net.socket) {
-          net.socket.close();
-        }
-      });
-    }
-    if (room) {
-      room.addEventListener("input", function () {
-        room.value = room.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-      });
-    }
-  }
+  /* Online play is deterministic lockstep: both browsers run the same core
+     and exchange only button masks. Local input for frame f is sampled at
+     frame f - INPUT_DELAY and sent right away, so a frame steps as soon as
+     the other player's mask for it has arrived; if it hasn't, that browser
+     waits. INPUT_DELAY frames (~67 ms) hide normal internet latency. */
+  var INPUT_DELAY = 4;
+  var HASH_INTERVAL = 120; /* compare RAM hashes every 2 s to catch desyncs */
 
   function start(Module) {
     var canvas = document.getElementById("screen");
     var ctx = canvas.getContext("2d");
     var loading = document.getElementById("loading");
+    var status = document.getElementById("net-status");
 
-    var setInput = Module.cwrap("contra_web_set_input", null, ["number"]);
     var setInputs = Module.cwrap("contra_web_set_inputs", null, ["number", "number"]);
     var step = Module.cwrap("contra_web_step", null, []);
-    var reset = Module.cwrap("contra_web_reset", null, []);
-    var stateHash = Module.cwrap("contra_web_state_hash", "number", []);
     var framebuffer = Module.cwrap("contra_web_framebuffer", "number", []);
-
-    function applyDebugWarp() {
-      if (location.hash === "#level2boss") {
-        Module.ccall("contra_web_warp_level2_boss", null, [], []);
-      } else if (location.hash === "#level4") {
-        Module.ccall("contra_web_warp_level4", null, [], []);
-      }
-    }
-
-    Module.ccall("contra_web_init", null, [], []);
-    applyDebugWarp();
+    var stateHash = Module.cwrap("contra_web_state_hash", "number", []);
 
     var fbPtr = framebuffer();
     var fbBytes = FB_WIDTH * FB_HEIGHT * 4;
@@ -518,50 +203,422 @@
     setupKeyboard();
     setupOnScreenController();
     setupKonami();
-    setupMultiplayer({
-      setInput: setInput,
-      setInputs: setInputs,
-      step: step,
-      reset: reset,
-      stateHash: stateHash,
-      applyDebugWarp: applyDebugWarp
-    });
 
+    /* null = solo; otherwise the lockstep session (see startOnline). */
+    var net = null;
+    var running = false;
+
+    function setStatus(text, bad) {
+      status.hidden = !text;
+      status.textContent = text || "";
+      status.classList.toggle("bad", !!bad);
+    }
+
+    function drawFrame() {
+      /* Re-read HEAPU8 each frame: ALLOW_MEMORY_GROWTH can swap the view object. */
+      imageData.data.set(Module.HEAPU8.subarray(fbPtr, fbPtr + fbBytes));
+      ctx.putImageData(imageData, 0, 0);
+    }
+
+    function bootCore() {
+      Module.ccall("contra_web_init", null, [], []);
+    }
+
+    function startSolo() {
+      bootCore();
+      /* Optional debug warps via URL hash, e.g. index.html#level2boss */
+      if (location.hash === "#level2boss") {
+        Module.ccall("contra_web_warp_level2_boss", null, [], []);
+      } else if (location.hash === "#level4") {
+        Module.ccall("contra_web_warp_level4", null, [], []);
+      }
+      net = null;
+      setStatus("");
+      run();
+    }
+
+    function startOnline(link, player, room) {
+      var f;
+      net = {
+        link: link,
+        room: room,
+        player: player,          /* 1 = host, 2 = guest */
+        frame: 0,                /* next frame to step */
+        nextLocal: INPUT_DELAY,  /* next frame whose local input to sample */
+        local: {},
+        remote: {},
+        myHashes: {},
+        theirHashes: {},
+        desynced: false,
+        stallSince: 0,
+        ping: 0,
+        lastHeard: performance.now()
+      };
+      for (f = 0; f < INPUT_DELAY; f += 1) {
+        net.local[f] = 0;
+        net.remote[f] = 0;
+      }
+      link.onMessage(function (msg) {
+        if (!net || net.link !== link) {
+          return;
+        }
+        net.lastHeard = performance.now();
+        if (msg.t === "i") {
+          net.remote[msg.f] = msg.m;
+        } else if (msg.t === "h") {
+          net.theirHashes[msg.f] = msg.h;
+          checkHash(msg.f);
+        } else if (msg.t === "p") {
+          link.send({ t: "q", ts: msg.ts });
+        } else if (msg.t === "q") {
+          net.ping = Math.round(performance.now() - msg.ts);
+        }
+      });
+      link.onClose(function () {
+        if (net && net.link === link) {
+          endOnline("The other player left the game.");
+        }
+      });
+      net.pingTimer = setInterval(function () {
+        /* WebRTC often never reports a closed tab; pings answer every second,
+           so 10 s of silence means the other player is gone. */
+        if (performance.now() - net.lastHeard > 10000) {
+          endOnline("Lost the connection to the other player.");
+          return;
+        }
+        link.send({ t: "p", ts: performance.now() });
+      }, 1000);
+      bootCore();
+      updateOnlineStatus();
+      run();
+    }
+
+    function endOnline(message) {
+      if (!net) {
+        return;
+      }
+      clearInterval(net.pingTimer);
+      net.link.close();
+      net.room.close();
+      net = null;
+      running = false;
+      setStatus("");
+      showLobby(message);
+    }
+
+    function checkHash(f) {
+      if (net.myHashes[f] === undefined || net.theirHashes[f] === undefined) {
+        return;
+      }
+      if (net.myHashes[f] !== net.theirHashes[f]) {
+        net.desynced = true;
+      }
+      delete net.myHashes[f];
+      delete net.theirHashes[f];
+    }
+
+    function updateOnlineStatus() {
+      var text = "Online · you are Player " + net.player;
+      if (net.ping) {
+        text += " · ping " + net.ping + " ms";
+      }
+      if (net.desynced) {
+        setStatus(text + " · OUT OF SYNC: the two games differ, start a new one.", true);
+      } else if (net.stallSince && performance.now() - net.stallSince > 500) {
+        setStatus(text + " · waiting for the other player…", true);
+      } else {
+        setStatus(text);
+      }
+    }
+
+    /* Advance the online game by one frame if the other player's input for it
+       is here. Returns false when stalled. */
+    function stepOnline(localMask) {
+      var remoteMask;
+      var h;
+      /* Sample and send our input INPUT_DELAY frames ahead (once per frame). */
+      if (net.nextLocal <= net.frame + INPUT_DELAY) {
+        net.local[net.nextLocal] = localMask;
+        net.link.send({ t: "i", f: net.nextLocal, m: localMask });
+        net.nextLocal += 1;
+      }
+      remoteMask = net.remote[net.frame];
+      if (remoteMask === undefined) {
+        return false;
+      }
+      if (net.player === 1) {
+        setInputs(net.local[net.frame], remoteMask);
+      } else {
+        setInputs(remoteMask, net.local[net.frame]);
+      }
+      step();
+      delete net.local[net.frame];
+      delete net.remote[net.frame];
+      if (net.frame % HASH_INTERVAL === 0) {
+        h = stateHash() >>> 0;
+        net.myHashes[net.frame] = h;
+        net.link.send({ t: "h", f: net.frame, h: h });
+        checkHash(net.frame);
+      }
+      net.frame += 1;
+      return true;
+    }
+
+    var STEP_MS = 1000 / 60;
     var acc = 0;
-    var last = performance.now();
+    var last = 0;
+
+    function run() {
+      acc = 0;
+      last = performance.now();
+      if (!running) {
+        running = true;
+        requestAnimationFrame(frame);
+      }
+    }
 
     function frame(now) {
-      var combined;
-      var steps = 0;
-
+      if (!running) {
+        return;
+      }
       acc += now - last;
       last = now;
 
-      combined = localInputMask();
+      var combined = keyboardMask | pointerMask;
       syncPressedVisual(combined);
 
       /* Catch up at 60 Hz, but never spiral (cap at 5 steps like the SDL host). */
+      var steps = 0;
+      var stalled = false;
       while (acc >= STEP_MS && steps < 5) {
-        if (net.running) {
-          networkTick(combined);
+        if (net) {
+          if (!stepOnline(combined)) {
+            stalled = true;
+            break;
+          }
         } else {
-          setInput(combined);
+          setInputs(combined, 0);
           step();
         }
         acc -= STEP_MS;
         steps += 1;
       }
-      if (acc > 250) {
+      if (net) {
+        if (stalled) {
+          if (!net.stallSince) {
+            net.stallSince = now;
+          }
+          /* Keep a few frames of budget so we catch up once input arrives. */
+          acc = Math.min(acc, STEP_MS * 5);
+        } else if (steps > 0) {
+          net.stallSince = 0;
+        }
+        updateOnlineStatus();
+      } else if (acc > 250) {
         acc = 0; /* tab was backgrounded; don't fast-forward on return */
       }
 
-      /* Re-read HEAPU8 each frame: ALLOW_MEMORY_GROWTH can swap the view object. */
-      imageData.data.set(Module.HEAPU8.subarray(fbPtr, fbPtr + fbBytes));
-      ctx.putImageData(imageData, 0, 0);
-
+      drawFrame();
       requestAnimationFrame(frame);
     }
-    requestAnimationFrame(frame);
+
+    /* ---- Lobby ---------------------------------------------------------- */
+
+    var lobby = document.getElementById("lobby");
+    var menu = document.getElementById("lobby-menu");
+    var wait = document.getElementById("lobby-wait");
+    var waitTitle = document.getElementById("wait-title");
+    var waitCode = document.getElementById("wait-code");
+    var waitText = document.getElementById("wait-text");
+    var copyBtn = document.getElementById("btn-copy");
+    var joinCode = document.getElementById("join-code");
+    var pendingRoom = null;
+    var inviteLink = "";
+
+    var slotP1 = document.getElementById("slot-p1");
+    var slotP2 = document.getElementById("slot-p2");
+    var players = document.getElementById("room-players");
+    var inviteField = document.getElementById("invite-link");
+    var startBtn = document.getElementById("btn-start");
+    /* The connected-but-not-started room: { link, room, code }. */
+    var waitingRoom = null;
+
+    function leaveRoom() {
+      if (waitingRoom) {
+        waitingRoom.link.close();
+        waitingRoom.room.close();
+        waitingRoom = null;
+      }
+      if (pendingRoom) {
+        pendingRoom.close();
+        pendingRoom = null;
+      }
+    }
+
+    function showLobby(message) {
+      leaveRoom();
+      lobby.hidden = false;
+      menu.hidden = !!message;
+      wait.hidden = !message;
+      if (message) {
+        showWaiting("Room closed", "", message);
+      }
+    }
+
+    function showWaiting(title, code, text) {
+      menu.hidden = true;
+      wait.hidden = false;
+      waitTitle.textContent = title;
+      waitCode.textContent = code || "";
+      waitText.textContent = text || "";
+      copyBtn.hidden = true;
+      inviteField.hidden = true;
+      players.hidden = true;
+      startBtn.hidden = true;
+    }
+
+    /* The room screen both players see before the game starts. */
+    function showRoom(code, me, p2Here) {
+      showWaiting("Room " + code, "", "");
+      waitCode.textContent = "";
+      players.hidden = false;
+      slotP1.textContent = "Player 1" + (me === 1 ? " (you)" : "");
+      slotP1.className = "here";
+      slotP2.textContent = p2Here ? "Player 2" + (me === 2 ? " (you)" : "") : "Player 2: waiting to join…";
+      slotP2.className = p2Here ? "here" : "";
+      if (me === 1) {
+        inviteField.hidden = false;
+        inviteField.value = inviteLink;
+        copyBtn.hidden = false;
+        startBtn.hidden = !p2Here;
+        waitText.textContent = p2Here
+          ? "Everyone's here. Start when you're ready."
+          : "Send Player 2 this link, or the code " + code + ".";
+      } else {
+        waitText.textContent = "Waiting for Player 1 to start the game…";
+      }
+    }
+
+    function hideLobby() {
+      lobby.hidden = true;
+      /* Hand keyboard focus back to the game. */
+      if (document.activeElement && document.activeElement.blur) {
+        document.activeElement.blur();
+      }
+    }
+
+    function beginOnline(player) {
+      var r = waitingRoom;
+      waitingRoom = null;
+      if (location.hash) {
+        /* A reload shouldn't try to rejoin a room that's in play. */
+        history.replaceState(null, "", location.pathname + location.search);
+      }
+      hideLobby();
+      startOnline(r.link, player, r.room);
+    }
+
+    function enterRoom(link, code, me) {
+      waitingRoom = { link: link, room: pendingRoom, code: code };
+      pendingRoom = null;
+      link.onClose(function () {
+        if (waitingRoom && waitingRoom.link === link) {
+          showLobby(me === 1 ? "Player 2 left the room." : "Player 1 closed the room.");
+        }
+      });
+      link.onMessage(function (msg) {
+        if (me === 2 && msg.t === "go" && waitingRoom && waitingRoom.link === link) {
+          beginOnline(2);
+        }
+      });
+      showRoom(code, me, true);
+    }
+
+    function hostGame() {
+      showWaiting("Opening a room…", "", "");
+      pendingRoom = ContraNet.host({
+        onCode: function (code) {
+          inviteLink = location.origin + location.pathname + "#join=" + code;
+          showRoom(code, 1, false);
+          pendingRoom.code = code;
+        },
+        onConnected: function (link) {
+          enterRoom(link, pendingRoom.code, 1);
+        },
+        onError: function (message) {
+          showWaiting("Couldn't open a room", "", message);
+        }
+      });
+    }
+
+    function joinGame(code) {
+      code = ContraNet.normalizeCode(code);
+      if (!code) {
+        joinCode.focus();
+        return;
+      }
+      lobby.hidden = false;
+      showWaiting("Joining room " + code + "…", "", "Connecting to Player 1.");
+      pendingRoom = ContraNet.join(code, {
+        onConnected: function (link) {
+          enterRoom(link, code, 2);
+        },
+        onError: function (message) {
+          showWaiting("Couldn't join room " + code, "", message);
+        }
+      });
+    }
+
+    startBtn.addEventListener("click", function () {
+      if (waitingRoom) {
+        /* The channel is ordered, so "go" reaches Player 2 before any of
+           Player 1's frame inputs. */
+        waitingRoom.link.send({ t: "go" });
+        beginOnline(1);
+      }
+    });
+    inviteField.addEventListener("focus", function () { inviteField.select(); });
+
+    document.getElementById("btn-solo").addEventListener("click", function () {
+      hideLobby();
+      startSolo();
+    });
+    document.getElementById("btn-host").addEventListener("click", hostGame);
+    document.getElementById("join-form").addEventListener("submit", function (e) {
+      e.preventDefault();
+      joinGame(joinCode.value);
+    });
+    document.getElementById("btn-cancel").addEventListener("click", function () {
+      showLobby("");
+    });
+    copyBtn.addEventListener("click", function () {
+      var done = function () { copyBtn.textContent = "Link copied!"; };
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(inviteLink).then(done, function () {
+          window.prompt("Copy this invite link:", inviteLink);
+        });
+      } else {
+        window.prompt("Copy this invite link:", inviteLink);
+      }
+      setTimeout(function () { copyBtn.textContent = "Copy invite link"; }, 2000);
+    });
+    /* Typing a room code shouldn't drive the game underneath. */
+    joinCode.addEventListener("keydown", function (e) { e.stopPropagation(); });
+    joinCode.addEventListener("keyup", function (e) { e.stopPropagation(); });
+
+    var joinMatch = /^#join=([A-Za-z0-9]+)$/.exec(location.hash);
+    if (typeof ContraNet === "undefined" || typeof Peer === "undefined") {
+      /* PeerJS failed to load (offline / blocked): solo only. */
+      document.getElementById("btn-host").disabled = true;
+      document.getElementById("join-form").hidden = true;
+      showLobby("");
+    } else if (joinMatch) {
+      joinGame(joinMatch[1]);
+    } else if (location.hash === "#level2boss" || location.hash === "#level4") {
+      startSolo(); /* debug warps skip the lobby */
+    } else {
+      showLobby("");
+    }
   }
 
   if (typeof ContraModule !== "function") {

@@ -4,39 +4,48 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>Contra — NES Native Port (WebAssembly)</title>
-  <link rel="stylesheet" href="styles.css?v=20260612-multiplayer">
+  <link rel="stylesheet" href="styles.css?v=20260610-fontfix">
 </head>
 <body>
   <main class="stage">
     <h1 class="title">CONTRA</h1>
     <p class="subtitle">NES native port — running in your browser via WebAssembly</p>
 
-    <section class="multiplayer-panel" aria-label="Online multiplayer lobby">
-      <div class="multiplayer-header">
-        <h2>Online Co-op</h2>
-        <span id="net-status" class="net-status offline">Offline</span>
-      </div>
-      <p class="multiplayer-copy">
-        Create a room, share the code, then both players press Ready. P1 should
-        pick 2-player mode with <kbd>Shift</kbd> / <b>SELECT</b> before starting.
-      </p>
-      <div class="lobby-controls">
-        <button id="create-room" type="button">Create Room</button>
-        <input id="room-code" type="text" inputmode="latin" maxlength="6" placeholder="ROOM" aria-label="Room code">
-        <button id="join-room" type="button">Join Room</button>
-        <button id="ready-room" type="button" disabled>Ready</button>
-        <button id="leave-room" type="button" disabled>Leave</button>
-      </div>
-      <div id="room-info" class="room-info">Single-player mode. Run <code>node web/multiplayer-server.mjs</code> for local rooms.</div>
-    </section>
-
     <!-- The "TV": the game framebuffer is drawn to this canvas. -->
     <div class="tv">
       <div class="tv-screen">
         <canvas id="screen" width="256" height="240"></canvas>
         <div id="loading" class="loading">Loading…</div>
+
+        <!-- Lobby: pick solo or online 2-player before the game boots. -->
+        <div id="lobby" class="lobby" hidden>
+          <div id="lobby-menu" class="lobby-panel">
+            <h2>Choose a game</h2>
+            <button id="btn-solo" class="lobby-btn">Play on this computer</button>
+            <button id="btn-host" class="lobby-btn">Host online 2-player game</button>
+            <form id="join-form" class="join-form">
+              <input id="join-code" maxlength="6" placeholder="CODE" autocomplete="off" spellcheck="false">
+              <button class="lobby-btn" type="submit">Join</button>
+            </form>
+          </div>
+          <div id="lobby-wait" class="lobby-panel" hidden>
+            <h2 id="wait-title">Waiting…</h2>
+            <p id="wait-code" class="room-code"></p>
+            <input id="invite-link" class="invite-link" readonly hidden>
+            <button id="btn-copy" class="lobby-btn" hidden>Copy invite link</button>
+            <ul id="room-players" class="room-players" hidden>
+              <li id="slot-p1"></li>
+              <li id="slot-p2"></li>
+            </ul>
+            <p id="wait-text"></p>
+            <button id="btn-start" class="lobby-btn" hidden>Start game</button>
+            <button id="btn-cancel" class="lobby-btn lobby-btn-quiet">Back</button>
+          </div>
+        </div>
       </div>
     </div>
+
+    <p id="net-status" class="net-status" hidden></p>
 
     <p class="hint">
       Press <kbd>Enter</kbd> (or tap <b>START</b>) to begin.
@@ -46,6 +55,9 @@
       <kbd>Enter</kbd> Start · <kbd>Shift</kbd> Select
       <br>
       On-screen: <b>A</b> = jump · <b>B</b> = fire
+      <br>
+      Online: both players use these same keys on their own computer.
+      Player 1 picks <b>2 PLAYERS</b> with <kbd>Shift</kbd> on the title screen.
     </p>
 
     <!-- NES controller — markup from CodePen epzilla/AqweZk, wired to the game. -->
@@ -87,7 +99,9 @@
   </main>
 
   <!-- Emscripten module factory (MODULARIZE, EXPORT_NAME=ContraModule). -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script src="dist/contra.js"></script>
+  <script src="net.js"></script>
   <script src="controller.js"></script>
 </body>
 </html>
