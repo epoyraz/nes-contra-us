@@ -45,8 +45,8 @@
     Enter: BTN.START,
     ShiftLeft: BTN.SELECT,
     ShiftRight: BTN.SELECT,
-    KeyA: BTN.A,   /* jump (NES A) — home-row friendly on QWERTZ */
-    KeyS: BTN.B,   /* fire (NES B) */
+    KeyA: BTN.B,   /* fire (NES B) -- left of jump, like B and A on the pad */
+    KeyS: BTN.A,   /* jump (NES A) */
     Space: BTN.A   /* alt jump   */
   };
 

@@ -64,8 +64,8 @@ Then open <http://localhost:8000/>.
 | Action | Keyboard | On-screen |
 | ------ | -------- | --------- |
 | Move   | Arrow keys | D-pad |
-| Jump   | `A` / `Space` | A |
-| Fire   | `S` | B |
+| Jump   | `S` / `Space` | A |
+| Fire   | `A` | B |
 | Start  | `Enter` | START |
 | Select | `Shift` | SELECT |
 
