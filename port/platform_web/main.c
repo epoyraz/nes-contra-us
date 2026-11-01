@@ -19,6 +19,9 @@
  *   contra_web_framebuffer()       pointer to a 256x240 RGBA8888 buffer suitable
  *                                  for CanvasRenderingContext2D.putImageData.
  *   contra_web_width()/height()    framebuffer dimensions.
+ *   contra_web_audio()             pointer to the last step's mono int16
+ *                                  samples at contra_web_audio_rate() Hz.
+ *   contra_web_audio_count()       how many samples the last step produced.
  *   contra_web_warp_level2_boss()  DEBUG warp straight to the Level 2 boss.
  *   contra_web_warp_level4()       DEBUG warp straight to Level 4.
  *
@@ -108,6 +111,24 @@ EMSCRIPTEN_KEEPALIVE void contra_web_step(void)
 EMSCRIPTEN_KEEPALIVE const uint8_t *contra_web_framebuffer(void)
 {
     return g_rgba;
+}
+
+EMSCRIPTEN_KEEPALIVE const int16_t *contra_web_audio(void)
+{
+    return contra_core_audio(&g_core, NULL);
+}
+
+EMSCRIPTEN_KEEPALIVE int contra_web_audio_count(void)
+{
+    size_t count = 0u;
+
+    (void)contra_core_audio(&g_core, &count);
+    return (int)count;
+}
+
+EMSCRIPTEN_KEEPALIVE int contra_web_audio_rate(void)
+{
+    return (int)CONTRA_AUDIO_SAMPLE_RATE;
 }
 
 EMSCRIPTEN_KEEPALIVE int contra_web_width(void)

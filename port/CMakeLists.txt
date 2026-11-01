@@ -20,6 +20,8 @@ endfunction()
 add_library(contra_core STATIC
     contra_core/src/core.c
     contra_core/src/ppu.c
+    contra_core/src/apu.c
+    contra_core/src/sound_engine.c
 )
 
 target_include_directories(contra_core

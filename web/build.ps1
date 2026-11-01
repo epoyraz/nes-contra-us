@@ -31,6 +31,8 @@ $Opt = if ($Debug) { @("-O0", "-sASSERTIONS=2", "-gsource-map") } else { @("-O2"
 $Args = @(
   (Join-Path $RepoRoot "port\contra_core\src\core.c"),
   (Join-Path $RepoRoot "port\contra_core\src\ppu.c"),
+  (Join-Path $RepoRoot "port\contra_core\src\apu.c"),
+  (Join-Path $RepoRoot "port\contra_core\src\sound_engine.c"),
   (Join-Path $RepoRoot "port\platform_web\main.c"),
   "-I", (Join-Path $RepoRoot "port\contra_core\include")
 ) + $Opt + @(
@@ -39,8 +41,8 @@ $Args = @(
   "-sALLOW_MEMORY_GROWTH=1",
   "-sEXIT_RUNTIME=0",
   "-sFORCE_FILESYSTEM=1",
-  "-sEXPORTED_RUNTIME_METHODS=ccall,cwrap,HEAPU8,FS",
-  "-sEXPORTED_FUNCTIONS=_main,_contra_web_init,_contra_web_reset,_contra_web_set_input,_contra_web_set_inputs,_contra_web_state_hash,_contra_web_step,_contra_web_framebuffer,_contra_web_width,_contra_web_height,_contra_web_warp_level2_boss,_contra_web_warp_level4",
+  "-sEXPORTED_RUNTIME_METHODS=ccall,cwrap,HEAPU8,HEAP16,FS",
+  "-sEXPORTED_FUNCTIONS=_main,_contra_web_init,_contra_web_reset,_contra_web_set_input,_contra_web_set_inputs,_contra_web_state_hash,_contra_web_step,_contra_web_framebuffer,_contra_web_width,_contra_web_height,_contra_web_audio,_contra_web_audio_count,_contra_web_audio_rate,_contra_web_warp_level2_boss,_contra_web_warp_level4",
   "-o", (Join-Path $DistDir "contra.js")
 )
 

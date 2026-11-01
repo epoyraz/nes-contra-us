@@ -185,6 +185,149 @@
   var INPUT_DELAY = 4;
   var HASH_INTERVAL = 120; /* compare RAM hashes every 2 s to catch desyncs */
 
+  /* ---- Audio ------------------------------------------------------------ */
+
+  /* The core emits mono int16 samples per 60 Hz step (contra_web_audio). They
+     are resampled to the AudioContext rate and queued in a ring buffer that a
+     ScriptProcessor drains. Browsers only start audio after a user gesture,
+     so the context is created/resumed on the first key press or tap. */
+  var MUTE_KEY = "contra-muted";
+
+  function createAudio(Module) {
+    var samplesPtr = Module.cwrap("contra_web_audio", "number", []);
+    var sampleCount = Module.cwrap("contra_web_audio_count", "number", []);
+    var coreRate = Module.ccall("contra_web_audio_rate", "number", [], []);
+    var muted = false;
+    var ctx = null;
+    var gain = null;
+    var ring = new Float32Array(16384);
+    var readPos = 0;
+    var writePos = 0;
+    var queued = 0;
+    var ratio = 1;
+    var phase = 0;
+    var prev = 0;
+
+    try {
+      muted = localStorage.getItem(MUTE_KEY) === "1";
+    } catch (e) { /* storage blocked: default unmuted */ }
+
+    function ensureContext() {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      var node;
+      if (ctx || !AC) {
+        if (ctx && ctx.state === "suspended") {
+          ctx.resume();
+        }
+        return;
+      }
+      ctx = new AC();
+      ratio = coreRate / ctx.sampleRate;
+      gain = ctx.createGain();
+      gain.gain.value = muted ? 0 : 1;
+      node = ctx.createScriptProcessor(1024, 0, 1);
+      node.onaudioprocess = function (ev) {
+        var out = ev.outputBuffer.getChannelData(0);
+        var i;
+        for (i = 0; i < out.length; i += 1) {
+          if (queued > 0) {
+            out[i] = ring[readPos];
+            readPos = (readPos + 1) & (ring.length - 1);
+            queued -= 1;
+          } else {
+            out[i] = 0;
+          }
+        }
+      };
+      node.connect(gain);
+      gain.connect(ctx.destination);
+    }
+
+    ["keydown", "pointerdown", "touchstart"].forEach(function (type) {
+      window.addEventListener(type, ensureContext, { capture: true, passive: true });
+    });
+
+    /* Called after every core step: pull its samples into the ring. */
+    function pump() {
+      var count;
+      var base;
+      var heap;
+      var cur;
+      var limit;
+      if (!ctx || muted || ctx.state !== "running") {
+        return;
+      }
+      count = sampleCount();
+      base = samplesPtr() >> 1;
+      heap = Module.HEAP16;
+      /* keep latency bounded (~100 ms): drop the backlog if we fell behind */
+      limit = Math.floor(ctx.sampleRate / 10);
+      if (queued > limit) {
+        readPos = (writePos - (limit >> 1)) & (ring.length - 1);
+        queued = limit >> 1;
+      }
+      /* linear resample core rate -> context rate */
+      while (phase < count) {
+        var idx = Math.floor(phase);
+        var frac = phase - idx;
+        var a = idx === 0 ? prev : heap[base + idx - 1] / 32768;
+        var b = heap[base + idx] / 32768;
+        cur = a + (b - a) * frac;
+        if (queued < ring.length) {
+          ring[writePos] = cur;
+          writePos = (writePos + 1) & (ring.length - 1);
+          queued += 1;
+        }
+        phase += ratio;
+      }
+      phase -= count;
+      if (count > 0) {
+        prev = heap[base + count - 1] / 32768;
+      }
+    }
+
+    function setMuted(value) {
+      muted = value;
+      try {
+        localStorage.setItem(MUTE_KEY, muted ? "1" : "0");
+      } catch (e) { /* ignore */ }
+      if (gain) {
+        gain.gain.value = muted ? 0 : 1;
+      }
+      if (muted) {
+        queued = 0;
+        readPos = writePos;
+      }
+    }
+
+    return {
+      pump: pump,
+      isMuted: function () { return muted; },
+      setMuted: setMuted
+    };
+  }
+
+  function setupMuteButton(audio) {
+    var btn = document.getElementById("btn-mute");
+    if (!btn) {
+      return;
+    }
+    function render() {
+      var m = audio.isMuted();
+      btn.classList.toggle("muted", m);
+      btn.setAttribute("aria-pressed", m ? "true" : "false");
+      btn.setAttribute("aria-label", m ? "Unmute sound" : "Mute sound");
+      btn.title = m ? "Unmute sound" : "Mute sound";
+    }
+    btn.hidden = false;
+    btn.addEventListener("click", function () {
+      audio.setMuted(!audio.isMuted());
+      render();
+      btn.blur(); /* keep Space/Enter going to the game, not the button */
+    });
+    render();
+  }
+
   function start(Module) {
     var canvas = document.getElementById("screen");
     var ctx = canvas.getContext("2d");
@@ -192,7 +335,13 @@
     var status = document.getElementById("net-status");
 
     var setInputs = Module.cwrap("contra_web_set_inputs", null, ["number", "number"]);
-    var step = Module.cwrap("contra_web_step", null, []);
+    var stepCore = Module.cwrap("contra_web_step", null, []);
+    var audio = createAudio(Module);
+    function step() {
+      stepCore();
+      audio.pump();
+    }
+    setupMuteButton(audio);
     var framebuffer = Module.cwrap("contra_web_framebuffer", "number", []);
     var stateHash = Module.cwrap("contra_web_state_hash", "number", []);
 

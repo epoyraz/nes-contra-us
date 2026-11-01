@@ -779,3 +779,60 @@ body {
   color: #ff6666;
   min-height: 1em;
 }
+
+/* ----------------------------------------------------------------------- */
+/* Floating mute button                                                    */
+/* ----------------------------------------------------------------------- */
+
+.mute-btn {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 50;
+  width: 48px;
+  height: 48px;
+  padding: 10px;
+  border: 2px solid #555;
+  border-radius: 50%;
+  background: rgba(20, 20, 20, 0.85);
+  color: #eee;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+.mute-btn[hidden] {
+  display: none;
+}
+
+.mute-btn:hover,
+.mute-btn:focus-visible {
+  border-color: #c0392b;
+}
+
+.mute-btn svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.mute-btn .spk {
+  fill: currentColor;
+}
+
+.mute-btn .cross,
+.mute-btn.muted .wave {
+  display: none;
+}
+
+.mute-btn.muted .cross {
+  display: inline;
+}
+
+.mute-btn.muted {
+  color: #c0392b;
+}

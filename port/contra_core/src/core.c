@@ -248,6 +248,8 @@
  *   bank7:10640-10685 quadrant_aim_dir_00/01/02 */
 #include "contra/core.h"
 
+#include "sound_engine.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -2043,6 +2045,11 @@ static void contra_rom_handle_indoor_scroll(ContraCore *core)
                 contra_init_apu_channels(core, 0x03u); /* Y left by load_alternate_graphics' palette loop */
                 contra_note_raster_cut(core, 47u, 176u); /* clear_ppu: ROM frame 11961 */
                 contra_load_graphic_data_list(core, (uint8_t)((ram[CONTRA_RAM_CURRENT_LEVEL] >> 1) | 0x08u));
+                /* write_graphic_data_to_ppu runs with NMI disabled (PPUCTRL
+                   bit 7 clear): on hardware the boss-room CHR upload swallows
+                   the next 7 NMIs, so the music holds still (reference
+                   frames 11962-11968 and 35613-35619) */
+                core->nmi_blocked_lag_frames = 0x07u;
                 contra_play_sound(core, 0x42u);
                 ram[CONTRA_RAM_PPUCTRL_SETTINGS] = 0xB1u;
                 ram[CONTRA_RAM_VERTICAL_SCROLL] = 0xE0u;
@@ -3713,23 +3720,98 @@ static void contra_load_bank_6_write_text_palette_to_mem(ContraCore *core, uint8
     (void)contra_write_text_palette(core, text_code);
 }
 
-/* bank7 play_sound: the bank-1 sound engine itself is not ported (the port
-   produces no audio); its bank bookkeeping is (NMI_CHECK bit 7 only brackets
-   the call) */
+/* ---- the bank-1 sound engine (sound_engine.c) and its 6502 memory map ---- */
+
+uint8_t contra_sound_read(ContraCore *core, uint16_t addr)
+{
+    if (addr < 0x2000u)
+    {
+        return core->ram[addr & 0x7FFu];
+    }
+    if (addr == 0x4015u)
+    {
+        return contra_apu_read_status(&core->apu);
+    }
+    if (addr >= 0x8000u)
+    {
+        /* the engine only ever runs with bank 1 mapped */
+        return contra_rom_read_u8((addr >= 0xC000u) ? 7u : 1u, addr);
+    }
+    return 0u;
+}
+
+void contra_sound_write(ContraCore *core, uint16_t addr, uint8_t value)
+{
+    if (addr < 0x2000u)
+    {
+        core->ram[addr & 0x7FFu] = value;
+    }
+    else if ((addr >= 0x4000u) && (addr <= 0x4017u))
+    {
+        contra_apu_write(&core->apu, addr, value);
+    }
+}
+
+/* bank7 play_sound: init_sound_code_vars with bank 1 mapped, NMI_CHECK bit 7
+   set meanwhile (a nested NMI then skips the sound engine) */
 static void contra_play_sound(ContraCore *core, uint8_t sound_code)
 {
-    (void)sound_code;
+    uint8_t a = sound_code;
+    uint8_t x = 0u;
+    uint8_t y = 0u;
+
+    core->ram[CONTRA_RAM_NMI_CHECK] = (uint8_t)(core->ram[CONTRA_RAM_NMI_CHECK] | 0x80u);
     contra_load_bank_1(core);
+    contra_sound_exec(core, CONTRA_SOUND_INIT_SOUND_CODE_VARS, &a, &x, &y);
     contra_local_previous_1_bank(core);
+    core->ram[CONTRA_RAM_NMI_CHECK] = (uint8_t)(core->ram[CONTRA_RAM_NMI_CHECK] & 0x7Fu);
+}
+
+void contra_sound_ext_play_sound(ContraCore *core, uint8_t *a, uint8_t *n, uint8_t *z)
+{
+    contra_play_sound(core, *a);
+    *a = (uint8_t)(core->ram[CONTRA_RAM_NMI_CHECK] & 0x7Fu);
+    *n = (uint8_t)(*a & 0x80u);
+    *z = (uint8_t)(*a == 0u);
 }
 
 /* bank7 init_APU_channels: backs the caller's Y register up in $F7 around the
-   bank-1 call -- `y` is that register value at the call site */
+   bank-1 init_pulse_and_noise_channels -- `y` is that register value */
 static void contra_init_apu_channels(ContraCore *core, uint8_t y)
 {
+    uint8_t a = 0u;
+    uint8_t x = 0u;
+    uint8_t yy = y;
+
     core->ram[0xF7u] = y;
     contra_load_bank_1(core);
+    contra_sound_exec(core, CONTRA_SOUND_INIT_PULSE_AND_NOISE_CHANNELS, &a, &x, &yy);
     contra_local_previous_1_bank(core);
+}
+
+/* bank1 handle_sound_slots (called from the NMI with bank 1 mapped) */
+static void contra_handle_sound_slots(ContraCore *core)
+{
+    uint8_t a = 0u;
+    uint8_t x = 0u;
+    uint8_t y = 0u;
+
+    contra_sound_exec(core, CONTRA_SOUND_HANDLE_SOUND_SLOTS, &a, &x, &y);
+}
+
+static uint8_t contra_apu_dmc_read(void *ctx, uint16_t addr)
+{
+    return contra_sound_read((ContraCore *)ctx, addr);
+}
+
+/* one video frame of APU output (NTSC: 29780.5 CPU cycles per frame) */
+static void contra_run_apu_frame(ContraCore *core)
+{
+    const uint32_t cycles = (core->apu_frame_parity != 0u) ? 29781u : 29780u;
+
+    core->apu_frame_parity ^= 1u;
+    core->apu.sample_count = 0u;
+    contra_apu_run(&core->apu, cycles, contra_apu_dmc_read, core);
 }
 
 /* bank7 calculate_score_digit: divide the 16-bit $01:$00 by $03 (10) in
@@ -4316,7 +4398,7 @@ static bool contra_create_standard_or_machine_gun_bullet(
         contra_set_indoor_bullet_velocity(core, (size_t)bullet_slot, player_index, rapid_fire);
         contra_set_indoor_bullet_delay(core, (size_t)bullet_slot, weapon_type, rapid_fire);
     }
-    contra_play_sound(core, 0x0Au);
+    contra_play_sound(core, weapon_type == 0x01u ? 0x0Cu : 0x0Au); /* weapon_sound_tbl: sound_0a / sound_0c */
     return true;
 }
 
@@ -4378,7 +4460,7 @@ static bool contra_create_flame_bullet(ContraCore *core, uint8_t player_index)
     ram[CONTRA_RAM_PLAYER_BULLET_TIMER + (size_t)bullet_slot] = contra_f_bullet_initial_timer_tbl[aim_dir];
     ram[CONTRA_RAM_PLAYER_BULLET_FS_X + (size_t)bullet_slot] = (uint8_t)center_x;
     ram[CONTRA_RAM_PLAYER_BULLET_F_Y + (size_t)bullet_slot] = (uint8_t)center_y;
-    contra_play_sound(core, 0x0Au);
+    contra_play_sound(core, 0x10u); /* weapon_sound_tbl: sound_10 (F) */
     return true;
 }
 
@@ -4434,6 +4516,7 @@ static void contra_create_spray_bullets(ContraCore *core, uint8_t player_index)
                 contra_weapon_bullet_sprite_code_tbl[0x03u],
                 0x00u
             );
+        contra_play_sound(core, 0x12u); /* create_enemy_bullet, per bullet: weapon_sound_tbl sound_12 (S) */
         ram[CONTRA_RAM_PLAYER_BULLET_S_BULLET_NUM + (size_t)bullet_slot] = bullet_num;
         contra_init_player_bullet_position(core, (size_t)bullet_slot, player_index, aim_dir);
         if (contra_in_indoor_base_level(ram))
@@ -4455,8 +4538,6 @@ static void contra_create_spray_bullets(ContraCore *core, uint8_t player_index)
             contra_set_spray_bullet_velocity(core, (size_t)bullet_slot, aim_dir, bullet_num, rapid_fire);
         }
     }
-
-    contra_play_sound(core, 0x0Au);
 }
 
 /* fire_weapon_routine_l (bank6:526): the beam owns the player's first four
@@ -9764,6 +9845,10 @@ static void contra_rom_begin_enemy_explosion(ContraCore *core, uint8_t x)
        pass through) AND bit 0 (skip player-body collision), so the explosion of a
        killed enemy can't damage the player who walks into it. */
     ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] | 0x81u);
+    if ((ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x02u) != 0u)
+    {
+        contra_play_sound(core, 0x19u); /* explosion_sound_hide_enemy: sound_19 */
+    }
     ram[CONTRA_RAM_ENEMY_SPRITES + x] = 0x38u;
     /* enemy_routine_init_explosion (bank7:7544): the death burst forces sprite
        palette 2 ((attr & 0xFC) | 0x06) -- the orange/yellow explosion colors. The
@@ -14338,6 +14423,7 @@ static void contra_rom_exploding_bridge_routine_01(ContraCore *core, uint8_t x)
         contra_rom_advance_enemy_routine(core, x); /* -> routine_04 */
         return;
     }
+    contra_play_sound(core, 0x24u); /* sound_24: explosion */
     ram[CONTRA_RAM_ENEMY_ANIMATION_DELAY + x] = 0x04u;
     /* the bridge clouds use create_enemy_for_explosion (bank0:2352): the SMALL
        single-round explosion (state_width 0x08), not the big 0x89 burst */
@@ -14388,6 +14474,10 @@ static void contra_rom_enemy_routine_init_explosion_step(ContraCore *core, uint8
     uint8_t *const ram = core->ram;
 
     ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] = (uint8_t)(ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] | 0x81u);
+    if ((ram[CONTRA_RAM_ENEMY_STATE_WIDTH + x] & 0x02u) != 0u)
+    {
+        contra_play_sound(core, 0x19u); /* explosion_sound_hide_enemy: sound_19 */
+    }
     ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] =
         (uint8_t)((ram[CONTRA_RAM_ENEMY_SPRITE_ATTR + x] & 0xFCu) | 0x06u);
     if (ram[CONTRA_RAM_ENEMY_SPRITES + x] == 0u)
@@ -20858,6 +20948,14 @@ static void contra_rom_bullet_enemy_collision_test(ContraCore *core, uint8_t slo
             contra_rom_route_destroyed_enemy(core, slot);
             return;
         }
+        /* @play_collision_sound: ENEMY_STATE_WIDTH bit 2 selects
+           bullet_hit_sound_tbl ($E40C) by ENEMY_VAR_A */
+        if ((ram[CONTRA_RAM_ENEMY_STATE_WIDTH + slot] & 0x04u) != 0u)
+        {
+            contra_play_sound(
+                core,
+                contra_rom_read_u8(7u, (uint16_t)(0xE40Cu + ram[CONTRA_RAM_ENEMY_VAR_A + slot])));
+        }
         return; /* survived the hit: at most one bullet per enemy per frame */
     }
 }
@@ -23801,9 +23899,18 @@ static bool contra_nmi_prologue(ContraCore *core)
     contra_ppu_read_status(&core->ppu);
     if (ram[CONTRA_RAM_NMI_CHECK] != 0u)
     {
-        /* handle_sounds_set_ppu_scroll_rti */
+        /* handle_sounds_set_ppu_scroll_rti: the sound engine keeps running
+           (unless the interrupted code was inside play_sound) */
         mask = (ram[CONTRA_RAM_PPU_READY] != 0u) ? 0x00u : ram[CONTRA_RAM_PPUMASK_SETTINGS];
         contra_ppu_write_mask(&core->ppu, mask);
+        if ((ram[CONTRA_RAM_NMI_CHECK] & 0x80u) == 0u)
+        {
+            const uint8_t bank = core->prg_bank;
+
+            core->prg_bank = 0x01u; /* set_rom_bank_to_y */
+            contra_handle_sound_slots(core);
+            core->prg_bank = bank;
+        }
         contra_set_ppu_scroll(core);
         return false;
     }
@@ -23860,6 +23967,9 @@ static void contra_reset_vector(ContraCore *core)
     ram[CONTRA_RAM_HIGH_SCORE_LOW] = 0xC8u;
     ram[CONTRA_RAM_HIGH_SCORE_HIGH] = 0x00u;
     ram[CONTRA_RAM_CPU_GRAPHICS_BUFFER] = 0x00u;
+    /* init_APU: channels on, 5-step frame sequencer */
+    contra_apu_write(&core->apu, 0x4015u, 0x0Fu);
+    contra_apu_write(&core->apu, 0x4017u, 0xC0u);
     /* init_APU_channels: backs Y up in $F7 (Y = $FF after clear_memory) and
        maps bank 1 around init_pulse_and_noise_channels */
     contra_init_apu_channels(core, 0xFFu); /* Y = $FF after clear_memory */
@@ -23899,6 +24009,7 @@ void contra_core_reset(ContraCore *core)
     size_t index;
 
     memset(core, 0, sizeof(*core));
+    contra_apu_reset(&core->apu);
     /* power-on: RAM all zero (Mesen's default), palette RAM at its power-up
        values, the reset code spins until frame 3, then NMIs start at frame 4
        and game_routine_00's intro graphics load runs until frame 10 */
@@ -23936,18 +24047,37 @@ void contra_core_set_input(ContraCore *core, const ContraInputSnapshot *input)
    for the recording's lag frames so the picture matches. */
 void contra_core_step_lag_frame(ContraCore *core)
 {
+    if (core->nmi_blocked_lag_frames != 0u)
+    {
+        core->nmi_blocked_lag_frames = (uint8_t)(core->nmi_blocked_lag_frames - 1u);
+        contra_present_frame(core);
+        contra_run_apu_frame(core);
+        return;
+    }
     core->ram[CONTRA_RAM_NMI_CHECK] = 0x01u;
     (void)contra_nmi_prologue(core);
     core->ram[CONTRA_RAM_NMI_CHECK] = 0x00u;
     contra_present_frame(core);
+    contra_run_apu_frame(core);
 }
 
 static void contra_core_step_frame_body(ContraCore *core);
 
 void contra_core_step_frame(ContraCore *core)
 {
+    core->nmi_blocked_lag_frames = 0u;
     contra_core_step_frame_body(core);
     core->raster_cut_hint = 0u;
+    contra_run_apu_frame(core);
+}
+
+const int16_t *contra_core_audio(const ContraCore *core, size_t *count)
+{
+    if (count != NULL)
+    {
+        *count = core->apu.sample_count;
+    }
+    return core->apu.samples;
 }
 
 static void contra_core_step_frame_body(ContraCore *core)
@@ -24031,6 +24161,7 @@ static void contra_core_step_frame_body(ContraCore *core)
 
     /* the game loop inside the NMI */
     contra_load_bank_number(core, 0x01u);
+    contra_handle_sound_slots(core);
     contra_process_level_1_weapon_box_restore(core);
     contra_apply_controller_state(core);
     contra_exe_game_routine(core);

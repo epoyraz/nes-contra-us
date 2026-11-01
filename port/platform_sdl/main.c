@@ -140,6 +140,7 @@ int main(int argc, char **argv)
     SDL_Window *window = NULL;
     SDL_Renderer *renderer = NULL;
     SDL_Texture *texture = NULL;
+    SDL_AudioDeviceID audio_device = 0u;
     uint64_t previous_counter;
     double counter_frequency;
     double accumulator_seconds = 0.0;
@@ -151,7 +152,7 @@ int main(int argc, char **argv)
 
     SDL_SetMainReady();
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMECONTROLLER) != 0)
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMECONTROLLER | SDL_INIT_AUDIO) != 0)
     {
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return 1;
@@ -210,6 +211,26 @@ int main(int argc, char **argv)
     }
 
     contra_core_init(&core);
+
+    /* mono int16 at the APU model's rate; frames are queued as they're made */
+    {
+        SDL_AudioSpec want;
+
+        SDL_zero(want);
+        want.freq = CONTRA_AUDIO_SAMPLE_RATE;
+        want.format = AUDIO_S16SYS;
+        want.channels = 1u;
+        want.samples = 1024u;
+        audio_device = SDL_OpenAudioDevice(NULL, 0, &want, NULL, 0);
+        if (audio_device == 0u)
+        {
+            fprintf(stderr, "SDL_OpenAudioDevice failed (no sound): %s\n", SDL_GetError());
+        }
+        else
+        {
+            SDL_PauseAudioDevice(audio_device, 0);
+        }
+    }
 
     /* DEBUG: CONTRA_START_LEVEL2_BOSS=1 warps straight to the Level 2 boss fight. */
     if (getenv("CONTRA_START_LEVEL2_BOSS") != NULL)
@@ -271,6 +292,17 @@ int main(int argc, char **argv)
         while ((accumulator_seconds >= frame_step_seconds) && (sim_steps < 5))
         {
             contra_core_step_frame(&core);
+            if (audio_device != 0u)
+            {
+                size_t count;
+                const int16_t *samples = contra_core_audio(&core, &count);
+
+                /* keep latency bounded: skip a frame's audio past ~100 ms queued */
+                if (SDL_GetQueuedAudioSize(audio_device) < (Uint32)(CONTRA_AUDIO_SAMPLE_RATE / 10 * 2))
+                {
+                    SDL_QueueAudio(audio_device, samples, (Uint32)(count * sizeof(int16_t)));
+                }
+            }
             accumulator_seconds -= frame_step_seconds;
             ++sim_steps;
         }
@@ -292,6 +324,10 @@ int main(int argc, char **argv)
         }
     }
 
+    if (audio_device != 0u)
+    {
+        SDL_CloseAudioDevice(audio_device);
+    }
     SDL_DestroyTexture(texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
